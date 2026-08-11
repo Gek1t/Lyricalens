@@ -1,76 +1,74 @@
 # ContextEng — 详细项目需求规格说明书 (Project Specification)
 
-> 本文档为 ContextEng 系统的**单源真相 (Single Source of Truth)** 规格说明书。记录产品大方向、自动组卷通知机制、歌单歌词同步、例句动态优先级链、全端响应式设计、AI 协作铁律与四阶段演进路线。
+> 本文档为 ContextEng 系统的**单源真相 (Single Source of Truth)** 规格说明书。严格遵循“3个分块基础功能 ➔ 1个通用贯穿功能 ➔ 1个核心灵魂功能”三段式架构，记录全局规格、AI 协作铁律与四阶段演进路线。
 
 ---
 
-## 1. 核心业务愿景与产品哲学
+## 1. 📌 第一部分：3 个分块基础功能 (Divisional Functions)
 
-本应用旨在打造一个**以真实情境驱动、AI 自动化组卷为核心**的深度英语学习系统：
+### 1.1 📷 相机实物 AR 标签 (Camera AR Labeling)
+* **场景**：“Thinking about the things around you in English.”
+* **功能规格**：
+  * 获取 WebRTC 摄像头视频流，识别视野内物品。
+  * **全景 Glassmorphism AR 标签**：视野内检测到的所有物体上方同时悬浮高透光 Glassmorphism 极美标签，呈现英文单词、音标与收藏入口。
+  * 点击标签唤起详情。
 
-1. **静默沉浸收录 (Silent Seamless Collection)**：在相机实物 AR 扫描或歌曲播放中，用户点击 ⭐ 按钮后，系统**完全静默自动入库并自动归类打标**，绝不打断用户的连续学习流。
-2. **智能阈值与定时通知 (Automatic Smart Notification)**：当用户收录的词汇满足特定条件时（支持数量阈值、时间周期或双触发模式，数值由用户自定义），系统自动触发通知，提示“您的专属雅思真题试卷已生成！”。
-3. **雅思全套真题匹配与组卷 (IELTS Full Test Generation - Key Feature)**：
-   * **完整套题模式 (Full Test Mode - 用户首选)**：将用户近期收录的一组单词，合成/匹配为一整篇标准的**雅思阅读文章 (Full Reading Passage)** 或 **听力 Section 3 对话**，并附带真正的雅思考题（如 True/False/Not Given 判定题、填空题、Matching 匹配题）。
-   * **专项分块模式 (Section Mode)**：按听力短对话、阅读短段落、写作 Task 2 高分句型分块呈现。
-   * 用户可自由选择以哪种模式练习。
-4. **歌单与歌词同步 (Playlist & Lyrics Sync)**：支持导入/同步个人歌单，自动匹配 `.lrc` 毫秒级逐字歌词，实现歌词平滑高亮与交互查词。
-5. **全景 AR 镜头呈现 (Panoramic AR Camera)**：相机视野内识别到的所有物体上方同时悬浮 Glassmorphism 极美标签，点击标签唤起详情。
-6. **全端响应式支持 (Full-Platform Parity)**：手机端 (Mobile PWA App) 侧重相机扫描与随身听歌；PC 端 (Desktop Workbench) 侧重雅思长文章阅读与大屏写作练题。
+### 1.2 🎵 音乐与歌词联想教学 (Music & Lyric Connection)
+* **场景**：“Using songs to learn vocabulary.”
+* **功能规格**：
+  * **歌单与歌词同步引擎**：支持同步网易云/Spotify/本地歌单，自动匹配 `.lrc` 毫秒级逐字高亮歌词。
+  * 预置经典示范曲目（如 *Shape of You* 附带完整逐字 LRC 歌词）。
 
----
-
-## 2. 🤖 AI 协作与工作流铁律 (AI Collaboration Rules)
-
-> [!IMPORTANT]
-> 任何参与本项目的 AI 必须 100% 遵循以下三条工作流铁律，违者视为严重违规：
-
-1. **绝对禁止抢跑 (Strictly No Premature Jumping)**：
-   * 必须严格配合用户的节奏。用户没有指令开展下一步前，严禁擅自跳步或预设下一步微观细节。
-2. **多用 Plan 模式主动向用户询问与确认 (Mandatory Plan-Mode Consultation)**：
-   * 在开展任何新阶段或修改前，必须先制定 Plan，主动向用户询问细节并充分确认意图。
-3. **技术问题“先通俗说明，再由用户拍板” (Plain Explanation Before Consultation)**：
-   * 凡涉及技术选型或架构方案，AI **必须先用通俗易懂的语言把原理、优缺点解释清楚**，然后再交由用户审查与拍板。
-   * **绝对禁止擅自替用户做技术决定**。
+### 1.3 📚 时间与类别词汇集合 (Word Set Classified by Time & Category)
+* **场景**：“classified by time (today, yesterday) or categories (animal, plant)”
+* **功能规格**：
+  * **时间轴维度**：`Today`（今天）、`Yesterday`（昨天）、`Earlier`（更早）。
+  * **多维场景与 AI 打标**：预置 `Animal`, `Plant`, `Technology`, `Daily Life` 场景，预留 AI 接口进行深度语义打标。
 
 ---
 
-## 3. 详细功能机制规格
+## 2. 📌 第二部分：1 个通用贯穿功能 (General Function)
 
-### 3.1 例句关联动态优先级链 (Example Sentence Dynamic Priority Chain)
-在单词详情卡片中呈现情境例句时，系统遵循以下严格的**优先级降级链**：
-$$\text{例句优先级} = \text{用户歌单歌曲原词例句} \xrightarrow{\text{未命中}} \text{相机/生活原场景例句} \xrightarrow{\text{未命中}} \text{雅思真题学术例句}$$
-
-* **第一优先级（用户歌单例句）**：如果用户同步的歌单歌曲中有包含该词，优先提取并高亮歌词例句。
-* **第二优先级（原场景例句）**：若歌单未命中，提取用户使用 AR 相机或生活场景捕获该词时的例句。
-* **第三优先级（雅思学术例句）**：若以上均无，提取剑桥雅思真题库中的学术例句。
-
-### 3.2 单词积累阈值与通知机制 (Threshold & Notification Engine)
-* **自定义触发规则**：
-  * **按词汇数量**：用户自定义（如每满 10 个/20 个新词）。
-  * **按时间周期**：用户自定义（如每日 20:00 定时生成）。
-  * **双触发模式**：允许同时开启数量与时间阈值，满足任意条件即自动发送系统通知并生成真题试卷。
-
-### 3.3 雅思全套真题匹配与呈现 (IELTS Generation & Quiz Spec)
-* **阅读全套模式 (Full Reading Passage)**：
-  * 自动包含用户收录的目标词汇。
-  * 包含完整学术文章 + 雅思标准题型（T/F/NG 判定、段落标题匹配、Summary 填空）。
-* **听力全套模式 (Full Listening Section)**：
-  * 自动包含目标词汇的完整 Section 对话/独白录音与文本 + 听力填空/选择题。
-* **写作专项模式 (Writing Task 2)**：
-  * 针对目标词汇生成 Task 2 高分论据与替换句型卡片。
-
-### 3.4 静默沉浸收录与 AI 分类 (Silent Collection & Auto-Tagging)
-* **无缝交互**：用户在相机 AR 视图或歌词视图中点击 ⭐，无任何阻碍弹窗，0.1 秒内完成收录。
-* **多维分类**：
-  * 时间维度：`Today` / `Yesterday` / `Earlier`。
-  * 场景与 AI 标签：`Animal`, `Plant`, `Technology`, `Daily Life`, `IELTS Band 7.0+` 等。
+### 2.1 🎴 单词点击 ➔ “不背单词”参考沉浸卡片 ➔ ⭐ 静默收录归类
+* **场景**：在上述任意界面点击单词 ➔ 跳转“不背单词”参考风格详情页 ➔ 点击 ⭐ 添加至词汇集并自动归类。
+* **功能规格**：
+  * **0.1 秒静默沉浸入库**：点击 ⭐ 仅需 0.1s 静默完成收录与自动打标，无阻碍弹窗，绝对不打断学习流。
+  * **例句动态优先级链**：
+    $$\text{例句优先级} = \text{用户歌单歌曲原词例句} \xrightarrow{\text{未命中}} \text{相机/生活原场景例句} \xrightarrow{\text{未命中}} \text{雅思真题学术例句}$$
+    优先高亮用户歌单歌词里的原句！
 
 ---
 
-## 4. 分期演进路线 (Phased Execution)
+## 3. 📌 第三部分：1 个核心灵魂功能 (Key Feature)
 
-* **Phase 1 (地基与核心架构)**：数据模型 + 本地存储 + 自动通知/阈值设置框架 + 全端 UI 壳。
-* **Phase 2 (歌词同步与静默收录)**：歌单/LRC 歌词同步引擎 + 歌词逐字高亮 + 一键 ⭐ 静默收录。
-* **Phase 3 (雅思自动组卷与通知引擎)**：单词积累阈值监听 + 雅思全套阅读/听力/写作试卷生成与练习。
-* **Phase 4 (AR 相机与视觉标签)**：WebRTC 相机物块检测 + 全景 Glassmorphism 悬浮 AR 标签。
+### 3.1 🎯 雅思真题 (听/读/写) 自动匹配与组卷通知 (IELTS Auto Full Test & Notification)
+* **场景**：基于收录词汇，自动在雅思真题（听力、阅读、写作）中检索/匹配语料段落与自动组卷通知。
+* **功能规格**：
+  * **自动阈值通知**：用户自定义积累数量（如满 15 词）或时间周期（如每日 20:00）触发系统通知：“*您的专属雅思真题试卷已生成！*”。
+  * **完整套题模式 (用户首选)**：将收录的词汇合成/匹配为**一整篇标准的雅思阅读文章 (Full Passage)** 或 **听力 Section 3 对话**，并附带真正雅思考题 (T/F/NG 判定、Summary 填空、Matching 匹配)。支持专项分块模式切分。
+  * **📱💻 全端 100% 全功能**：手机端呈现口袋刷题卡片，PC 端呈现大屏双栏对比阅读与写作工作台。
+
+---
+
+## 4. 🚨 AI 协作与工作流三铁律 (AI Collaboration Rules)
+
+1. **绝对禁止抢跑 (Strictly No Premature Rushing)**：必须 100% 配合用户的节奏，用户未指令下一步前，严禁擅自跳步。
+2. **多用 Plan 模式主动询问与确认 (Mandatory Plan Consultation)**：开展任何新阶段前，必须先制定 Plan 充分询问确认。
+3. **技术问题“先通俗说明，再由用户拍板” (Plain Explanation Before Consultation)**：技术选型必须先用通俗语言把原理与优缺点解释清楚，完全由用户拍板。
+
+---
+
+## 5. 🛠️ 用户拍板的技术选型 (Approved Tech Stack)
+
+* **前端核心框架**：`React 18 / 19 + Vite`（npm 周下载 1.6 亿+，82.3K Stars，工业级标准）
+* **离线数据库**：`IndexedDB (Dexie.js)`（npm 周下载 150 万+，14.5K Stars，10年成熟标准）
+* **样式与设计系统**：`Vanilla CSS (CSS 变量)`（0 依赖，100% 自由度打磨 Glassmorphism）
+
+---
+
+## 6. 📅 4 阶段演进路线图 (Phased Roadmap)
+
+* **Phase 1**：地基与核心架构（数据模型 + 本地存储 + 自动通知/阈值设置框架 + 全端 UI 壳 + “不背单词”参考卡片）
+* **Phase 2**：歌词同步与静默收录（歌单/LRC 歌词同步引擎 + 歌词逐字高亮 + 一键 ⭐ 静默收录）
+* **Phase 3**：雅思自动组卷与通知引擎（单词积累阈值监听 + 雅思全套阅读/听力/写作试卷生成与练习）
+* **Phase 4**：AR 相机与视觉标签（WebRTC 相机物块检测 + 全景 Glassmorphism 悬浮 AR 标签）
