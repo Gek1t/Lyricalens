@@ -1,7 +1,7 @@
-# 🎵📷 Lyricalex — 智能情境英语学习系统 (by Yuzaiyuan)
+# 🎵📷 Lyricalens — 智能情境英语学习系统 (by Yuzaiyuan)
 
 > **"In the Lyrical Flow of Life and Songs, Master the IELTS."**  
-> 一款由 Yuzaiyuan 构想的高级沉浸式英语学习应用，融合 **AR 相机实物识别 (Lens)**、**英文歌曲/歌词沉浸教学 (Lyric)**、**高质感词卡** 与 **雅思真题 (听/读/写) 语境自动组卷通知**。
+> 一款由 Yuzaiyuan 构想的终极沉浸式英语学习应用，融合 **AR 相机实物识别 (Lens)**、**英文歌曲/歌词沉浸教学 (Lyric/Lyrical)**、**词汇宝典 (Lex)** 与 **雅思真题 (听/读/写) 语境自动组卷通知**。
 
 ---
 
