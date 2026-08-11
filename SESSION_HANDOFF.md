@@ -9,11 +9,21 @@
 * **项目名称**：ContextEng (情境英文)
 * **本地根目录**：`d:\Git\`
 * **代码仓库状态**：已初始化 Git 仓库，拥有规范的 `.gitignore` 与原子化 Commit 记录。
-* **当前阶段**：**地基阶段 (Groundwork Phase)** — 正在进行大方向对齐、技术栈选择与功能逐一深入探讨。
+* **当前阶段**：**地基阶段 (Groundwork Phase)** — 正在进行功能逐一深入探讨。
 
 ---
 
-## 🎯 2. 已完全确立的用户真实意图 (Decided User Intents)
+## 🛠️ 2. 用户亲自拍板确立的技术选型 (Approved Tech Stack)
+
+| 层级 | 拍板技术方案 | 工业成熟度与理由 |
+| :--- | :--- | :--- |
+| **前端框架 & 构建** | **React 18 / 19 + Vite** | npm 周下载量 1.6 亿+，82.3K Stars，全球标准建站基建。 |
+| **离线数据库** | **IndexedDB (Dexie.js)** | npm 周下载量 150 万+，14.5K Stars，10 年成熟工业标准，高速离线存词库与真题。 |
+| **样式与设计系统** | **Vanilla CSS (CSS 变量)** | 0 依赖，100% 自由度微调 Glassmorphism 玻璃拟态与 3D 浮动动画。 |
+
+---
+
+## 🎯 3. 已确立的用户真实意图 (Decided User Intents)
 
 | 核心模块 | 已拍板确立的细节规则 |
 | :--- | :--- |
@@ -27,9 +37,10 @@
 
 ---
 
-## 📜 3. Git 提交历史索引 (Git Commit Log)
+## 📜 4. Git 提交历史索引 (Git Commit Log)
 
 ```
+dceb247 docs: add SESSION_HANDOFF.md context memory file for cross-session tracking
 51b5c51 docs: add panoramic AR label spec and lyric-first example priority chain
 6b8331e docs: integrate automatic word-threshold notification and full-passage IELTS generation spec
 09dae69 docs: add mobile PWA and PC desktop responsive layout spec
@@ -38,10 +49,3 @@
 a1eba1d docs: add project-level README.md specification
 2466a24 chore: initialize repository with clean .gitignore
 ```
-
----
-
-## 📋 4. 当前正进行的环节与下一步 (Current & Next Steps)
-
-1. **当前环节**：**基础技术栈选型与确认 (Tech Stack Alignment)**。
-2. **后续环节**：按 **Phase 1 -> Phase 2 -> Phase 3 -> Phase 4** 一个功能一个功能地深入探讨微观设计。
