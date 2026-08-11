@@ -1,7 +1,7 @@
-# 🌟 ContextEng — 智能情境英语学习系统 (Vision & Music IELTS Context App)
+# 🎵📷 LyricLens — 智能情境英语学习系统 (by Yuzaiyuan)
 
-> **"Thinking about the things around you in English helps you a lot."**  
-> 一款融合 **AR 相机实物识别**、**英文歌曲/歌词沉浸教学**、**高质感词卡** 与 **雅思真题 (听/读/写) 语境自动组卷通知** 的全场景英语学习应用。
+> **"Scan the World, Sing the Words, Master the IELTS."**  
+> 一款由 Yuzaiyuan 构想的沉浸式英语学习应用，融合 **AR 相机实物识别 (Lens)**、**英文歌曲/歌词沉浸教学 (Lyric)**、**高质感词卡** 与 **雅思真题 (听/读/写) 语境自动组卷通知**。
 
 ---
 
@@ -15,7 +15,7 @@
 
 ## 🎯 核心功能愿景 (Core Features)
 
-### 1. 📷 AR 相机实物全景识别 (Camera Real-Time AR Labeling)
+### 1. 📷 AR 相机实物全景识别 (Camera Real-Time AR Lens)
 * 打开摄像头识别周围物品（如 `desk`, `coffee cup`, `monstera plant`）。
 * 在画面物品上方悬浮呈现 **Glassmorphism (玻璃拟态)** 极美英文标签。
 * 点击标签直接唤起单词详情并一键 ⭐ 静默收录。
