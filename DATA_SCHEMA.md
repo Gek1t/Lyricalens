@@ -45,13 +45,13 @@ export interface WordRecord {
 
 ---
 
-## 2. 歌曲与歌词数据模型 (Song & Lyric Schema)
+## 2. 歌单与歌词数据模型 (Playlist & Song Schema)
 
 ```typescript
 export interface LyricSegment {
-  startTime: number;          // 逐字/逐句起始时间 (秒)
+  startTime: number;          // 起始时间 (秒)
   duration: number;           // 持续时长 (秒)
-  text: string;               // 文本内容
+  text: string;               // 歌词单行文本
   words?: {                   // 逐字高亮时间轴
     word: string;
     startTime: number;
@@ -65,9 +65,20 @@ export interface SongRecord {
   artist: string;
   albumCover?: string;
   audioUrl: string;
-  lrcRaw: string;             // 原始 LRC 文本内容
+  lrcRaw: string;             // 原始 LRC 格式文本
   lyricsParsed: LyricSegment[]; // 解析后的结构化时间轴
-  targetVocab: string[];      // 本歌曲包含的重难点词汇 ID 清单
+  targetVocab: string[];      // 本歌曲包含的核心雅思/重点词汇 ID
+}
+
+export interface PlaylistRecord {
+  id: string;
+  title: string;              // 例如 "雅思听力高频英文歌单"
+  description?: string;
+  coverUrl?: string;
+  sourceType: 'preset' | 'netease' | 'spotify' | 'custom_json' | 'local_folder';
+  sourceUrlOrId?: string;     // 关联的外部歌单 URL 或 ID
+  songs: SongRecord[];        // 歌单内包含的歌曲列表
+  lastSyncedTimestamp: number;
 }
 ```
 
@@ -110,8 +121,9 @@ export interface IeltsCorpusRecord {
 // 数据库版本: v1
 const dbSchema = {
   words: 'id, &word, dateKey, isStarred, addedTimestamp, *categories, *aiTags',
+  playlists: 'id, title, sourceType',
   songs: 'id, title, artist',
   ieltsCorpus: 'id, module, topicCategory, *containedWords',
-  userSettings: 'key' // 存储当前选中的主题 (Dark/Light/Paper)、发音偏好等
+  userSettings: 'key' // 存储当前选中的主题 (Dark/Light/Paper)、发音偏好、PWA 配置等
 };
 ```
