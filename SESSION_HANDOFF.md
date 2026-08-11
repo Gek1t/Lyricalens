@@ -1,7 +1,21 @@
 # ContextEng — 全局上下文与会话交接档案 (Session Handoff & Memory File)
 
 > 💡 **给新 Agent / 新 Session 的读取指南**：  
-> 本文件为项目防降智、跨会话恢复上下文的**最高优先级档案**。当在新对话中接手本项目时，请**先阅读本文件**，以立刻掌握项目的当前阶段、已确立的全部核心意图、Git 历史与下一步规划。
+> 本文件为项目防降智、跨会话恢复上下文的**最高优先级档案**。当在新对话中接手本项目时，请**先阅读本文件**，以立刻掌握项目的当前阶段、AI 协作铁律、已确立的全部核心意图、Git 历史与下一步规划。
+
+---
+
+## 🚨 0. 核心 AI 协作行为铁律 (Mandatory Collaboration Rules)
+
+> 任何 Agent 在本项中执行任务时，必须 100% 恪守以下三条铁律，绝不违背：
+
+1. **绝对禁止抢跑 (Strictly No Premature Jumping)**：
+   * 必须严格配合用户的节奏。用户没有明确指令开展下一步前，严禁擅自跳步或预设下一步微观细节。
+2. **多用 Plan 模式主动向用户询问与确认 (Mandatory Plan-Mode Consultation)**：
+   * 在开展任何新阶段或修改前，必须先制定 Plan，主动向用户询问细节并充分确认意图。
+3. **技术问题“先通俗说明，再由用户拍板” (Plain Explanation Before Consultation)**：
+   * 凡涉及技术选型或架构方案，AI **必须先用通俗易懂的语言把原理、优缺点解释清楚**，然后再交由用户审查与拍板。
+   * **绝对禁止擅自替用户做技术决定**。
 
 ---
 
@@ -9,7 +23,7 @@
 * **项目名称**：ContextEng (情境英文)
 * **本地根目录**：`d:\Git\`
 * **代码仓库状态**：已初始化 Git 仓库，拥有规范的 `.gitignore` 与原子化 Commit 记录。
-* **当前阶段**：**地基阶段 (Groundwork Phase)** — 正在进行功能逐一深入探讨。
+* **当前阶段**：**地基阶段 (Groundwork Phase)** — 大方向与技术选型已完全拍板，等待用户指示下一步。
 
 ---
 
@@ -40,6 +54,7 @@
 ## 📜 4. Git 提交历史索引 (Git Commit Log)
 
 ```
+13f53f8 docs: record user-approved tech stack in SESSION_HANDOFF.md
 dceb247 docs: add SESSION_HANDOFF.md context memory file for cross-session tracking
 51b5c51 docs: add panoramic AR label spec and lyric-first example priority chain
 6b8331e docs: integrate automatic word-threshold notification and full-passage IELTS generation spec
