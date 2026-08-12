@@ -12,7 +12,7 @@
 ## 📌 1. 当前项目进度 (Current Status)
 * **项目名称**：**Lyricalens** (by Yuzaiyuan)
 * **根据地根目录**：`d:\Git\`
-* **当前阶段**：**地基阶段 (Groundwork Phase)** — 终极 App 官方名称定案为 Lyricalens (Lyric + Lens + Lex 三合一神作)，项目规格与大纲（三段式）已完成，技术选型已由用户拍板。
+* **当前阶段**：**核心 UI 架构阶段 (Core UI Architecture Phase)** — 沉浸式三重空间 (Immersive Tri-Space) 方案已获批准，即将开始重构 `App.tsx` 与导航栏。
 
 ---
 
@@ -23,6 +23,17 @@
 | **前端框架 & 构建** | **React 18 / 19 + Vite** |
 | **离线数据库** | **IndexedDB (Dexie.js)** |
 | **样式与设计系统** | **Vanilla CSS (CSS 变量)** |
+
+---
+
+## 🎨 2.5 用户拍板的 UI/UX 设计方案 (Approved UI/UX Design)
+* **核心架构**：沉浸式三重空间 (Immersive Tri-Space)。完全摒弃底部传统 Tab 按钮，采用类似抖音/Snapchat 的**左右横滑无缝切换**（ViewPager 模式），底部仅保留极简圆点指示器。
+* **视觉对标**：“不背单词”极致留白、大字号衬线体、全屏无边框壁纸、暗黑玻璃态 (Dark Mode + Glassmorphism)。
+* **每日一歌 (Daily Song)**：作为首页中枢，系统固定推送一首。背景为全屏情境图，中央展示核心歌词，向上滑动展示提取的生词。
+* **三大平级空间**：
+  1. `左滑`：AR 实境捕获眼 (极简十字准星，3D 悬浮单词标签)
+  2. `中央`：每日一歌 (全屏沉浸，上滑查词)
+  3. `右滑`：雅思精读坞 (护眼纸质背景，底部半透明毛玻璃做题抽屉)
 
 ---
 
