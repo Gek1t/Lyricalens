@@ -60,11 +60,27 @@
     * **全局资产中枢 (左上角菜单 - 规划中)**：点击左上角控件，原播放器柔和缩小并向后变暗下沉，新界面盖下（**空间下沉过渡**）；背景提取当前封面的主色调，生成带高斯模糊的**轻透流体 (Apple Music 风格)** 视觉；内部功能架构（学习资产/真题库等）与排版形态**待定 (TBD)**。
   * 预置经典示范曲目（如 *Shape of You* 附带完整逐字 LRC 歌词）。
 
-### 1.3 📚 时间与类别词汇集合 (Word Set Classified by Time & Category)
+### 1.3 📚 时间与类别词汇集合 (Word Set / Vocabulary Vault)
 * **场景**：“classified by time (today, yesterday) or categories (animal, plant)”
 * **功能规格**：
   * **时间轴维度**：`Today`（今天）、`Yesterday`（昨天）、`Earlier`（更早）。
   * **多维场景与 AI 打标**：预置 `Animal`, `Plant`, `Technology`, `Daily Life` 场景，预留 AI 接口进行深度语义打标。
+  * **生词本中枢与卡片交互架构 (Vault Interaction & Mastery Engine)**：
+    * **掌握度智能指示器 (Mastery Ring Badge)**：
+      * 废除卡片右侧冗余的黄色星星 ⭐，替换为 4 阶场景驱动的掌握度圆环指示器：
+        - `Level 0: 新学 (New · 空心环)`：刚从歌词（下滑）或 AR 收录，未做题；
+        - `Level 1: 熟悉中 (Familiarizing · 1/3 环)`：听歌复习或详情精读过；
+        - `Level 2: 雅思通关 (Tested in IELTS · 2/3 环)`：在雅思空间真题做题中正确作答过该词考题；
+        - `Level 3: 已掌握 (Mastered · 满环勾选 ✔)`：多次做对或手动标记已掌握，移出高频背诵流；
+      * 点击该徽标可手动在“学习中”与“已掌握”之间快速切换。
+    * **卡片单点 vs 长按交互**：
+      * **单点卡片**：直接无缝切换进入该词汇的【全屏深度详情页】（双语境例句 + 词性释义 + 子词下钻）；
+      * **长按卡片**：触发 20ms 触觉震动，卡片左侧滑出圆形复选框，激活【多选批量管理模式 (Batch Mode)】。
+    * **多选批量管理操作栏 (Batch Action Bar)**：
+      * 🎯 **一键生成雅思试卷 (Generate IELTS Test)**：将勾选的生词直接打包注入右侧雅思空间，自动组卷生成专属阅读长文与考题（核心灵魂功能）；
+      * ✔ **批量标记掌握 / 重置 (Mark Mastered / Reset)**；
+      * 🏷 **批量打标归类 (Batch Tagging)**；
+      * 🗑 **批量移除 (Batch Delete)**。
 
 ---
 

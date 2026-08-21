@@ -33,11 +33,12 @@
       * **⭐ 收藏与返回**：所见即所收（自动建立母子词组外键关联）；点击左上角返回或右滑，词汇飞回歌词原位，平滑恢复全屏歌词流。
   * **示范曲目**：预置经典英文金曲（如 *Shape of You*）附带完整逐字 LRC 歌词。
 
-#### 3. 📚 时间与类别词汇集合 (Word Set Classified by Time & Category)
+#### 3. 📚 时间与类别词汇集合 (Word Set / Vocabulary Vault)
 * **原始需求**：包含一个单词集合，可按时间（如 Today, Yesterday）或类别（如 Animal, Plant）分类。
 * **最新确立演进**：
-  * **时间轴维度**：`Today`（今天）、`Yesterday`（昨天）、`Earlier`（更早）。
-  * **多维场景与 AI 打标**：预置 `Animal`, `Plant`, `Technology`, `Daily Life` 场景，支持预留 AI 接口进行深度语义打标。
+  * **时间轴与多维分类**：`Today`, `Yesterday`, `Earlier` 与 `Animal`, `Plant`, `Technology`, `Daily Life` 场景打标；
+  * **4 阶场景驱动掌握度体系 (Mastery Ring)**：废除冗余黄色星星，替换为四阶掌握度指示器（Level 0 新学空心环 ➔ Level 1 熟悉 1/3 环 ➔ Level 2 雅思通关 2/3 环 ➔ Level 3 掌握绿勾 ✔）；
+  * **卡片单点与长按多选管理**：单点直接进入全屏详情页，长按 20ms 振动激活多选模式，支持 **一键批量生成雅思专属试卷 (🎯 灵魂联动)**、批量标记掌握、批量打标及删除。
 
 ---
 
