@@ -118,6 +118,33 @@ export interface IeltsCorpusRecord {
 
   containedWords: string[];   // 本语料所包含的已收录单词列表
 }
+
+export interface IeltsTestResultRecord {
+  id: string;
+  corpusId: string;
+  passageTitle: string;
+  score: number;              // 正确题数 / 总题数
+  totalQuestions: number;
+  estimatedBand: number;      // 预估 Band 分数 (e.g. 7.5)
+  standardDurationSeconds: number; // 标准官方时长 (例如 1200 秒 / 20 分钟)
+  actualDurationSeconds: number;   // 实际总耗时
+  extensionCount: number;     // 加时次数 (例如 1)
+  extensionMinutesTotal: number; // 累计加时分钟数
+  completedTimestamp: number;
+  testedWordsSummary: {
+    wordId: string;
+    isCorrect: boolean;
+  }[];
+}
+
+export interface UserSettingsRecord {
+  key: string;                // e.g. 'general_settings' | 'ielts_preferences'
+  theme?: 'dark' | 'light' | 'paper';
+  pronunciationPreference?: 'uk' | 'us';
+  lastExtensionMinutes?: number; // 上次雅思做题加时分钟数 (如 5)
+  extensionUsageStats?: { minutes: number; count: number }[]; // 历史加时档位使用频次
+  ieltsTimePerPassageMinutes?: number; // 默认每篇时长 (默认 20)
+}
 ```
 
 ---
@@ -125,12 +152,13 @@ export interface IeltsCorpusRecord {
 ## 4. IndexedDB 本地数据库索引 (Dexie.js Spec)
 
 ```javascript
-// 数据库版本: v1
+// 数据库版本: v2
 const dbSchema = {
   words: 'id, &word, dateKey, isStarred, addedTimestamp, *categories, *aiTags',
   playlists: 'id, title, sourceType',
   songs: 'id, title, artist',
   ieltsCorpus: 'id, module, topicCategory, *containedWords',
-  userSettings: 'key' // 存储当前选中的主题 (Dark/Light/Paper)、发音偏好、PWA 配置等
+  ieltsTestResults: 'id, corpusId, completedTimestamp',
+  userSettings: 'key' // 存储主题、发音偏好、加时习惯 (lastExtensionMinutes)、PWA 配置等
 };
 ```
