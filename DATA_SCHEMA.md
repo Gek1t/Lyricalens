@@ -30,12 +30,19 @@ export interface WordRecord {
   categories: string[];       // 场景/语义分类: ['Plant', 'Daily Life', 'Nature']
   aiTags?: string[];          // AI 动态标注标签: ['Botany', 'IELTS Academic C1']
   
-  // 时间与打卡状态
-  isStarred: boolean;         // 是否已 ⭐ 收藏
+  // 词组与关联外键
+  isPhrase?: boolean;         // 是否为多词短语/词组 (例如 "in shades of")
+  subWords?: string[];        // 短语构成的子单词列表
+  parentPhraseId?: string;    // 若下钻收录单单词，记录所属母词组外键引用
+  
+  // 熟练度与复习状态
+  masteryLevel: 0 | 1 | 2 | 3; // 4阶场景驱动掌握度: 0(新学) | 1(熟悉中) | 2(雅思通关) | 3(已掌握)
+  isStarred: boolean;         // 是否已收藏
   addedTimestamp: number;     // 添加时的毫秒级时间戳 (用于切分 Today/Yesterday/Earlier)
   dateKey: string;            // 'YYYY-MM-DD' 格式索引字段
   lastReviewedTimestamp?: number; // 上次复习时间
   reviewCount: number;        // 累计复习/查看次数
+  ieltsTestedCount?: number;  // 雅思真题做对次数
 
   // 雅思相关元数据
   ieltsLevel?: 'Band 6.0' | 'Band 7.0' | 'Band 8.0+'; // 雅思目标分级
