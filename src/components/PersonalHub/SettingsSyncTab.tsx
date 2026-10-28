@@ -1077,23 +1077,6 @@ export const SettingsSyncTab: React.FC = () => {
     }
   }, [ncmCookie]);
 
-  // Helper to safely launch external app schemes via Native Media Bridge or window.location.href
-  const launchExternalScheme = (schemeUrl: string) => {
-    try {
-      const androidMedia = (window as any).AndroidNativeMedia;
-      if (androidMedia?.openAppScheme) {
-        const handled = androidMedia.openAppScheme(schemeUrl);
-        if (handled) return;
-      } else if (androidMedia?.launchApp) {
-        const handled = androidMedia.launchApp(schemeUrl);
-        if (handled) return;
-      }
-    } catch (e) {
-      console.warn('Native launchExternalScheme failed, falling back to location.href:', e);
-    }
-    window.location.href = schemeUrl;
-  };
-
   // Helper to invoke music platform custom URL scheme (orpheus://, qqmusic://, kugouURL://, kwmusic://, migumusic://, spotify://)
   const triggerPlatformDeepLink = (platformId: MusicPlatformId, targetUrl?: string) => {
     try {
@@ -1112,7 +1095,7 @@ export const SettingsSyncTab: React.FC = () => {
         spotify: '已为您唤起 Spotify！在歌单页面点击「分享 → 复制链接」，返回本应用即可直接导入！'
       };
       showToast(guideMessages[platformId] || `正在唤起 ${pl.name}...`);
-      launchExternalScheme(schemeUrl);
+      window.location.href = schemeUrl;
     } catch {
       showToast('未检测到本地音乐客户端，请确认已安装该应用');
     }
@@ -1367,12 +1350,16 @@ export const SettingsSyncTab: React.FC = () => {
 
     const isQq = activeMusicPlatform === 'qq';
     const launchAppLabel = isQq ? '手机 QQ' : pl.shortName;
-    const launchScheme = isQq ? 'mqqapi://qrcode/scan_qr' : (pl.appSchemeName || 'orpheus://');
+    const launchScheme = isQq ? 'mqqapi://qrcode/scan_qrcode?version=1&src_type=app' : (pl.appSchemeName || 'orpheus://');
 
     if (savedViaNative) {
       showToast(`二维码已保存至手机相册！正在唤起${launchAppLabel}，请点击「扫一扫 → 相册」识别`);
       window.setTimeout(() => {
-        launchExternalScheme(launchScheme);
+        if (isQq) {
+          window.location.href = launchScheme;
+        } else {
+          triggerPlatformDeepLink(activeMusicPlatform, launchScheme);
+        }
       }, 500);
       return;
     }
@@ -1403,11 +1390,19 @@ export const SettingsSyncTab: React.FC = () => {
 
       showToast(`已保存二维码！正在唤起${launchAppLabel}，请打开「扫一扫 → 相册」识别`);
       window.setTimeout(() => {
-        launchExternalScheme(launchScheme);
+        if (isQq) {
+          window.location.href = launchScheme;
+        } else {
+          triggerPlatformDeepLink(activeMusicPlatform, launchScheme);
+        }
       }, 500);
     } catch {
       showToast(`请长按二维码图片保存到相册，再打开${launchAppLabel}「扫一扫」识别`);
-      launchExternalScheme(launchScheme);
+      if (isQq) {
+        window.location.href = launchScheme;
+      } else {
+        triggerPlatformDeepLink(activeMusicPlatform, launchScheme);
+      }
     }
   };
 

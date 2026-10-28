@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
 import { ChevronDown, MoreHorizontal, Moon, Sun, BookMarked } from 'lucide-react';
 import { useAppStore } from '../store/useAppStore';
@@ -35,6 +35,12 @@ export const TopHeader: React.FC<TopHeaderProps> = ({
   const isDark = useAppStore(s => s.isDark);
   const toggleTheme = useAppStore(s => s.toggleTheme);
   const openPersonalHub = useAppStore(s => s.openPersonalHub);
+  const activeSpace = useAppStore(s => s.activeSpace);
+  const isFullscreenLyricsOpen = useAppStore(s => s.isFullscreenLyricsOpen);
+
+  useEffect(() => {
+    setIsMenuOpen(false);
+  }, [activeSpace, isFullscreenLyricsOpen]);
 
   const isCamera = variant === 'camera';
 
@@ -118,62 +124,108 @@ export const TopHeader: React.FC<TopHeaderProps> = ({
       {/* Right circular buttons */}
       <div className="relative flex items-center gap-2">
         {rightSlot}
+
         <button
           id="top-header-more-btn"
           onClick={() => setIsMenuOpen(!isMenuOpen)}
-          className={`w-9 h-9 rounded-full flex items-center justify-center active:scale-90 transition-all cursor-pointer ${
+          className={`w-9 h-9 rounded-full flex items-center justify-center active:scale-90 transition-all duration-200 cursor-pointer ${
             isCamera
               ? 'text-white bg-white/14 hover:bg-white/22 backdrop-blur-xl border border-white/25 shadow-[0_2px_10px_rgba(0,0,0,0.18)]'
+              : isMenuOpen
+              ? 'text-stone-950 dark:text-white bg-stone-500/15 dark:bg-white/15'
               : 'text-stone-700 dark:text-stone-300 hover:text-stone-950 dark:hover:text-white hover:bg-stone-500/10 dark:hover:bg-white/10'
           }`}
           aria-label="More options"
+          aria-expanded={isMenuOpen}
         >
-          <MoreHorizontal className="w-4.5 h-4.5 opacity-90" />
+          <motion.span
+            animate={{ rotate: isMenuOpen ? 90 : 0, scale: isMenuOpen ? 1.05 : 1 }}
+            transition={{ type: 'spring', stiffness: 420, damping: 26 }}
+            className="flex items-center justify-center"
+          >
+            <MoreHorizontal className="w-4.5 h-4.5 opacity-90" />
+          </motion.span>
         </button>
 
-        {/* Dropdown Menu */}
-        {isMenuOpen && (
-          <>
-            <div
-              className="fixed inset-0 z-40"
-              onClick={() => setIsMenuOpen(false)}
-            />
-            <div className="absolute right-0 top-11 w-56 rounded-2xl p-2 bg-[#FDFBF7]/95 dark:bg-[#121826]/95 backdrop-blur-2xl border border-stone-200/60 dark:border-slate-800 shadow-xl z-50 animate-in fade-in zoom-in-95 duration-150 space-y-1">
-              <button
-                id="menu-open-notebook-btn"
-                onClick={() => {
-                  setIsMenuOpen(false);
-                  onOpenNotebook?.();
+        {/* Dropdown Menu with Top-Right Origin Spring Scale & Fade Animation */}
+        <AnimatePresence>
+          {isMenuOpen && (
+            <>
+              <motion.div
+                key="top-header-menu-backdrop"
+                initial={{ opacity: 0 }}
+                animate={{ opacity: 1 }}
+                exit={{ opacity: 0 }}
+                transition={{ duration: 0.16, ease: 'easeOut' }}
+                className="fixed inset-0 z-50"
+                onClick={() => setIsMenuOpen(false)}
+              />
+              <motion.div
+                key="top-header-menu-popover"
+                initial={{ opacity: 0, scale: 0.86, y: -6 }}
+                animate={{
+                  opacity: 1,
+                  scale: 1,
+                  y: 0,
+                  transition: {
+                    type: 'spring',
+                    stiffness: 430,
+                    damping: 27,
+                    mass: 0.72,
+                    opacity: { duration: 0.16, ease: [0.16, 1, 0.3, 1] }
+                  }
                 }}
-                className="w-full flex items-center gap-3 px-3 py-2 text-xs font-medium text-stone-700 dark:text-stone-200 hover:bg-stone-100/80 dark:hover:bg-slate-800/80 rounded-xl transition-colors text-left cursor-pointer"
+                exit={{
+                  opacity: 0,
+                  scale: 0.9,
+                  y: -4,
+                  transition: {
+                    duration: 0.15,
+                    ease: [0.32, 0, 0.67, 0]
+                  }
+                }}
+                style={{
+                  transformOrigin: 'top right',
+                  willChange: 'transform, opacity'
+                }}
+                className="absolute right-0 top-11 w-56 rounded-2xl p-2 bg-[#FDFBF7] dark:bg-[#141B2B] border border-stone-200/85 dark:border-slate-800/95 shadow-[0_18px_40px_-10px_rgba(0,0,0,0.22),0_4px_12px_rgba(0,0,0,0.08)] dark:shadow-[0_20px_45px_-10px_rgba(0,0,0,0.78)] z-[60] space-y-1 hardware-accelerated"
               >
-                <BookMarked className="w-4 h-4 text-[#516050] dark:text-[#8FB996]" />
-                <span>Vocabulary Vault</span>
-              </button>
+                <button
+                  id="menu-open-notebook-btn"
+                  onClick={() => {
+                    setIsMenuOpen(false);
+                    onOpenNotebook?.();
+                  }}
+                  className="w-full flex items-center gap-3 px-3 py-2.5 text-xs font-medium text-stone-700 dark:text-stone-200 hover:bg-stone-200/60 dark:hover:bg-slate-800/80 active:scale-[0.98] rounded-xl transition-all text-left cursor-pointer"
+                >
+                  <BookMarked className="w-4 h-4 text-[#516050] dark:text-[#8FB996] shrink-0" />
+                  <span>Vocabulary Vault</span>
+                </button>
 
-              <button
-                id="menu-toggle-theme-btn"
-                onClick={() => {
-                  toggleTheme();
-                  setIsMenuOpen(false);
-                }}
-                className="w-full flex items-center gap-3 px-3 py-2 text-xs font-medium text-stone-700 dark:text-stone-200 hover:bg-stone-100/80 dark:hover:bg-slate-800/80 rounded-xl transition-colors text-left cursor-pointer"
-              >
-                {isDark ? (
-                  <>
-                    <Sun className="w-4 h-4 text-amber-500" />
-                    <span>Warm Cream Paper Mode</span>
-                  </>
-                ) : (
-                  <>
-                    <Moon className="w-4 h-4 text-indigo-500" />
-                    <span>Obsidian Dark Mode</span>
-                  </>
-                )}
-              </button>
-            </div>
-          </>
-        )}
+                <button
+                  id="menu-toggle-theme-btn"
+                  onClick={() => {
+                    toggleTheme();
+                    setIsMenuOpen(false);
+                  }}
+                  className="w-full flex items-center gap-3 px-3 py-2.5 text-xs font-medium text-stone-700 dark:text-stone-200 hover:bg-stone-200/60 dark:hover:bg-slate-800/80 active:scale-[0.98] rounded-xl transition-all text-left cursor-pointer"
+                >
+                  {isDark ? (
+                    <>
+                      <Sun className="w-4 h-4 text-amber-500 shrink-0" />
+                      <span>Warm Cream Paper Mode</span>
+                    </>
+                  ) : (
+                    <>
+                      <Moon className="w-4 h-4 text-indigo-500 shrink-0" />
+                      <span>Obsidian Dark Mode</span>
+                    </>
+                  )}
+                </button>
+              </motion.div>
+            </>
+          )}
+        </AnimatePresence>
       </div>
     </header>
   );

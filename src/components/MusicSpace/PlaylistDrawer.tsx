@@ -232,12 +232,12 @@ export const PlaylistDrawer: React.FC = () => {
             key="playlist-sheet"
             data-no-swipe="true"
             data-no-gesture="true"
-            initial={{ y: '100%', height: '72%' }}
-            animate={{ y: 0, height: isExpanded ? '92%' : '72%' }}
+            initial={{ y: '100%' }}
+            animate={{ y: 0 }}
             exit={{ y: '100%' }}
             drag="y"
             dragConstraints={{ top: 0, bottom: 0 }}
-            dragElastic={{ top: 0, bottom: 0.55 }}
+            dragElastic={{ top: 0.08, bottom: 0.5 }}
             onDragEnd={(_, info) => {
               if (info.offset.y < -30 || info.velocity.y < -200) {
                 setIsExpanded(true);
@@ -252,14 +252,21 @@ export const PlaylistDrawer: React.FC = () => {
             }}
             transition={{
               type: 'spring',
-              damping: 30,
-              stiffness: 280,
-              mass: 0.85
+              damping: 32,
+              stiffness: 320,
+              mass: 0.8
+            }}
+            style={{
+              height: isExpanded ? '92%' : '72%',
+              transition: 'height 280ms cubic-bezier(0.22, 1, 0.36, 1)',
+              willChange: 'transform',
+              backfaceVisibility: 'hidden',
+              WebkitBackfaceVisibility: 'hidden'
             }}
             onTouchStart={(e) => e.stopPropagation()}
             onTouchMove={(e) => e.stopPropagation()}
             onTouchEnd={(e) => e.stopPropagation()}
-            className="relative w-full flex flex-col rounded-t-[32px] sm:rounded-t-[36px] bg-[#FAF7F2] dark:bg-[#121826] border-t border-white/90 dark:border-white/10 shadow-[0_-20px_50px_rgba(0,0,0,0.35)] px-5 pt-3 pb-8 z-10 overflow-hidden"
+            className="relative w-full flex flex-col rounded-t-[32px] sm:rounded-t-[36px] bg-[#FAF7F2] dark:bg-[#121826] border-t border-white/90 dark:border-white/10 shadow-[0_-20px_50px_rgba(0,0,0,0.35)] px-5 pt-3 pb-8 z-10 overflow-hidden hardware-accelerated"
           >
             {/* Drag Pill Handle */}
             <div
@@ -336,31 +343,22 @@ export const PlaylistDrawer: React.FC = () => {
             </div>
 
             {/* Track list with smooth scrolling & auto-scroll support */}
-            <motion.div
-              layout="position"
+            <div
               ref={playlistContainerRef}
               className="flex-1 overflow-y-auto space-y-2.5 mt-3 min-h-0 select-none scroll-smooth no-scrollbar"
               onTouchStart={(e) => e.stopPropagation()}
               onTouchMove={(e) => e.stopPropagation()}
             >
               {filteredList.length > 0 ? (
-                filteredList.map(({ song, originalIdx, stats, matchedList, hasDueWords, hasNotebookWords }) => {
+                filteredList.map(({ song, originalIdx, matchedList }) => {
                   const isCur = originalIdx === currentSongIndex;
 
                   return (
-                    <motion.div
+                    <div
                       key={song.id}
-                      layout="position"
                       ref={isCur ? activeSongItemRef : undefined}
                       onClick={() => handleSelectSong(originalIdx)}
-                      initial={{ opacity: 0, y: 10 }}
-                      animate={{ opacity: 1, y: 0 }}
-                      transition={{
-                        duration: 0.28,
-                        delay: Math.min(originalIdx * 0.02, 0.2),
-                        ease: [0.16, 1, 0.3, 1]
-                      }}
-                      className={`p-3 rounded-2xl flex items-center gap-3 cursor-pointer transition-all active:scale-[0.98] ${
+                      className={`p-3 rounded-2xl flex items-center gap-3 cursor-pointer transition-transform duration-150 active:scale-[0.98] ${
                         isCur
                           ? 'bg-[#262E25]/10 dark:bg-[#7EA783]/15 border-2 border-[#262E25]/35 dark:border-[#7EA783]/45 shadow-sm ring-1 ring-[#262E25]/10 dark:ring-[#7EA783]/20'
                           : 'bg-white dark:bg-[#1A2234] border border-stone-200/60 dark:border-slate-800/80 hover:border-stone-400 dark:hover:border-slate-700 hover:bg-stone-50/80 dark:hover:bg-slate-800/50'
@@ -371,6 +369,8 @@ export const PlaylistDrawer: React.FC = () => {
                         <img
                           src={song.albumArtUrl}
                           alt={song.title}
+                          loading="lazy"
+                          decoding="async"
                           className="w-full h-full object-cover"
                           referrerPolicy="no-referrer"
                         />
@@ -459,7 +459,7 @@ export const PlaylistDrawer: React.FC = () => {
                           {String(originalIdx + 1).padStart(2, '0')}
                         </span>
                       )}
-                    </motion.div>
+                    </div>
                   );
                 })
               ) : (
@@ -474,7 +474,7 @@ export const PlaylistDrawer: React.FC = () => {
                   </button>
                 </div>
               )}
-            </motion.div>
+            </div>
           </motion.div>
         </div>
       )}

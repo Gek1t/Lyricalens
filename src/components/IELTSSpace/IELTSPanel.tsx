@@ -1118,7 +1118,7 @@ export const IELTSPanel: React.FC<IELTSPanelProps> = ({ onOpenNotebook }) => {
       onTouchEnd={isReadingMode ? handlePointerUp : undefined}
       onMouseUp={isReadingMode ? handlePointerUp : undefined}
       onTouchCancel={isReadingMode ? handlePointerUp : undefined}
-      className="relative w-full h-full flex flex-col justify-between overflow-hidden bg-[#FAF7F2] dark:bg-[#0C1017] select-none"
+      className="relative w-full h-full flex flex-col justify-between overflow-hidden bg-gradient-to-r from-[#FAF7F2]/45 via-[#FAF7F2]/82 to-[#FAF7F2]/95 dark:from-[#0B0F17]/50 dark:via-[#0B0F17]/85 dark:to-[#0C1017]/96 select-none"
     >
       {/* Dedicated Clean Academic Paper Background Overlay */}
       <div

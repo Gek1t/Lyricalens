@@ -67,7 +67,6 @@ export const FullscreenLyricsView: React.FC<FullscreenLyricsViewProps> = ({
     lrcText: '',
   }), []);
   const currentSong: SongItem = songs[currentSongIndex] || songs[0] || fallbackSong;
-  const currentTime = useAppStore(s => s.currentTime);
   const setIsPlaying = useAppStore(s => s.setIsPlaying);
 
   const [showTranslation, setShowTranslation] = useState(false);
@@ -165,22 +164,27 @@ export const FullscreenLyricsView: React.FC<FullscreenLyricsViewProps> = ({
     return set;
   }, [collectedWords]);
 
-  // Helper to check if span at sIdx in line is part of any saved word or multi-word phrase
-  const isSpanSaved = (sIdx: number, spans: { text: string }[]) => {
-    const currentClean = cleanWordText(spans[sIdx]?.text || '').toLowerCase();
-    if (currentClean && savedWordsSet.has(currentClean)) return true;
+  // Precompute saved vocabulary span lookup table once per song/vault update instead of on every render frame
+  const savedSpanLookup = useMemo(() => {
+    return parsedLyrics.map(line => {
+      const spans = line.spans || [];
+      const cleanSpans = spans.map(s => cleanWordText(s.text || '').toLowerCase());
+      return spans.map((_, sIdx) => {
+        const currentClean = cleanSpans[sIdx];
+        if (currentClean && savedWordsSet.has(currentClean)) return true;
 
-    // Check multi-word phrases (sliding window of 2 to 5 words)
-    for (let len = 2; len <= 5; len++) {
-      for (let start = Math.max(0, sIdx - len + 1); start <= sIdx && start + len <= spans.length; start++) {
-        const phrase = spans.slice(start, start + len).map(s => cleanWordText(s.text)).join(' ').toLowerCase();
-        if (savedWordsSet.has(phrase)) {
-          return true;
+        for (let len = 2; len <= 5; len++) {
+          for (let start = Math.max(0, sIdx - len + 1); start <= sIdx && start + len <= spans.length; start++) {
+            const phrase = cleanSpans.slice(start, start + len).join(' ');
+            if (savedWordsSet.has(phrase)) {
+              return true;
+            }
+          }
         }
-      }
-    }
-    return false;
-  };
+        return false;
+      });
+    });
+  }, [parsedLyrics, savedWordsSet]);
 
   // Active anchor for selected phrase in lyric lines
   const [highlightAnchor, setHighlightAnchor] = useState<{
@@ -794,11 +798,16 @@ export const FullscreenLyricsView: React.FC<FullscreenLyricsViewProps> = ({
   return (
     <motion.div
       id="fullscreen-flowing-lyrics-view"
-      initial={{ opacity: 0, scale: 0.94, y: 25 }}
+      initial={{ opacity: 0, scale: 0.95, y: 20 }}
       animate={{ opacity: 1, scale: 1, y: 0 }}
-      exit={{ opacity: 0, scale: 0.94, y: 30 }}
-      transition={{ duration: 0.38, ease: [0.16, 1, 0.3, 1] }}
-      className="absolute inset-0 z-30 flex flex-col justify-between overflow-hidden select-none bg-[#FAF8F5] dark:bg-[#0D1117] cursor-pointer"
+      exit={{ opacity: 0, scale: 0.96, y: 20 }}
+      transition={{ duration: 0.32, ease: [0.22, 1, 0.36, 1] }}
+      style={{
+        willChange: 'transform, opacity',
+        backfaceVisibility: 'hidden',
+        WebkitBackfaceVisibility: 'hidden'
+      }}
+      className="absolute inset-0 z-50 flex flex-col justify-between overflow-hidden select-none bg-[#FAF8F5] dark:bg-[#0D1117] cursor-pointer hardware-accelerated"
       onClick={handleBlankAreaClick}
       onTouchStart={handleBgTouchStart}
       onMouseDown={handleBgTouchStart}
@@ -809,18 +818,18 @@ export const FullscreenLyricsView: React.FC<FullscreenLyricsViewProps> = ({
       onTouchCancel={handlePointerUp}
     >
       {/* Full-bleed Ambient Fluid Mesh Glow */}
-      <div className="absolute inset-0 pointer-events-none overflow-hidden">
+      <div className="absolute inset-0 pointer-events-none overflow-hidden" style={{ contain: 'paint' }}>
         <div
-          className="absolute -top-16 -left-16 w-80 h-80 rounded-full blur-[100px] opacity-40 dark:opacity-20 transition-all duration-1000"
-          style={{ backgroundColor: palette[0] || '#CBD5C8' }}
+          className="absolute -top-16 -left-16 w-80 h-80 rounded-full blur-[90px] opacity-40 dark:opacity-20"
+          style={{ backgroundColor: palette[0] || '#CBD5C8', transform: 'translate3d(0, 0, 0)' }}
         />
         <div
-          className="absolute top-1/3 -right-16 w-72 h-72 rounded-full blur-[90px] opacity-35 dark:opacity-15 transition-all duration-1000"
-          style={{ backgroundColor: palette[1] || '#E6DFD5' }}
+          className="absolute top-1/3 -right-16 w-72 h-72 rounded-full blur-[85px] opacity-35 dark:opacity-15"
+          style={{ backgroundColor: palette[1] || '#E6DFD5', transform: 'translate3d(0, 0, 0)' }}
         />
         <div
-          className="absolute -bottom-16 left-1/4 w-80 h-80 rounded-full blur-[110px] opacity-30 dark:opacity-20 transition-all duration-1000"
-          style={{ backgroundColor: palette[2] || '#C3B8A8' }}
+          className="absolute -bottom-16 left-1/4 w-80 h-80 rounded-full blur-[95px] opacity-30 dark:opacity-20"
+          style={{ backgroundColor: palette[2] || '#C3B8A8', transform: 'translate3d(0, 0, 0)' }}
         />
       </div>
 
@@ -842,22 +851,18 @@ export const FullscreenLyricsView: React.FC<FullscreenLyricsViewProps> = ({
           </button>
         </div>
 
-        {/* Center: Animated Song Title & Artist with shared layoutId */}
+        {/* Center: Song Title & Artist */}
         <div className="flex-1 px-2 flex flex-col items-center justify-center text-center overflow-hidden pointer-events-none select-none">
-          <motion.p
-            layoutId={`track-artist-${currentSong.id}`}
-            transition={{ type: 'spring', stiffness: 350, damping: 30 }}
+          <p
             className="font-sans text-[9px] uppercase tracking-[0.25em] text-[#78716C] dark:text-stone-400 font-normal truncate max-w-[180px]"
           >
             {currentSong.artist ? currentSong.artist.toUpperCase() : 'ETHEREAL SOUNDS'}
-          </motion.p>
-          <motion.h2
-            layoutId={`track-title-${currentSong.id}`}
-            transition={{ type: 'spring', stiffness: 350, damping: 30 }}
+          </p>
+          <h2
             className="font-serif-luxury text-[13px] sm:text-sm font-normal text-[#292524] dark:text-stone-100 tracking-[0.15em] uppercase truncate max-w-[200px] leading-tight mt-0.5"
           >
             {currentSong.title}
-          </motion.h2>
+          </h2>
         </div>
 
         {/* Right: Minimalist [ 译 ] Capsule Toggle */}
@@ -991,12 +996,16 @@ export const FullscreenLyricsView: React.FC<FullscreenLyricsViewProps> = ({
           )}
         </AnimatePresence>
 
-        {/* Main Flowing Lyrics Canvas (Safe horizontal gutters px-16 sm:px-20 ensure no overlap with left/right controls) */}
+        {/* Main Flowing Lyrics Canvas (Safe horizontal gutters px-16 sm:px-20 and vertical fade mask ensure zero boundary bleed) */}
         <div
           ref={containerRef}
           onScroll={handleScroll}
-          style={{ gap: `${lineSpacing}px` }}
-          className="flex-1 w-full overflow-y-auto no-scrollbar px-16 sm:px-20 pt-6 pb-[160px] flex flex-col text-center select-none z-20 transition-[gap] duration-150"
+          style={{
+            gap: `${lineSpacing}px`,
+            maskImage: 'linear-gradient(to bottom, transparent 0%, black 7%, black 88%, transparent 100%)',
+            WebkitMaskImage: 'linear-gradient(to bottom, transparent 0%, black 7%, black 88%, transparent 100%)'
+          }}
+          className="flex-1 w-full overflow-y-auto no-scrollbar px-16 sm:px-20 pt-8 pb-[160px] flex flex-col text-center select-none z-20 transition-[gap] duration-150"
         >
           {/* Top Spacer */}
           <div className="h-12 flex-shrink-0" />
@@ -1022,18 +1031,22 @@ export const FullscreenLyricsView: React.FC<FullscreenLyricsViewProps> = ({
 
             const translation = showTranslation ? (line.translation || getLyricLineTranslation(line.rawText)) : '';
 
+            const lineOpacity = isDimmed ? 0.18 : isAimed ? 1 : isActive ? 1 : isScrubbing ? 0.45 : 0.38;
+            const lineScale = isAimed ? 1.02 : isActive ? activeScaleFactor : 0.97;
+
             return (
-              <motion.div
+              <div
                 key={`${line.timeMs}-${lIdx}`}
                 data-line-index={lIdx}
                 ref={isActive ? activeLineRef : null}
-                animate={{
-                  opacity: isDimmed ? 0.18 : isAimed ? 1 : isActive ? 1 : isScrubbing ? 0.45 : 0.38,
-                  scale: isAimed ? 1.02 : isActive ? activeScaleFactor : 0.97,
-                  filter: isDimmed ? 'blur(1.5px)' : 'blur(0px)'
+                style={{
+                  opacity: lineOpacity,
+                  transform: `translate3d(0, 0, 0) scale(${lineScale})`,
+                  WebkitTransform: `translate3d(0, 0, 0) scale(${lineScale})`,
+                  transition: 'transform 240ms cubic-bezier(0.22, 1, 0.36, 1), opacity 240ms ease-out',
+                  willChange: isActive || isAimed ? 'transform, opacity' : 'auto'
                 }}
-                transition={{ duration: 0.24, ease: 'easeOut' }}
-                className="py-1 transition-all duration-200 cursor-pointer"
+                className="py-1 cursor-pointer"
                 onClick={() => {
                   if (isScrubbing && !gestureState.isLongPressing) {
                     handleSeekToLine(lIdx);
@@ -1057,8 +1070,8 @@ export const FullscreenLyricsView: React.FC<FullscreenLyricsViewProps> = ({
                     const isLastAnchor = isAnchorSpan && sIdx === highlightAnchor.endSpan;
                     const isSingleAnchor = isAnchorSpan && highlightAnchor.startSpan === highlightAnchor.endSpan;
 
-                    // Check if span is in user's vocabulary book
-                    const isSaved = isSpanSaved(sIdx, line.spans);
+                    // O(1) lookup from precomputed vocabulary book matrix
+                    const isSaved = Boolean(savedSpanLookup[lIdx]?.[sIdx]);
                     const savedUnderlineClasses = isSaved
                       ? 'underline decoration-[#455743] dark:decoration-[#84AA87] underline-offset-[5px] decoration-[1.5px]'
                       : '';
@@ -1133,12 +1146,12 @@ export const FullscreenLyricsView: React.FC<FullscreenLyricsViewProps> = ({
                 {showTranslation && translation && (
                   <p
                     style={{ fontSize: `${translationFontSize}px` }}
-                    className="text-stone-500 dark:text-stone-400 font-sans tracking-wide mt-1.5 animate-in fade-in duration-200"
+                    className="text-stone-500 dark:text-stone-400 font-sans tracking-wide mt-1.5 transition-opacity duration-200"
                   >
                     {translation}
                   </p>
                 )}
-              </motion.div>
+              </div>
             );
           })}
 
