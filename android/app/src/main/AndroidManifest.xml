@@ -78,8 +78,31 @@
             <action android:name="android.intent.action.VIEW" />
             <data android:scheme="spotify" />
         </intent>
+        <intent>
+            <action android:name="android.intent.action.VIEW" />
+            <data android:scheme="mqq" />
+        </intent>
+        <intent>
+            <action android:name="android.intent.action.VIEW" />
+            <data android:scheme="mqqapi" />
+        </intent>
+        <intent>
+            <action android:name="android.intent.action.VIEW" />
+            <data android:scheme="wtloginmqq" />
+        </intent>
+        <intent>
+            <action android:name="android.intent.action.VIEW" />
+            <data android:scheme="weixin" />
+        </intent>
+        <intent>
+            <action android:name="android.intent.action.VIEW" />
+            <data android:scheme="tim" />
+        </intent>
         <package android:name="com.netease.cloudmusic" />
+        <package android:name="com.tencent.mobileqq" />
+        <package android:name="com.tencent.tim" />
         <package android:name="com.tencent.qqmusic" />
+        <package android:name="com.tencent.mm" />
         <package android:name="com.kugou.android" />
         <package android:name="cn.kuwo.player" />
         <package android:name="cmcc.mobilevideo" />

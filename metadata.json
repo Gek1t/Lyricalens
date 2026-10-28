@@ -1,5 +1,5 @@
 {
-  "name": "10.26",
+  "name": "1028",
   "description": "Contextual English learning PWA blending AR camera exploration, dynamic KTV lyric karaoke, and IELTS Academic reading generation with local-first Dexie database.",
   "requestFramePermissions": [
     "camera"

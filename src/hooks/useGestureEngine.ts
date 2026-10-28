@@ -28,6 +28,11 @@ function isAnyModalOpen(state: ReturnType<typeof useAppStore.getState>): boolean
 export function useGestureEngine(options: GestureEngineOptions = {}) {
   const { enableXSwipe = true, enableYSwipeInMusic = true } = options;
   const activeSpace = useAppStore(s => s.activeSpace);
+  const activeSpaceRef = useRef(activeSpace);
+  useEffect(() => {
+    activeSpaceRef.current = activeSpace;
+  }, [activeSpace]);
+
   const setActiveSpace = useAppStore(s => s.setActiveSpace);
   const nextSong = useAppStore(s => s.nextSong);
   const prevSong = useAppStore(s => s.prevSong);
@@ -37,9 +42,13 @@ export function useGestureEngine(options: GestureEngineOptions = {}) {
   const startTime = useRef(0);
   const currentX = useRef(0);
   const currentY = useRef(0);
+  const containerWidthRef = useRef(412);
   const isDragging = useRef(false);
   const lockedAxis = useRef<'x' | 'y' | null>(null);
   const suppressClickUntil = useRef(0);
+  const vpRef = useRef<HTMLElement | null>(null);
+  const pendingDiffX = useRef<number>(0);
+  const rafId = useRef<number | null>(null);
 
   const handleTouchStart = useCallback((e: TouchEvent | MouseEvent) => {
     const state = useAppStore.getState();
@@ -70,38 +79,44 @@ export function useGestureEngine(options: GestureEngineOptions = {}) {
     currentY.current = point.clientY;
     isDragging.current = true;
     lockedAxis.current = null;
+
+    // Cache viewport container element and width once at gesture onset to eliminate forced layout reflow during RAF animations
+    const vp = document.getElementById('viewpager-viewport');
+    vpRef.current = vp;
+    containerWidthRef.current = vp?.parentElement?.clientWidth || window.innerWidth || 412;
   }, []);
 
-  const rafId = useRef<number | null>(null);
-
   const updateViewportTransform = useCallback((diffX: number) => {
-    if (rafId.current !== null) {
-      cancelAnimationFrame(rafId.current);
+    pendingDiffX.current = diffX;
+    if (rafId.current === null) {
+      rafId.current = requestAnimationFrame(() => {
+        rafId.current = null;
+        const el = vpRef.current || document.getElementById('viewpager-viewport');
+        if (!el) return;
+        el.style.transition = 'none';
+        (el.style as any).webkitTransition = 'none';
+        const containerWidth = containerWidthRef.current || 412;
+        const currentActiveSpace = activeSpaceRef.current;
+        const currentDiffX = pendingDiffX.current;
+        const dragPercent = (currentDiffX / containerWidth) * (100 / 3);
+        const basePercent = -(currentActiveSpace * 100) / 3;
+        let finalPercent = basePercent + dragPercent;
+        // Soft elastic rubber-band resistance at boundary edges
+        if ((currentActiveSpace === 0 && currentDiffX > 0) || (currentActiveSpace === 2 && currentDiffX < 0)) {
+          finalPercent = basePercent + dragPercent * 0.28;
+        }
+        el.style.transform = `translate3d(${finalPercent}%, 0, 0)`;
+        (el.style as any).webkitTransform = `translate3d(${finalPercent}%, 0, 0)`;
+      });
     }
-    rafId.current = requestAnimationFrame(() => {
-      const el = document.getElementById('viewpager-viewport');
-      if (!el) return;
-      el.style.transition = 'none';
-      (el.style as any).webkitTransition = 'none';
-      const containerWidth = el.parentElement?.clientWidth || window.innerWidth || 412;
-      const dragPercent = (diffX / containerWidth) * (100 / 3);
-      const basePercent = -(activeSpace * 100) / 3;
-      let finalPercent = basePercent + dragPercent;
-      // Soft elastic rubber-band resistance at boundary edges
-      if ((activeSpace === 0 && diffX > 0) || (activeSpace === 2 && diffX < 0)) {
-        finalPercent = basePercent + dragPercent * 0.28;
-      }
-      el.style.transform = `translate3d(${finalPercent}%, 0, 0)`;
-      (el.style as any).webkitTransform = `translate3d(${finalPercent}%, 0, 0)`;
-    });
-  }, [activeSpace]);
+  }, []);
 
   const resetViewportTransition = useCallback((targetSpace: number) => {
     if (rafId.current !== null) {
       cancelAnimationFrame(rafId.current);
       rafId.current = null;
     }
-    const el = document.getElementById('viewpager-viewport');
+    const el = vpRef.current || document.getElementById('viewpager-viewport');
     if (!el) return;
     el.style.transition = 'transform 380ms cubic-bezier(0.22, 1, 0.36, 1)';
     (el.style as any).webkitTransition = '-webkit-transform 380ms cubic-bezier(0.22, 1, 0.36, 1)';
@@ -131,7 +146,7 @@ export function useGestureEngine(options: GestureEngineOptions = {}) {
         // Bias towards horizontal navigation: if horizontal movement is dominant or comparable
         if (Math.abs(diffX) >= Math.abs(diffY) * 0.75) {
           lockedAxis.current = 'x';
-        } else if (Math.abs(diffY) > Math.abs(diffX) * 1.2 && activeSpace === 1) {
+        } else if (Math.abs(diffY) > Math.abs(diffX) * 1.2 && activeSpaceRef.current === 1) {
           lockedAxis.current = 'y';
         }
       }
@@ -140,16 +155,17 @@ export function useGestureEngine(options: GestureEngineOptions = {}) {
     if (lockedAxis.current === 'x' && enableXSwipe) {
       updateViewportTransform(diffX);
     }
-  }, [activeSpace, enableXSwipe, updateViewportTransform]);
+  }, [enableXSwipe, updateViewportTransform]);
 
   const handleTouchEnd = useCallback(() => {
     if (!isDragging.current) return;
     isDragging.current = false;
 
+    const currentSpace = activeSpaceRef.current;
     const state = useAppStore.getState();
     if (isAnyModalOpen(state)) {
       lockedAxis.current = null;
-      resetViewportTransition(activeSpace);
+      resetViewportTransition(currentSpace);
       return;
     }
 
@@ -172,20 +188,20 @@ export function useGestureEngine(options: GestureEngineOptions = {}) {
       lockedAxis.current === 'x' ||
       (Math.abs(diffX) > Math.abs(diffY) * 1.2 && (isFastFlickX || isNormalSwipeX));
 
-    let targetSpace = activeSpace;
+    let targetSpace = currentSpace;
     if (isHorizontalIntent && enableXSwipe) {
       if (diffX < 0 && (diffX < -45 || isFastFlickX)) {
         // Swipe Left (drag finger left) -> Go Right to next space (e.g. from AR [0] -> Music [1] -> IELTS [2])
-        if (activeSpace < 2) {
-          targetSpace = activeSpace + 1;
+        if (currentSpace < 2) {
+          targetSpace = currentSpace + 1;
         }
       } else if (diffX > 0 && (diffX > 45 || isFastFlickX)) {
         // Swipe Right (drag finger right) -> Go Left to previous space (e.g. from IELTS [2] -> Music [1] -> AR [0])
-        if (activeSpace > 0) {
-          targetSpace = activeSpace - 1;
+        if (currentSpace > 0) {
+          targetSpace = currentSpace - 1;
         }
       }
-    } else if (lockedAxis.current === 'y' && enableYSwipeInMusic && activeSpace === 1) {
+    } else if (lockedAxis.current === 'y' && enableYSwipeInMusic && currentSpace === 1) {
       const isFastFlickY = Math.abs(velocityY) > 0.22 && Math.abs(diffY) > 20;
       if (diffY < -30 || (diffY < 0 && isFastFlickY)) {
         // Swipe Up -> Next song
@@ -197,19 +213,19 @@ export function useGestureEngine(options: GestureEngineOptions = {}) {
     }
 
     resetViewportTransition(targetSpace);
-    if (targetSpace !== activeSpace) {
+    if (targetSpace !== currentSpace) {
       setActiveSpace(targetSpace);
     }
 
     lockedAxis.current = null;
-  }, [activeSpace, enableXSwipe, enableYSwipeInMusic, nextSong, prevSong, resetViewportTransition, setActiveSpace]);
+  }, [enableXSwipe, enableYSwipeInMusic, nextSong, prevSong, resetViewportTransition, setActiveSpace]);
 
   useEffect(() => {
     const el = window;
 
     const handleCancel = () => {
       isDragging.current = false;
-      resetViewportTransition(activeSpace);
+      resetViewportTransition(activeSpaceRef.current);
       lockedAxis.current = null;
     };
 
@@ -245,5 +261,5 @@ export function useGestureEngine(options: GestureEngineOptions = {}) {
       el.removeEventListener('mouseleave', handleCancel, true);
       window.removeEventListener('click', handleCaptureClick, true);
     };
-  }, [handleTouchStart, handleTouchMove, handleTouchEnd]);
+  }, [handleTouchStart, handleTouchMove, handleTouchEnd, resetViewportTransition]);
 }
