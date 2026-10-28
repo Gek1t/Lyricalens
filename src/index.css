@@ -1,0 +1,238 @@
+@import "tailwindcss";
+
+@custom-variant dark (&:where(.dark, .dark *));
+
+@layer base {
+  :root {
+    --font-serif: 'Playfair Display', Georgia, serif;
+    --font-sans: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+    
+    --ambient-glow-1: #E4D8C9;
+    --ambient-glow-2: #D8DFD5;
+    --ambient-glow-3: #D0C5B4;
+
+    --color-cream-bg: #F8F6F0;
+    --color-cream-surface: rgba(255, 255, 255, 0.78);
+    --color-cream-card: rgba(255, 255, 255, 0.88);
+    --color-sage: #516050;
+    --color-sage-dark: #3F4C3E;
+    --color-sage-light: #7E927D;
+    --color-amber-accent: #B45309;
+
+    --safe-top: env(safe-area-inset-top, 24px);
+    --safe-bottom: env(safe-area-inset-bottom, 0px);
+  }
+
+  .dark {
+    --ambient-glow-1: #1E293B;
+    --ambient-glow-2: #162C27;
+    --ambient-glow-3: #2A1F3D;
+
+    --color-cream-bg: #0B0F17;
+    --color-cream-surface: rgba(18, 24, 38, 0.72);
+    --color-cream-card: rgba(26, 34, 52, 0.85);
+    --color-sage: #6B8F71;
+    --color-sage-dark: #4A6B50;
+    --color-sage-light: #8FB996;
+    --color-amber-accent: #F59E0B;
+  }
+
+  html, body {
+    height: 100%;
+    overscroll-behavior: none;
+    -webkit-tap-highlight-color: transparent;
+  }
+
+  body {
+    font-family: var(--font-sans);
+    background-color: var(--color-cream-bg);
+    color: #1C1917;
+    touch-action: pan-x pan-y;
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+    user-select: none;
+    -webkit-user-select: none;
+  }
+
+  .dark body {
+    color: #F8FAFC;
+  }
+}
+
+.font-serif-luxury {
+  font-family: 'Playfair Display', Georgia, serif;
+}
+
+.font-sans-ui {
+  font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+}
+
+.label-caps {
+  font-family: 'Inter', -apple-system, sans-serif;
+  letter-spacing: 0.22em;
+  text-transform: uppercase;
+  font-size: 0.6875rem; /* 11px */
+  font-weight: 600;
+}
+
+.glass-panel {
+  background: var(--color-cream-surface);
+  backdrop-filter: blur(28px) saturate(180%);
+  -webkit-backdrop-filter: blur(28px) saturate(180%);
+  border: 1px solid rgba(255, 255, 255, 0.55);
+}
+
+.dark .glass-panel {
+  background: var(--color-cream-surface);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+.glass-tag {
+  background: rgba(28, 25, 23, 0.78);
+  backdrop-filter: blur(16px);
+  -webkit-backdrop-filter: blur(16px);
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  color: #FFFFFF;
+}
+
+.dark .glass-tag {
+  background: rgba(18, 24, 38, 0.85);
+  border: 1px solid rgba(255, 255, 255, 0.18);
+}
+
+/* Ambient breathing animations - Pure organic spatial motion & rich luminous diffusion */
+@keyframes ambientBreathe1 {
+  0%, 100% {
+    transform: translate(0, 0) scale(1);
+  }
+  50% {
+    transform: translate(4%, -4%) scale(1.12);
+  }
+}
+
+@keyframes ambientBreathe2 {
+  0%, 100% {
+    transform: translate(0, 0) scale(1.06);
+  }
+  50% {
+    transform: translate(-4%, 4%) scale(0.96);
+  }
+}
+
+@keyframes ambientBreathe3 {
+  0%, 100% {
+    transform: translate(0, 0) scale(1);
+  }
+  50% {
+    transform: translate(3%, 5%) scale(1.10);
+  }
+}
+
+.animate-ambient-1 {
+  animation: ambientBreathe1 12s ease-in-out infinite;
+}
+.animate-ambient-2 {
+  animation: ambientBreathe2 15s ease-in-out infinite;
+}
+.animate-ambient-3 {
+  animation: ambientBreathe3 18s ease-in-out infinite;
+}
+
+/* Word fill animation for KTV lyrics */
+.lyric-word {
+  position: relative;
+  display: inline-block;
+  color: rgba(28, 25, 23, 0.35);
+  transition: color 0.15s ease;
+  cursor: pointer;
+}
+
+.dark .lyric-word {
+  color: rgba(248, 250, 252, 0.3);
+}
+
+.lyric-word.active-word {
+  color: #1C1917;
+  font-weight: 600;
+  text-shadow: 0 0 16px rgba(81, 96, 80, 0.25);
+}
+
+.dark .lyric-word.active-word {
+  color: #FFFFFF;
+  text-shadow: 0 0 20px rgba(56, 189, 248, 0.4);
+}
+
+/* Hide scrollbar buttons and arrows globally */
+::-webkit-scrollbar-button {
+  display: none !important;
+  width: 0 !important;
+  height: 0 !important;
+}
+
+/* Hide scrollbars */
+.no-scrollbar::-webkit-scrollbar {
+  display: none !important;
+  width: 0 !important;
+  height: 0 !important;
+}
+.no-scrollbar {
+  -ms-overflow-style: none !important;
+  scrollbar-width: none !important;
+}
+
+/* Subtle minimal scrollbar */
+.subtle-scrollbar::-webkit-scrollbar {
+  width: 3px;
+  height: 3px;
+}
+.subtle-scrollbar::-webkit-scrollbar-track {
+  background: transparent;
+}
+.subtle-scrollbar::-webkit-scrollbar-thumb {
+  background: rgba(168, 162, 158, 0.25);
+  border-radius: 9999px;
+}
+.subtle-scrollbar::-webkit-scrollbar-thumb:hover {
+  background: rgba(168, 162, 158, 0.45);
+}
+.subtle-scrollbar {
+  scrollbar-width: thin;
+  scrollbar-color: rgba(168, 162, 158, 0.25) transparent;
+}
+
+/* Target vocabulary underline in reading passage */
+.vocab-target {
+  text-decoration: underline;
+  text-decoration-thickness: 1.5px;
+  text-underline-offset: 4px;
+  text-decoration-color: #516050;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  border-radius: 2px;
+  padding: 0 2px;
+}
+
+.vocab-target:hover, .vocab-target:active {
+  background-color: rgba(81, 96, 80, 0.15);
+  color: #2F392E;
+}
+
+.dark .vocab-target {
+  text-decoration-color: #38BDF8;
+}
+
+.dark .vocab-target:hover {
+  background-color: rgba(56, 189, 248, 0.2);
+}
+
+/* GPU Hardware Acceleration for Android WebView */
+.hardware-accelerated {
+  -webkit-transform: translate3d(0, 0, 0);
+  transform: translate3d(0, 0, 0);
+  -webkit-backface-visibility: hidden;
+  backface-visibility: hidden;
+  will-change: transform;
+  -webkit-transform-style: preserve-3d;
+  transform-style: preserve-3d;
+}
+

@@ -1,0 +1,138 @@
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+model User {
+  id           Int      @id @default(autoincrement())
+  username     String   @unique
+  passwordHash String
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+  settings     String?  // JSON stringified user settings
+
+  words           Word[]
+  songs           Song[]
+  ieltsTests      IELTSTest[]
+  customPassages  CustomPassage[]
+  customListening CustomListening[]
+}
+
+model Word {
+  id                    Int      @id @default(autoincrement())
+  userId                Int
+  user                  User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  word                  String
+  phoneticUk            String?
+  phoneticUs            String?
+  partOfSpeech          String?
+  definition            String?
+  definitionCn          String?
+  examples              String?  // JSON string: WordExample[]
+  sourceContext         String?
+  dateKey               String?
+  isStarred             Boolean  @default(true)
+  masteryLevel          Int      @default(0) // 0: New, 1: Learning, 2: Familiar, 3: Mastered
+  addedTimestamp        BigInt
+  lastReviewedTimestamp BigInt?
+  reviewCount           Int      @default(0)
+  categories            String?  // JSON string: string[]
+  aiTags                String?  // JSON string: string[]
+  isPhrase              Boolean  @default(false)
+  parentPhrase          String?
+  subWords              String?  // JSON string: SubWordItem[]
+  arObjectLabel         String?
+  updatedAt             DateTime @updatedAt
+
+  @@unique([userId, word])
+  @@unique([id, userId])
+  @@index([userId, isStarred])
+  @@index([userId, masteryLevel])
+}
+
+model Song {
+  id           String   // External song ID (e.g. Netease ID)
+  userId       Int
+  user         User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  title        String
+  artist       String
+  duration     Int      @default(0)
+  albumArtUrl  String?
+  audioUrl     String?
+  lrcText      String?
+  tlyricText   String?
+  palette      String?  // JSON string: [glow1, glow2, glow3]
+  keyVocab     String?  // JSON string: string[]
+  vocabLevel   String?
+  vocabStats   String?  // JSON string: SongVocabStats
+  updatedAt    DateTime @updatedAt
+
+  @@id([userId, id])
+  @@index([userId])
+}
+
+model IELTSTest {
+  id              Int      @id @default(autoincrement())
+  userId          Int
+  user            User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  timestamp       BigInt
+  bandScore       Float
+  passageTitle    String
+  totalQuestions  Int
+  correctCount    Int
+  durationSeconds Int
+  questionResults String   // JSON string
+  rawQuestions    String   // JSON string
+  createdAt       DateTime @default(now())
+
+  @@index([userId])
+}
+
+model CustomPassage {
+  id             String   // Custom passage ID
+  userId         Int
+  user           User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  cambridgeBook  Int?
+  testNum        Int?
+  passageNum     Int?
+  title          String
+  subTitle       String?
+  readingPassage String
+  questions      String   // JSON string
+  addedTimestamp BigInt
+  isOnlineAdded  Boolean  @default(true)
+
+  @@id([userId, id])
+  @@index([userId])
+}
+
+model CustomListening {
+  id             String   // Custom listening ID
+  userId         Int
+  user           User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  cambridgeBook  Int?
+  testNum        Int?
+  sectionNum     Int?
+  title          String
+  topic          String?
+  audioUrl       String?
+  questions      String   // JSON string
+  transcript     String?  // JSON string
+  addedTimestamp BigInt
+  isOnlineAdded  Boolean  @default(true)
+
+  @@id([userId, id])
+  @@index([userId])
+}
+
+model WordDictionaryCache {
+  word       String   @id
+  resultJson String
+  hitCount   Int      @default(1)
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+}

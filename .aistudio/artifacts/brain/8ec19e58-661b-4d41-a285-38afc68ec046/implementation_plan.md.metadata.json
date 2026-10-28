@@ -1,0 +1,6 @@
+{
+  "summary":  "重新定位「全网题库」为纯粹的「淘题与新题入库工作台」，彻底剔除与主界面重复的「真题馆」与「馆藏」模块，仅保留「考季机经」与「全网搜卷」两大核心模块；采用专属的「考场日历批次卡片（Calendar Tear-off Stub + Session Dossier）」层次化布局与单篇勾选/整场一键入库交互。",
+  "updatedAt":  "2026-10-24T11:27:51.760628661Z",
+  "requestFeedback":  true,
+  "userFacing":  true
+}

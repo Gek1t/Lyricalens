@@ -1,0 +1,781 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Lyricalens 个人中心 · A/B/C 三大高阶美学方案对比</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Cinzel:wght@500;600;700&family=Cormorant+Garamond:ital,wght@0,400;0,600;0,700;1,400;1,600&family=Fraunces:ital,opsz,wght@0,9..144,300;0,9..144,500;0,9..144,600;1,9..144,400&family=Outfit:wght@300;400;500;600&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+  <style>
+    * {
+      box-sizing: border-box;
+      margin: 0;
+      padding: 0;
+      -webkit-font-smoothing: antialiased;
+    }
+
+    body {
+      background-color: #121316;
+      color: #E2E8F0;
+      font-family: 'Outfit', sans-serif;
+      padding: 40px 20px;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      min-height: 100vh;
+    }
+
+    .page-header {
+      text-align: center;
+      margin-bottom: 40px;
+      max-width: 800px;
+    }
+
+    .page-header h1 {
+      font-family: 'Cormorant Garamond', Georgia, serif;
+      font-size: 38px;
+      font-weight: 600;
+      letter-spacing: -0.02em;
+      color: #F8FAFC;
+      margin-bottom: 10px;
+    }
+
+    .page-header p {
+      font-size: 14px;
+      color: #94A3B8;
+      line-height: 1.6;
+    }
+
+    .showcase-grid {
+      display: flex;
+      gap: 36px;
+      justify-content: center;
+      flex-wrap: wrap;
+      max-width: 1300px;
+      width: 100%;
+    }
+
+    .variant-card {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 16px;
+    }
+
+    .variant-title-badge {
+      font-size: 13px;
+      font-weight: 600;
+      padding: 6px 16px;
+      border-radius: 20px;
+      letter-spacing: 0.05em;
+      text-transform: uppercase;
+    }
+
+    /* 手机外框容器 */
+    .mockup-frame {
+      width: 380px;
+      height: 800px;
+      border-radius: 40px;
+      overflow-y: auto;
+      overflow-x: hidden;
+      position: relative;
+      box-shadow: 0 30px 80px -20px rgba(0, 0, 0, 0.6), 0 0 0 1px rgba(255, 255, 255, 0.08);
+      display: flex;
+      flex-direction: column;
+    }
+
+    .mockup-frame::-webkit-scrollbar {
+      display: none;
+    }
+
+    /* ============================================================
+       方案 A: Curated Gallery Folio (艺术画廊装裱展签)
+       ============================================================ */
+    .theme-a {
+      background-color: #FAF8F5;
+      color: #1A1C20;
+      font-family: 'Outfit', sans-serif;
+    }
+
+    .theme-a .top-nav {
+      padding: 24px 20px 14px;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      background: rgba(250, 248, 245, 0.9);
+      backdrop-filter: blur(10px);
+      position: sticky;
+      top: 0;
+      z-index: 10;
+      border-bottom: 1px solid rgba(226, 220, 210, 0.6);
+    }
+
+    .theme-a .brand-title {
+      font-family: 'Fraunces', serif;
+      font-size: 20px;
+      font-weight: 500;
+      letter-spacing: -0.02em;
+    }
+
+    .theme-a .brand-sub {
+      font-size: 10px;
+      font-family: 'JetBrains Mono', monospace;
+      color: #8C827A;
+      letter-spacing: 0.08em;
+    }
+
+    .theme-a .close-circle {
+      width: 32px;
+      height: 32px;
+      border-radius: 50%;
+      background: rgba(0,0,0,0.04);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 14px;
+      color: #555;
+    }
+
+    .theme-a .content-body {
+      padding: 20px 20px 50px;
+      display: flex;
+      flex-direction: column;
+      gap: 24px;
+    }
+
+    /* 方案 A Hero: 艺术装裱卡片 */
+    .theme-a .art-mat-card {
+      background: #FFFFFF;
+      border-radius: 20px;
+      padding: 24px;
+      box-shadow: 0 16px 36px -10px rgba(180, 160, 140, 0.25), 0 0 0 1px rgba(220, 215, 205, 0.6);
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      text-align: center;
+      position: relative;
+    }
+
+    .theme-a .exhibit-tag {
+      font-size: 9px;
+      font-family: 'JetBrains Mono', monospace;
+      text-transform: uppercase;
+      letter-spacing: 0.15em;
+      color: #8C7864;
+      margin-bottom: 10px;
+    }
+
+    .theme-a .hero-quote {
+      font-family: 'Fraunces', serif;
+      font-size: 21px;
+      font-weight: 400;
+      font-style: italic;
+      color: #2D3748;
+      line-height: 1.35;
+      margin-bottom: 12px;
+    }
+
+    .theme-a .hero-quote span {
+      text-decoration: underline;
+      text-decoration-color: #2C4A3E;
+      text-underline-offset: 4px;
+      font-weight: 600;
+      color: #2C4A3E;
+    }
+
+    .theme-a .art-stats-pill {
+      display: flex;
+      gap: 16px;
+      background: #FAF8F5;
+      padding: 8px 16px;
+      border-radius: 30px;
+      border: 1px solid #ECE7DE;
+      font-size: 11px;
+      font-family: 'JetBrains Mono', monospace;
+      color: #64748B;
+    }
+
+    .theme-a .art-stats-pill b {
+      color: #1A1C20;
+    }
+
+    /* 方案 A: 同心天体星轨罗盘 (Celestial Star Orbit) */
+    .theme-a .orbit-section {
+      background: #FFFFFF;
+      border-radius: 20px;
+      padding: 20px;
+      border: 1px solid rgba(220, 215, 205, 0.6);
+      display: flex;
+      flex-direction: column;
+      gap: 14px;
+    }
+
+    .theme-a .orbit-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: baseline;
+    }
+
+    .theme-a .orbit-header h3 {
+      font-family: 'Fraunces', serif;
+      font-size: 16px;
+      font-weight: 600;
+    }
+
+    .theme-a .orbit-visual {
+      height: 140px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      position: relative;
+    }
+
+    .theme-a .orbit-ring {
+      position: absolute;
+      border-radius: 50%;
+      border: 1px dashed rgba(180, 160, 140, 0.4);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+    }
+
+    .theme-a .orbit-3 { width: 130px; height: 130px; border-color: rgba(44, 74, 62, 0.6); }
+    .theme-a .orbit-2 { width: 95px; height: 95px; border-color: rgba(180, 120, 54, 0.5); }
+    .theme-a .orbit-1 { width: 60px; height: 60px; border-color: rgba(160, 160, 160, 0.4); }
+    .theme-a .orbit-core { width: 24px; height: 24px; background: #2C4A3E; border-radius: 50%; color:#fff; font-size:10px; display:flex; align-items:center; justify-content:center; }
+
+    .theme-a .star-node {
+      position: absolute;
+      background: #2C4A3E;
+      color: #fff;
+      font-size: 9px;
+      padding: 2px 6px;
+      border-radius: 8px;
+      font-family: 'JetBrains Mono', monospace;
+      box-shadow: 0 2px 8px rgba(44, 74, 62, 0.25);
+    }
+
+    .theme-a .orbit-legend {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 8px;
+      font-size: 11px;
+      border-top: 1px solid #F1EBE1;
+      padding-top: 10px;
+    }
+
+    .theme-a .legend-item {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      color: #4A5568;
+    }
+
+    /* 方案 A: 精装书脊式试卷档案 */
+    .theme-a .journal-spine-card {
+      background: #FFFFFF;
+      border-radius: 16px;
+      padding: 16px 18px;
+      border: 1px solid rgba(220, 215, 205, 0.6);
+      border-left: 5px solid #2C4A3E;
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+    }
+
+    .theme-a .journal-title {
+      font-family: 'Fraunces', serif;
+      font-size: 17px;
+      font-weight: 600;
+      color: #1A1C20;
+    }
+
+
+    /* ============================================================
+       方案 B: Obsidian Midnight Gallery (黑曜石暗夜透镜)
+       ============================================================ */
+    .theme-b {
+      background-color: #0B0D11;
+      color: #F1F5F9;
+      font-family: 'Outfit', sans-serif;
+      position: relative;
+    }
+
+    /* 弥散光晕底 */
+    .theme-b::before {
+      content: '';
+      position: absolute;
+      top: 60px;
+      left: 30px;
+      width: 250px;
+      height: 250px;
+      background: radial-gradient(circle, rgba(46, 125, 86, 0.28) 0%, rgba(0,0,0,0) 70%);
+      pointer-events: none;
+    }
+
+    .theme-b .top-nav {
+      padding: 24px 20px 14px;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      background: rgba(11, 13, 17, 0.75);
+      backdrop-filter: blur(20px);
+      position: sticky;
+      top: 0;
+      z-index: 10;
+      border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+    }
+
+    .theme-b .brand-title {
+      font-family: 'Cormorant Garamond', serif;
+      font-size: 21px;
+      font-weight: 600;
+      letter-spacing: -0.01em;
+      color: #F8FAFC;
+    }
+
+    .theme-b .brand-sub {
+      font-size: 10px;
+      font-family: 'JetBrains Mono', monospace;
+      color: #4ADE80;
+      letter-spacing: 0.1em;
+    }
+
+    .theme-b .close-circle {
+      width: 32px;
+      height: 32px;
+      border-radius: 50%;
+      background: rgba(255,255,255,0.08);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 14px;
+      color: #CBD5E1;
+    }
+
+    .theme-b .content-body {
+      padding: 20px 20px 50px;
+      display: flex;
+      flex-direction: column;
+      gap: 22px;
+    }
+
+    /* 方案 B: VisionOS 光学磨砂玻璃卡片 */
+    .theme-b .glass-lens-box {
+      background: rgba(255, 255, 255, 0.04);
+      backdrop-filter: blur(24px);
+      -webkit-backdrop-filter: blur(24px);
+      border-radius: 24px;
+      padding: 22px;
+      border: 1px solid rgba(255, 255, 255, 0.12);
+      box-shadow: 0 20px 40px rgba(0, 0, 0, 0.4), inset 0 1px 0 rgba(255, 255, 255, 0.15);
+      display: flex;
+      flex-direction: column;
+      gap: 16px;
+    }
+
+    .theme-b .laser-hud-title {
+      font-size: 10px;
+      font-family: 'JetBrains Mono', monospace;
+      text-transform: uppercase;
+      letter-spacing: 0.12em;
+      color: #94A3B8;
+      display: flex;
+      justify-content: space-between;
+    }
+
+    .theme-b .hud-streak-num {
+      font-family: 'Cinzel', serif;
+      font-size: 36px;
+      font-weight: 700;
+      color: #FFFFFF;
+      text-shadow: 0 0 20px rgba(74, 222, 128, 0.3);
+      line-height: 1;
+    }
+
+    /* 方案 B: 激光发光星核矩阵 */
+    .theme-b .star-core-grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 10px;
+    }
+
+    .theme-b .star-core-tile {
+      background: rgba(255, 255, 255, 0.03);
+      border: 1px solid rgba(255, 255, 255, 0.06);
+      border-radius: 14px;
+      padding: 12px;
+      display: flex;
+      flex-direction: column;
+      gap: 4px;
+    }
+
+    .theme-b .star-core-tile.active {
+      border-color: rgba(74, 222, 128, 0.4);
+      background: rgba(74, 222, 128, 0.06);
+    }
+
+    .theme-b .tile-symbol {
+      font-size: 16px;
+      color: #4ADE80;
+    }
+
+    .theme-b .tile-num {
+      font-family: 'JetBrains Mono', monospace;
+      font-size: 20px;
+      font-weight: 600;
+      color: #fff;
+    }
+
+    .theme-b .tile-desc {
+      font-size: 11px;
+      color: #94A3B8;
+    }
+
+
+    /* ============================================================
+       方案 C: Oxford Scholarly Journal (牛津古典学术手帖)
+       ============================================================ */
+    .theme-c {
+      background-color: #F1ECE1;
+      color: #1F2421;
+      font-family: 'Cormorant Garamond', Georgia, serif;
+      background-image: radial-gradient(#E2D9C8 1px, transparent 1px);
+      background-size: 16px 16px;
+    }
+
+    .theme-c .top-nav {
+      padding: 24px 20px 14px;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      background: rgba(241, 236, 225, 0.92);
+      backdrop-filter: blur(10px);
+      position: sticky;
+      top: 0;
+      z-index: 10;
+      border-bottom: 2px solid #3C2A21;
+    }
+
+    .theme-c .brand-title {
+      font-family: 'Cinzel', serif;
+      font-size: 18px;
+      font-weight: 700;
+      letter-spacing: 0.05em;
+      color: #2D1B14;
+    }
+
+    .theme-c .brand-sub {
+      font-size: 10px;
+      font-family: 'Outfit', sans-serif;
+      text-transform: uppercase;
+      letter-spacing: 0.15em;
+      color: #785A46;
+    }
+
+    .theme-c .close-circle {
+      width: 30px;
+      height: 30px;
+      border: 1px solid #785A46;
+      border-radius: 50%;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 13px;
+      color: #2D1B14;
+    }
+
+    .theme-c .content-body {
+      padding: 20px 20px 50px;
+      display: flex;
+      flex-direction: column;
+      gap: 24px;
+    }
+
+    /* 方案 C: 火漆印章与古籍装帧 */
+    .theme-c .folio-sheet {
+      background: #FAF7F0;
+      border: 1px solid #D6CABA;
+      box-shadow: 0 8px 24px rgba(70, 50, 30, 0.08);
+      border-radius: 4px;
+      padding: 24px;
+      position: relative;
+    }
+
+    .theme-c .wax-seal {
+      position: absolute;
+      top: -12px;
+      right: 20px;
+      width: 32px;
+      height: 32px;
+      background: #8A2B18;
+      border-radius: 50%;
+      box-shadow: 0 4px 10px rgba(138, 43, 24, 0.4);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      color: #F8D2B0;
+      font-family: 'Cinzel', serif;
+      font-size: 12px;
+      font-weight: bold;
+    }
+
+    .theme-c .drop-cap-lead {
+      font-size: 17px;
+      line-height: 1.6;
+      color: #2D231E;
+      margin-bottom: 16px;
+    }
+
+    .theme-c .drop-cap {
+      float: left;
+      font-family: 'Cinzel', serif;
+      font-size: 42px;
+      line-height: 0.8;
+      padding-top: 4px;
+      padding-right: 8px;
+      color: #8A2B18;
+      font-weight: 700;
+    }
+
+    .theme-c .scholarly-scale {
+      border-top: 1px solid #D6CABA;
+      border-bottom: 1px solid #D6CABA;
+      padding: 12px 0;
+      margin: 12px 0;
+      display: flex;
+      justify-content: space-around;
+      text-align: center;
+    }
+
+    .theme-c .scale-box h4 {
+      font-family: 'Cinzel', serif;
+      font-size: 18px;
+      color: #2D1B14;
+    }
+
+    .theme-c .scale-box p {
+      font-family: 'Outfit', sans-serif;
+      font-size: 10px;
+      text-transform: uppercase;
+      color: #785A46;
+    }
+  </style>
+</head>
+<body>
+
+  <div class="page-header">
+    <h1>Lyricalens Atelier · A/B/C 三重高阶美学预览</h1>
+    <p>彻底颠覆普通 AI 模板的生硬卡片堆砌，将个人中心重塑为具备艺术张力与仪式感的高维空间。</p>
+  </div>
+
+  <div class="showcase-grid">
+
+    <!-- ==================== 方案 A ==================== -->
+    <div class="variant-card">
+      <div class="variant-title-badge" style="background:#FAF8F5; color:#2C4A3E; border:1px solid #E2DCD2;">
+        方案 A · 艺术画廊展签 (Gallery Folio)
+      </div>
+      <div class="mockup-frame theme-a">
+        <div class="top-nav">
+          <div>
+            <div class="brand-title">Yuzaiyuan Atelier</div>
+            <div class="brand-sub">VOL. 084 · KINFOLK SCHOLAR</div>
+          </div>
+          <div class="close-circle">✕</div>
+        </div>
+
+        <div class="content-body">
+          <!-- 艺术装裱卡片 -->
+          <div class="art-mat-card">
+            <div class="exhibit-tag">Featured Lyric & Epiphany</div>
+            <div class="hero-quote">
+              "Fragrant whispers in the <span>ephemeral</span> air"
+            </div>
+            <div class="art-stats-pill">
+              <span>DAY <b>14</b> STREAK</span>
+              <span>•</span>
+              <span><b>9</b> MASTERED</span>
+            </div>
+          </div>
+
+          <!-- 同心星轨罗盘 -->
+          <div class="orbit-section">
+            <div class="orbit-header">
+              <h3>Celestial Mastery Orbit (星轨罗盘)</h3>
+              <span style="font-family:'JetBrains Mono'; font-size:11px; color:#8C827A;">9 Words Active</span>
+            </div>
+
+            <div class="orbit-visual">
+              <div class="orbit-ring orbit-3">
+                <span class="star-node" style="top:5px; right:15px;">◉ Mastered</span>
+              </div>
+              <div class="orbit-ring orbit-2">
+                <span class="star-node" style="bottom:10px; left:10px; background:#B47836;">⊙ Learning</span>
+              </div>
+              <div class="orbit-ring orbit-1"></div>
+              <div class="orbit-core">✦</div>
+            </div>
+
+            <div class="orbit-legend">
+              <div class="legend-item"><span style="color:#2C4A3E">◉</span> 已通关 (10%)</div>
+              <div class="legend-item"><span style="color:#B47836">⊙</span> 复习中 (22%)</div>
+              <div class="legend-item"><span style="color:#64748B">⊛</span> 已收藏 (44%)</div>
+              <div class="legend-item"><span style="color:#94A3B8">○</span> 待探索 (24%)</div>
+            </div>
+          </div>
+
+          <!-- 精装书脊试卷档案 -->
+          <div class="journal-spine-card">
+            <div style="display:flex; justify-content:space-between; font-size:10px; font-family:'JetBrains Mono'; color:#8C827A;">
+              <span>CAMBRIDGE 18 · PASSAGE 2</span>
+              <span style="color:#2C4A3E; font-weight:bold;">BAND 7.0</span>
+            </div>
+            <div class="journal-title">The Secret Life of Urban Flora</div>
+            <div style="font-size:12px; color:#64748B; font-family:'JetBrains Mono';">
+              ephemeral · resilience · ubiquitous
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- ==================== 方案 B ==================== -->
+    <div class="variant-card">
+      <div class="variant-title-badge" style="background:#1E293B; color:#4ADE80; border:1px solid rgba(74,222,128,0.3);">
+        方案 B · 黑曜石暗夜透镜 (Obsidian Glass)
+      </div>
+      <div class="mockup-frame theme-b">
+        <div class="top-nav">
+          <div>
+            <div class="brand-title">Lyricalens Quantum</div>
+            <div class="brand-sub">● NEURAL HUD ACTIVE</div>
+          </div>
+          <div class="close-circle">✕</div>
+        </div>
+
+        <div class="content-body">
+          <!-- VisionOS 毛玻璃 HUD 能量卡 -->
+          <div class="glass-lens-box">
+            <div class="laser-hud-title">
+              <span>CONTINUOUS FOCUS</span>
+              <span>TOP 5%</span>
+            </div>
+            <div style="display:flex; align-items:baseline; gap:8px;">
+              <div class="hud-streak-num">14</div>
+              <span style="color:#94A3B8; font-size:12px; font-family:'JetBrains Mono';">DAYS STREAK</span>
+            </div>
+          </div>
+
+          <!-- 发光星核矩阵 -->
+          <div class="glass-lens-box">
+            <div class="laser-hud-title">
+              <span>STAR-CORE SPECTRUM</span>
+              <span>TOTAL 9</span>
+            </div>
+
+            <div class="star-core-grid">
+              <div class="star-core-tile active">
+                <span class="tile-symbol">◉</span>
+                <div class="tile-num">0</div>
+                <div class="tile-desc">Mastered</div>
+              </div>
+              <div class="star-core-tile">
+                <span class="tile-symbol" style="color:#FBBF24;">⊙</span>
+                <div class="tile-num">2</div>
+                <div class="tile-desc">Learning</div>
+              </div>
+              <div class="star-core-tile">
+                <span class="tile-symbol" style="color:#94A3B8;">⊛</span>
+                <div class="tile-num">4</div>
+                <div class="tile-desc">Vaulted</div>
+              </div>
+              <div class="star-core-tile">
+                <span class="tile-symbol" style="color:#64748B;">○</span>
+                <div class="tile-num">3</div>
+                <div class="tile-desc">Browsing</div>
+              </div>
+            </div>
+          </div>
+
+          <!-- 暗夜光学试卷卡片 -->
+          <div class="glass-lens-box">
+            <div class="laser-hud-title">
+              <span>LATEST EXAM</span>
+              <span style="color:#4ADE80;">BAND 7.0</span>
+            </div>
+            <div style="font-family:'Cormorant Garamond'; font-size:19px; color:#fff; font-weight:600;">
+              The Secret Life of Urban Flora
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- ==================== 方案 C ==================== -->
+    <div class="variant-card">
+      <div class="variant-title-badge" style="background:#F1ECE1; color:#3C2A21; border:1px solid #D6CABA;">
+        方案 C · 牛津古典手帖 (Oxford Folio)
+      </div>
+      <div class="mockup-frame theme-c">
+        <div class="top-nav">
+          <div>
+            <div class="brand-title">Atelier Yuzaiyuan</div>
+            <div class="brand-sub">Scholarly Field Archive</div>
+          </div>
+          <div class="close-circle">✕</div>
+        </div>
+
+        <div class="content-body">
+          <!-- 手帖卷首卡 -->
+          <div class="folio-sheet">
+            <div class="wax-seal">✦</div>
+            <div class="drop-cap-lead">
+              <span class="drop-cap">E</span>very whisper holds an ephemeral trace of grace. Fourteen consecutive days of intellectual immersion.
+            </div>
+
+            <div class="scholarly-scale">
+              <div class="scale-box">
+                <h4>14</h4>
+                <p>Days Habit</p>
+              </div>
+              <div class="scale-box">
+                <h4>7.0</h4>
+                <p>IELTS Band</p>
+              </div>
+              <div class="scale-box">
+                <h4>9</h4>
+                <p>Lexicon</p>
+              </div>
+            </div>
+          </div>
+
+          <!-- 博物学索引列表 -->
+          <div class="folio-sheet">
+            <h3 style="font-family:'Cinzel'; font-size:14px; margin-bottom:12px; color:#3C2A21;">
+              I. Lexicon Star-Core Distribution
+            </h3>
+            <div style="display:flex; flex-direction:column; gap:8px; font-size:14px;">
+              <div style="display:flex; justify-content:space-between; border-bottom:1px dashed #D6CABA; padding-bottom:4px;">
+                <span>◉ Mastered Degree</span>
+                <b>0 Items</b>
+              </div>
+              <div style="display:flex; justify-content:space-between; border-bottom:1px dashed #D6CABA; padding-bottom:4px;">
+                <span>⊙ In Memorisation</span>
+                <b>2 Items</b>
+              </div>
+              <div style="display:flex; justify-content:space-between; border-bottom:1px dashed #D6CABA; padding-bottom:4px;">
+                <span>⊛ Vault Repository</span>
+                <b>4 Items</b>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+  </div>
+
+</body>
+</html>

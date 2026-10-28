@@ -1,0 +1,902 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Lyricalens 个人中心 · 原版排版高级精修预览</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:ital,wght@0,600;0,700;1,600&family=Fraunces:ital,opsz,wght@0,9..144,500;0,9..144,600;1,9..144,400&family=Outfit:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+  <style>
+    :root {
+      --bg-cream: #FAF8F5;
+      --surface-pure: #FFFFFF;
+      --ink-primary: #191B1F;
+      --ink-secondary: #5F6774;
+      --ink-tertiary: #9CA3AF;
+      --border-whisper: #EDE8DF;
+      
+      /* 高阶收敛调色板 (去除彩虹色) */
+      --forest-primary: #2C4A3E;
+      --forest-bg: #EBF3EF;
+      --forest-border: #C8DDD3;
+      
+      --amber-primary: #9E6B28;
+      --amber-bg: #FAF3E8;
+      --amber-border: #EADBCE;
+      
+      --slate-primary: #526071;
+      --slate-bg: #F1F4F7;
+      --slate-border: #DDE3EA;
+      
+      --neutral-primary: #6B7280;
+      --neutral-bg: #F8F9FA;
+      --neutral-border: #E5E7EB;
+      
+      --radius-sm: 8px;
+      --radius-md: 16px;
+      --radius-lg: 24px;
+      
+      --font-display: 'Fraunces', 'Cormorant Garamond', Georgia, serif;
+      --font-sans: 'Outfit', -apple-system, sans-serif;
+      --font-mono: 'JetBrains Mono', monospace;
+    }
+
+    * {
+      box-sizing: border-box;
+      margin: 0;
+      padding: 0;
+      -webkit-font-smoothing: antialiased;
+    }
+
+    body {
+      background-color: #E8E5DD;
+      font-family: var(--font-sans);
+      color: var(--ink-primary);
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      min-height: 100vh;
+      padding: 30px 16px;
+    }
+
+    .banner-note {
+      text-align: center;
+      margin-bottom: 24px;
+      max-width: 600px;
+    }
+
+    .banner-note h1 {
+      font-family: var(--font-display);
+      font-size: 28px;
+      font-weight: 600;
+      color: #2D3748;
+      margin-bottom: 6px;
+    }
+
+    .banner-note p {
+      font-size: 13px;
+      color: #64748B;
+    }
+
+    /* 手机全屏外框 (无黑边截断) */
+    .app-screen {
+      width: 390px;
+      height: 844px;
+      background: var(--bg-cream);
+      border-radius: 44px;
+      box-shadow: 0 25px 70px -15px rgba(0, 0, 0, 0.22), 0 0 0 1px rgba(0, 0, 0, 0.08);
+      overflow-y: auto;
+      overflow-x: hidden;
+      position: relative;
+      display: flex;
+      flex-direction: column;
+    }
+
+    .app-screen::-webkit-scrollbar {
+      display: none;
+    }
+
+    /* 顶部沉浸 Header */
+    .top-header {
+      padding: 22px 20px 14px;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      background: rgba(250, 248, 245, 0.92);
+      backdrop-filter: blur(12px);
+      position: sticky;
+      top: 0;
+      z-index: 20;
+      border-bottom: 1px solid var(--border-whisper);
+    }
+
+    .profile-info {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+    }
+
+    .avatar-wrapper {
+      position: relative;
+    }
+
+    .avatar-circle {
+      width: 40px;
+      height: 40px;
+      border-radius: 50%;
+      background: #243E33;
+      color: #F8FAFC;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-family: var(--font-display);
+      font-size: 19px;
+      font-weight: 600;
+      box-shadow: 0 4px 10px rgba(36, 62, 51, 0.2);
+    }
+
+    .pro-pill {
+      font-size: 9px;
+      font-family: var(--font-mono);
+      font-weight: 700;
+      background: #D4AF37;
+      color: #1A1C20;
+      padding: 1px 5px;
+      border-radius: 6px;
+      margin-left: 6px;
+      vertical-align: middle;
+      letter-spacing: 0.05em;
+    }
+
+    .user-text h2 {
+      font-family: var(--font-display);
+      font-size: 18px;
+      font-weight: 600;
+      color: var(--ink-primary);
+      display: flex;
+      align-items: center;
+    }
+
+    .user-text p {
+      font-size: 10px;
+      font-family: var(--font-mono);
+      color: var(--ink-secondary);
+      letter-spacing: 0.06em;
+      margin-top: 1px;
+    }
+
+    .btn-close {
+      width: 32px;
+      height: 32px;
+      border-radius: 50%;
+      background: rgba(0, 0, 0, 0.04);
+      border: none;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      cursor: pointer;
+      color: var(--ink-secondary);
+      font-size: 15px;
+      transition: background 0.2s;
+    }
+
+    .btn-close:hover {
+      background: rgba(0, 0, 0, 0.08);
+    }
+
+    /* 3 个 Tab 切换 */
+    .tab-nav {
+      padding: 12px 18px;
+      display: flex;
+      gap: 6px;
+      background: var(--bg-cream);
+    }
+
+    .tab-pill {
+      flex: 1;
+      text-align: center;
+      padding: 8px 0;
+      border-radius: 12px;
+      font-size: 12px;
+      font-weight: 500;
+      color: var(--ink-secondary);
+      cursor: pointer;
+      transition: all 0.2s;
+      border: 1px solid transparent;
+      user-select: none;
+    }
+
+    .tab-pill.active {
+      background: var(--surface-pure);
+      color: var(--ink-primary);
+      font-weight: 600;
+      border-color: var(--border-whisper);
+      box-shadow: 0 2px 6px rgba(0, 0, 0, 0.03);
+    }
+
+    /* 主滚动内容流 */
+    .tab-content {
+      padding: 14px 18px 60px;
+      display: flex;
+      flex-direction: column;
+      gap: 16px;
+    }
+
+    /* 通用卡片容器 */
+    .card-block {
+      background: var(--surface-pure);
+      border-radius: var(--radius-lg);
+      padding: 18px;
+      border: 1px solid var(--border-whisper);
+      box-shadow: 0 4px 16px -4px rgba(0, 0, 0, 0.02);
+      display: flex;
+      flex-direction: column;
+      gap: 14px;
+    }
+
+    /* 模块 1：打卡 */
+    .streak-top-row {
+      display: flex;
+      justify-content: space-between;
+      align-items: baseline;
+    }
+
+    .streak-left {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+    }
+
+    .streak-flame-icon {
+      width: 32px;
+      height: 32px;
+      border-radius: 50%;
+      background: var(--forest-bg);
+      color: var(--forest-primary);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 15px;
+    }
+
+    .streak-big-num {
+      font-family: var(--font-display);
+      font-size: 24px;
+      font-weight: 700;
+      color: var(--forest-primary);
+      line-height: 1;
+    }
+
+    .streak-big-num span {
+      font-family: var(--font-sans);
+      font-size: 13px;
+      font-weight: 400;
+      color: var(--ink-secondary);
+      margin-left: 4px;
+    }
+
+    .streak-tag {
+      background: var(--amber-bg);
+      color: var(--amber-primary);
+      border: 1px solid var(--amber-border);
+      font-size: 10px;
+      font-family: var(--font-mono);
+      font-weight: 600;
+      padding: 3px 8px;
+      border-radius: 20px;
+    }
+
+    .week-row {
+      display: flex;
+      justify-content: space-between;
+      padding-top: 4px;
+    }
+
+    .week-col {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 5px;
+    }
+
+    .week-day-txt {
+      font-size: 10px;
+      font-family: var(--font-mono);
+      color: var(--ink-tertiary);
+    }
+
+    .week-circle {
+      width: 24px;
+      height: 24px;
+      border-radius: 50%;
+      background: var(--forest-bg);
+      color: var(--forest-primary);
+      border: 1px solid var(--forest-border);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 11px;
+      font-weight: bold;
+    }
+
+    .week-circle.today-pulse {
+      background: var(--forest-primary);
+      color: #FFFFFF;
+      box-shadow: 0 0 0 3px var(--forest-bg);
+      border-color: var(--forest-primary);
+    }
+
+    /* 模块 2：4阶星核掌握度 (2x2 网格，低饱和度高级配色) */
+    .mastery-header-row {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+    }
+
+    .mastery-title-group {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      font-size: 14px;
+      font-weight: 600;
+      color: var(--ink-primary);
+    }
+
+    .mastery-count-total {
+      font-family: var(--font-mono);
+      font-size: 11px;
+      color: var(--ink-secondary);
+    }
+
+    /* 水平连续分段条 */
+    .mastery-bar-track {
+      height: 6px;
+      border-radius: 3px;
+      background: #E5E7EB;
+      display: flex;
+      overflow: hidden;
+    }
+
+    .bar-seg-l3 { background: var(--forest-primary); width: 10%; }
+    .bar-seg-l2 { background: var(--amber-primary); width: 22%; }
+    .bar-seg-l1 { background: #94A3B8; width: 44%; }
+    .bar-seg-l0 { background: #D1D5DB; width: 24%; }
+
+    /* 2x2 网格精修 */
+    .mastery-2x2-grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 10px;
+    }
+
+    .mastery-tile {
+      border-radius: var(--radius-md);
+      padding: 12px 14px;
+      display: flex;
+      flex-direction: column;
+      gap: 4px;
+      cursor: pointer;
+      transition: transform 0.15s;
+    }
+
+    .mastery-tile:active {
+      transform: scale(0.98);
+    }
+
+    .tile-top {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      font-size: 12px;
+      font-weight: 600;
+    }
+
+    .tile-percent {
+      font-size: 10px;
+      font-family: var(--font-mono);
+      font-weight: 500;
+    }
+
+    .tile-bottom {
+      display: flex;
+      align-items: baseline;
+      justify-content: space-between;
+      margin-top: 4px;
+    }
+
+    .tile-number {
+      font-family: var(--font-display);
+      font-size: 24px;
+      font-weight: 700;
+      line-height: 1;
+    }
+
+    .tile-unit {
+      font-size: 10px;
+      color: var(--ink-secondary);
+    }
+
+    /* 4 阶各自的高级调色 (绝对告别彩虹刺眼) */
+    .tile-l3 {
+      background: var(--forest-bg);
+      border: 1px solid var(--forest-border);
+      color: var(--forest-primary);
+    }
+    .tile-l3 .tile-number { color: var(--forest-primary); }
+
+    .tile-l2 {
+      background: var(--amber-bg);
+      border: 1px solid var(--amber-border);
+      color: var(--amber-primary);
+    }
+    .tile-l2 .tile-number { color: var(--amber-primary); }
+
+    .tile-l1 {
+      background: var(--slate-bg);
+      border: 1px solid var(--slate-border);
+      color: var(--slate-primary);
+    }
+    .tile-l1 .tile-number { color: var(--slate-primary); }
+
+    .tile-l0 {
+      background: var(--neutral-bg);
+      border: 1px solid var(--neutral-border);
+      color: var(--neutral-primary);
+    }
+    .tile-l0 .tile-number { color: var(--ink-primary); }
+
+    /* 模块 3：雅思学术表现 (3 列方块) */
+    .metrics-3-col {
+      display: grid;
+      grid-template-columns: 1fr 1fr 1fr;
+      gap: 8px;
+    }
+
+    .metric-col-box {
+      background: #F9FAFB;
+      border: 1px solid var(--border-whisper);
+      border-radius: var(--radius-md);
+      padding: 12px 8px;
+      text-align: center;
+      display: flex;
+      flex-direction: column;
+      gap: 4px;
+    }
+
+    .metric-col-box h4 {
+      font-size: 10px;
+      color: var(--ink-secondary);
+      font-weight: 500;
+    }
+
+    .metric-col-box .val-text {
+      font-family: var(--font-display);
+      font-size: 20px;
+      font-weight: 700;
+      color: var(--ink-primary);
+    }
+
+    .metric-col-box .sub-val {
+      font-size: 9px;
+      color: var(--ink-tertiary);
+      font-family: var(--font-mono);
+    }
+
+    /* 试卷卡片 (Tab 2) */
+    .search-input-box {
+      background: var(--surface-pure);
+      border: 1px solid var(--border-whisper);
+      border-radius: 14px;
+      padding: 10px 14px;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      font-size: 12px;
+      color: var(--ink-secondary);
+    }
+
+    .exam-item-card {
+      background: var(--surface-pure);
+      border-radius: var(--radius-lg);
+      padding: 18px;
+      border: 1px solid var(--border-whisper);
+      display: flex;
+      flex-direction: column;
+      gap: 12px;
+    }
+
+    .exam-badge-row {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+    }
+
+    .exam-tag-left {
+      font-size: 10px;
+      font-family: var(--font-mono);
+      color: var(--ink-tertiary);
+      letter-spacing: 0.05em;
+    }
+
+    .band-pill {
+      background: var(--forest-bg);
+      color: var(--forest-primary);
+      font-size: 10px;
+      font-weight: 700;
+      padding: 2px 8px;
+      border-radius: 10px;
+      font-family: var(--font-mono);
+    }
+
+    .exam-title-h3 {
+      font-family: var(--font-display);
+      font-size: 19px;
+      font-weight: 600;
+      color: var(--ink-primary);
+      line-height: 1.25;
+    }
+
+    .exam-status-row {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      font-size: 11px;
+      color: var(--ink-secondary);
+      font-family: var(--font-mono);
+    }
+
+    .exam-vocab-list {
+      display: flex;
+      gap: 6px;
+      flex-wrap: wrap;
+    }
+
+    .vocab-pill {
+      font-size: 11px;
+      font-family: var(--font-mono);
+      background: var(--bg-cream);
+      padding: 3px 8px;
+      border-radius: 6px;
+      color: #4B5563;
+      border: 1px solid #E5E0D8;
+    }
+
+    .exam-btn-group {
+      display: flex;
+      gap: 10px;
+      margin-top: 4px;
+    }
+
+    .btn-exam-action {
+      flex: 1;
+      padding: 9px;
+      border-radius: var(--radius-sm);
+      font-size: 12px;
+      font-weight: 500;
+      cursor: pointer;
+      border: 1px solid var(--border-whisper);
+      background: #FAF8F5;
+      color: var(--ink-primary);
+      text-align: center;
+    }
+
+    .btn-exam-action.primary {
+      background: var(--forest-primary);
+      color: #FFFFFF;
+      border-color: var(--forest-primary);
+    }
+
+    /* Tab 3: 网易云与音质 5 选 1 (原版排版去油腻) */
+    .audio-5-grid {
+      display: grid;
+      grid-template-columns: repeat(5, 1fr);
+      gap: 6px;
+    }
+
+    .audio-tile {
+      background: #F9FAFB;
+      border: 1px solid var(--border-whisper);
+      border-radius: 12px;
+      padding: 10px 4px;
+      text-align: center;
+      display: flex;
+      flex-direction: column;
+      gap: 3px;
+      cursor: pointer;
+      transition: all 0.2s;
+    }
+
+    .audio-tile.selected {
+      background: var(--forest-bg);
+      border-color: var(--forest-primary);
+      box-shadow: 0 0 0 1px var(--forest-primary);
+    }
+
+    .audio-tile h5 {
+      font-size: 11px;
+      font-weight: 600;
+      color: var(--ink-primary);
+    }
+
+    .audio-tile.selected h5 {
+      color: var(--forest-primary);
+    }
+
+    .audio-tile span {
+      font-size: 9px;
+      color: var(--ink-tertiary);
+      font-family: var(--font-mono);
+    }
+
+    .hi-res-tag {
+      background: #B47836;
+      color: #fff;
+      font-size: 8px;
+      font-weight: 700;
+      padding: 1px 3px;
+      border-radius: 4px;
+      margin: 0 auto;
+    }
+
+    /* 隐藏所有多余的灰色向上箭头 */
+  </style>
+</head>
+<body>
+
+  <div class="banner-note">
+    <h1>Lyricalens · 原版排版高级精修</h1>
+    <p>完全保留你认同的 2x2 掌握度方块、打卡与音质排版，全面干掉刺眼彩虹色与无意义箭头，注入静奢质感。</p>
+  </div>
+
+  <div class="app-screen">
+    <!-- 顶部常驻 Header (全屏沉浸) -->
+    <div class="top-header">
+      <div class="profile-info">
+        <div class="avatar-wrapper">
+          <div class="avatar-circle">L</div>
+        </div>
+        <div class="user-text">
+          <h2>Lyricalens Scholar <span class="pro-pill">PRO</span></h2>
+          <p>DAY 14 STREAK · 4-TIER MASTERY ACTIVE</p>
+        </div>
+      </div>
+      <button class="btn-close" title="收起">✕</button>
+    </div>
+
+    <!-- 3 Tab 切换栏 -->
+    <div class="tab-nav">
+      <div class="tab-pill active" onclick="switchTab('compass')">🧭 成长罗盘</div>
+      <div class="tab-pill" onclick="switchTab('archives')">📄 试卷档案</div>
+      <div class="tab-pill" onclick="switchTab('config')">⚙️ 歌单与配置</div>
+    </div>
+
+    <!-- Tab 1: 成长罗盘 (默认激活) -->
+    <div id="tab-compass" class="tab-content">
+      <!-- 打卡卡片 -->
+      <div class="card-block">
+        <div class="streak-top-row">
+          <div class="streak-left">
+            <div class="streak-flame-icon">✦</div>
+            <div class="streak-big-num">14 <span>Days Streak</span></div>
+          </div>
+          <div class="streak-tag">98% 习惯达成率</div>
+        </div>
+        <div class="week-row">
+          <div class="week-col"><span class="week-day-txt">M</span><div class="week-circle">✓</div></div>
+          <div class="week-col"><span class="week-day-txt">T</span><div class="week-circle">✓</div></div>
+          <div class="week-col"><span class="week-day-txt">W</span><div class="week-circle">✓</div></div>
+          <div class="week-col"><span class="week-day-txt">T</span><div class="week-circle">✓</div></div>
+          <div class="week-col"><span class="week-day-txt">F</span><div class="week-circle">✓</div></div>
+          <div class="week-col"><span class="week-day-txt">S</span><div class="week-circle">✓</div></div>
+          <div class="week-col"><span class="week-day-txt">S</span><div class="week-circle today-pulse">✓</div></div>
+        </div>
+      </div>
+
+      <!-- 4 阶词汇掌握度 (2x2 原版排版 · 低饱和度静奢色) -->
+      <div class="card-block">
+        <div class="mastery-header-row">
+          <div class="mastery-title-group">
+            <span>📚 词汇掌握度</span>
+          </div>
+          <div class="mastery-count-total">共 9 词 ›</div>
+        </div>
+
+        <!-- 水平分段条 -->
+        <div class="mastery-bar-track">
+          <div class="bar-seg-l3"></div>
+          <div class="bar-seg-l2"></div>
+          <div class="bar-seg-l1"></div>
+          <div class="bar-seg-l0"></div>
+        </div>
+
+        <!-- 2x2 方块 (去彩虹化) -->
+        <div class="mastery-2x2-grid">
+          <!-- ◉ 已掌握 -->
+          <div class="mastery-tile tile-l3">
+            <div class="tile-top">
+              <span>◉ 已掌握</span>
+              <span class="tile-percent">0%</span>
+            </div>
+            <div class="tile-bottom">
+              <div class="tile-number">0</div>
+              <div class="tile-unit">词汇 ›</div>
+            </div>
+          </div>
+
+          <!-- ⊙ 学习中 -->
+          <div class="mastery-tile tile-l2">
+            <div class="tile-top">
+              <span>⊙ 学习中</span>
+              <span class="tile-percent">22%</span>
+            </div>
+            <div class="tile-bottom">
+              <div class="tile-number">2</div>
+              <div class="tile-unit">词汇 ›</div>
+            </div>
+          </div>
+
+          <!-- ⊛ 已收藏 (对齐规范) -->
+          <div class="mastery-tile tile-l1">
+            <div class="tile-top">
+              <span>⊛ 已收藏</span>
+              <span class="tile-percent">44%</span>
+            </div>
+            <div class="tile-bottom">
+              <div class="tile-number">4</div>
+              <div class="tile-unit">词汇 ›</div>
+            </div>
+          </div>
+
+          <!-- ○ 未收录 -->
+          <div class="mastery-tile tile-l0">
+            <div class="tile-top">
+              <span>○ 未收录</span>
+              <span class="tile-percent">33%</span>
+            </div>
+            <div class="tile-bottom">
+              <div class="tile-number">3</div>
+              <div class="tile-unit">词汇 ›</div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- 雅思学术表现 (3 列方块) -->
+      <div class="card-block">
+        <div class="mastery-header-row">
+          <div class="mastery-title-group">
+            <span>🎯 雅思学术表现</span>
+          </div>
+          <div style="font-size:11px; color:var(--forest-primary); font-weight:600; cursor:pointer;">前往雅思空间 ›</div>
+        </div>
+
+        <div class="metrics-3-col">
+          <div class="metric-col-box">
+            <h4>平均分</h4>
+            <div class="val-text">7.0</div>
+            <div class="sub-val">/ 9.0 官方</div>
+          </div>
+          <div class="metric-col-box">
+            <h4>模考篇数</h4>
+            <div class="val-text">1</div>
+            <div class="sub-val">篇已完成</div>
+          </div>
+          <div class="metric-col-box">
+            <h4>学习时长</h4>
+            <div class="val-text">42</div>
+            <div class="sub-val">分钟专注</div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Tab 2: 试卷档案 (默认隐藏) -->
+    <div id="tab-archives" class="tab-content" style="display:none;">
+      <div class="search-input-box">
+        <span>🔍</span>
+        <span style="flex:1;">搜索文章篇目、核心词汇...</span>
+        <span style="font-family:var(--font-mono); font-size:10px;">共 1 篇</span>
+      </div>
+
+      <div class="exam-item-card">
+        <div class="exam-badge-row">
+          <span class="exam-tag-left">CAMBRIDGE 18 · PASSAGE 2 · ACADEMIC</span>
+          <span class="band-pill">BAND 7.0</span>
+        </div>
+        <div class="exam-title-h3">The Secret Life of Urban Flora</div>
+        <div class="exam-status-row">
+          <span>📅 8月25日 7:08</span>
+          <span>⏱ 20m 00s</span>
+          <span style="color:var(--forest-primary); font-weight:bold;">全对满分 ✨</span>
+        </div>
+        <div class="exam-vocab-list">
+          <span class="vocab-pill">ephemeral</span>
+          <span class="vocab-pill">resilience</span>
+          <span class="vocab-pill">ubiquitous</span>
+          <span class="vocab-pill">meticulous</span>
+        </div>
+        <div class="exam-btn-group">
+          <button class="btn-exam-action">📄 错题与解析回顾</button>
+          <button class="btn-exam-action primary">🔄 重新练习</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Tab 3: 歌单与配置 (默认隐藏) -->
+    <div id="tab-config" class="tab-content" style="display:none;">
+      <!-- 网易云直连 -->
+      <div class="card-block">
+        <div style="display:flex; justify-content:space-between; align-items:center;">
+          <span style="font-weight:600; font-size:13px;">📶 网易云直连</span>
+          <span style="font-size:10px; font-family:var(--font-mono); color:var(--forest-primary); background:var(--forest-bg); padding:2px 8px; border-radius:10px;">Connected</span>
+        </div>
+        <div style="background:#F9FAFB; border:1px solid var(--border-whisper); border-radius:12px; padding:10px; display:flex; justify-content:space-between; align-items:center;">
+          <div style="display:flex; gap:10px; align-items:center;">
+            <div style="width:30px; height:30px; border-radius:50%; background:#2C4A3E; color:#fff; display:flex; align-items:center; justify-content:center; font-weight:bold; font-size:12px;">G</div>
+            <span style="font-weight:600; font-size:13px;">Gekit</span>
+          </div>
+          <span style="font-size:11px; color:var(--ink-secondary); cursor:pointer;">[→ 退出</span>
+        </div>
+
+        <!-- 音质 5 选 1 (原版排版去油腻) -->
+        <div style="margin-top:6px;">
+          <div style="font-size:11px; color:var(--ink-secondary); margin-bottom:8px; display:flex; justify-content:space-between;">
+            <span>流媒体音质规格</span>
+            <span style="font-family:var(--font-mono); color:var(--forest-primary);">Hi-Res 24bit/96kHz</span>
+          </div>
+          <div class="audio-5-grid">
+            <div class="audio-tile">
+              <h5>标准</h5>
+              <span>128k</span>
+            </div>
+            <div class="audio-tile">
+              <h5>较高</h5>
+              <span>192k</span>
+            </div>
+            <div class="audio-tile">
+              <h5>极高</h5>
+              <span>320k</span>
+            </div>
+            <div class="audio-tile">
+              <h5>SQ无损</h5>
+              <span>FLAC</span>
+            </div>
+            <div class="audio-tile selected">
+              <span class="hi-res-tag">HI-RES</span>
+              <h5>Hi-Res</h5>
+              <span>24bit</span>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- AI 引擎 -->
+      <div class="card-block">
+        <div style="display:flex; justify-content:space-between; align-items:center;">
+          <span style="font-weight:600; font-size:13px;">⚙️ AI 引擎与模型</span>
+          <span style="font-size:10px; font-family:var(--font-mono); color:var(--forest-primary); background:var(--forest-bg); padding:2px 8px; border-radius:10px;">Gemini 3.7 Active</span>
+        </div>
+        <p style="font-size:11px; color:var(--ink-secondary);">基于 Google Gemini 3.7 全球前沿大模型驱动雅思学术组卷与场景解析。</p>
+      </div>
+    </div>
+
+  </div>
+
+  <script>
+    function switchTab(tabId) {
+      document.querySelectorAll('.tab-pill').forEach(el => el.classList.remove('active'));
+      event.target.classList.add('active');
+      
+      document.getElementById('tab-compass').style.display = 'none';
+      document.getElementById('tab-archives').style.display = 'none';
+      document.getElementById('tab-config').style.display = 'none';
+      
+      if (tabId === 'compass') document.getElementById('tab-compass').style.display = 'flex';
+      if (tabId === 'archives') document.getElementById('tab-archives').style.display = 'flex';
+      if (tabId === 'config') document.getElementById('tab-config').style.display = 'flex';
+    }
+  </script>
+
+</body>
+</html>
