@@ -103,28 +103,28 @@
 /* Ambient breathing animations - Pure organic spatial motion & rich luminous diffusion */
 @keyframes ambientBreathe1 {
   0%, 100% {
-    transform: translate(0, 0) scale(1);
+    transform: translate3d(0, 0, 0) scale(1);
   }
   50% {
-    transform: translate(4%, -4%) scale(1.12);
+    transform: translate3d(4%, -4%, 0) scale(1.12);
   }
 }
 
 @keyframes ambientBreathe2 {
   0%, 100% {
-    transform: translate(0, 0) scale(1.06);
+    transform: translate3d(0, 0, 0) scale(1.06);
   }
   50% {
-    transform: translate(-4%, 4%) scale(0.96);
+    transform: translate3d(-4%, 4%, 0) scale(0.96);
   }
 }
 
 @keyframes ambientBreathe3 {
   0%, 100% {
-    transform: translate(0, 0) scale(1);
+    transform: translate3d(0, 0, 0) scale(1);
   }
   50% {
-    transform: translate(3%, 5%) scale(1.10);
+    transform: translate3d(3%, 5%, 0) scale(1.10);
   }
 }
 
@@ -231,8 +231,5 @@
   transform: translate3d(0, 0, 0);
   -webkit-backface-visibility: hidden;
   backface-visibility: hidden;
-  will-change: transform;
-  -webkit-transform-style: preserve-3d;
-  transform-style: preserve-3d;
 }
 

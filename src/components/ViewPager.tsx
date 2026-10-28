@@ -20,6 +20,10 @@ import { BottomNavDots } from './BottomNavDots';
 import { ToastNotification } from './ToastNotification';
 import { AnimatePresence } from 'motion/react';
 
+const MemoizedARCameraPanel = React.memo(ARCameraPanel);
+const MemoizedMusicPlayerPanel = React.memo(MusicPlayerPanel);
+const MemoizedIELTSPanel = React.memo(IELTSPanel);
+
 export const ViewPager: React.FC = () => {
   const activeSpace = useAppStore(s => s.activeSpace);
   const selectedWord = useAppStore(s => s.selectedWord);
@@ -66,25 +70,33 @@ export const ViewPager: React.FC = () => {
   const [isMobileDevice, setIsMobileDevice] = useState(false);
 
   useEffect(() => {
+    let rafId: number | null = null;
     const handleResize = () => {
-      const w = window.innerWidth;
-      const h = window.innerHeight;
-      const isMobile = Capacitor.isNativePlatform() || w <= 480;
-      setIsMobileDevice(isMobile);
-      if (isMobile) {
-        setScale(1);
-      } else {
-        const targetW = 412;
-        const targetH = 740;
-        const padding = 28;
-        const scaleX = (w - padding) / targetW;
-        const scaleY = (h - padding) / targetH;
-        setScale(Math.min(1.0, scaleX, scaleY));
-      }
+      if (rafId !== null) return;
+      rafId = requestAnimationFrame(() => {
+        rafId = null;
+        const w = window.innerWidth;
+        const h = window.innerHeight;
+        const isMobile = Capacitor.isNativePlatform() || w <= 480;
+        setIsMobileDevice(isMobile);
+        if (isMobile) {
+          setScale(1);
+        } else {
+          const targetW = 412;
+          const targetH = 740;
+          const padding = 28;
+          const scaleX = (w - padding) / targetW;
+          const scaleY = (h - padding) / targetH;
+          setScale(Math.min(1.0, scaleX, scaleY));
+        }
+      });
     };
     handleResize();
-    window.addEventListener('resize', handleResize);
-    return () => window.removeEventListener('resize', handleResize);
+    window.addEventListener('resize', handleResize, { passive: true });
+    return () => {
+      if (rafId !== null) cancelAnimationFrame(rafId);
+      window.removeEventListener('resize', handleResize);
+    };
   }, []);
 
   return (
@@ -123,7 +135,7 @@ export const ViewPager: React.FC = () => {
           {/* 300% Horizontal Tri-Space ViewPager Container with 60/120fps GPU Composition */}
           <div
             id="viewpager-viewport"
-            className="w-[300%] h-full flex z-10 hardware-accelerated"
+            className="w-[300%] h-full flex z-10"
             style={{
               transform: `translate3d(-${(activeSpace * 100) / 3}%, 0, 0)`,
               WebkitTransform: `translate3d(-${(activeSpace * 100) / 3}%, 0, 0)`,
@@ -132,56 +144,39 @@ export const ViewPager: React.FC = () => {
               willChange: 'transform',
               WebkitBackfaceVisibility: 'hidden',
               backfaceVisibility: 'hidden',
-              WebkitPerspective: 1000,
-              perspective: 1000,
             }}
           >
             {/* Panel 0 (Left - AR Space) */}
             <div
               id="panel-ar-space"
-              className="w-1/3 h-full flex-shrink-0 relative overflow-hidden hardware-accelerated"
+              className="w-1/3 h-full flex-shrink-0 relative overflow-hidden"
               style={{
-                transform: 'translate3d(0, 0, 0)',
-                WebkitTransform: 'translate3d(0, 0, 0)',
-                WebkitBackfaceVisibility: 'hidden',
-                backfaceVisibility: 'hidden',
-                willChange: 'transform',
                 contain: 'paint layout',
               }}
             >
-              <ARCameraPanel onOpenNotebook={() => openNotebook()} />
+              <MemoizedARCameraPanel onOpenNotebook={openNotebook} />
             </div>
 
             {/* Panel 1 (Center - Music Hub) */}
             <div
               id="panel-music-space"
-              className="w-1/3 h-full flex-shrink-0 relative overflow-hidden hardware-accelerated"
+              className="w-1/3 h-full flex-shrink-0 relative overflow-hidden"
               style={{
-                transform: 'translate3d(0, 0, 0)',
-                WebkitTransform: 'translate3d(0, 0, 0)',
-                WebkitBackfaceVisibility: 'hidden',
-                backfaceVisibility: 'hidden',
-                willChange: 'transform',
                 contain: 'paint layout',
               }}
             >
-              <MusicPlayerPanel onOpenNotebook={() => openNotebook()} />
+              <MemoizedMusicPlayerPanel onOpenNotebook={openNotebook} />
             </div>
 
             {/* Panel 2 (Right - IELTS Reading Space) */}
             <div
               id="panel-ielts-space"
-              className="w-1/3 h-full flex-shrink-0 relative overflow-hidden hardware-accelerated"
+              className="w-1/3 h-full flex-shrink-0 relative overflow-hidden"
               style={{
-                transform: 'translate3d(0, 0, 0)',
-                WebkitTransform: 'translate3d(0, 0, 0)',
-                WebkitBackfaceVisibility: 'hidden',
-                backfaceVisibility: 'hidden',
-                willChange: 'transform',
                 contain: 'paint layout',
               }}
             >
-              <IELTSPanel onOpenNotebook={() => openNotebook()} />
+              <MemoizedIELTSPanel onOpenNotebook={openNotebook} />
             </div>
           </div>
 
