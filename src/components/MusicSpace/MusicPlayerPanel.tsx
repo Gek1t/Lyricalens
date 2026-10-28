@@ -389,25 +389,29 @@ export const MusicPlayerPanel: React.FC<MusicPlayerPanelProps> = ({ onOpenNotebo
   }, [activeLyricLine, currentSong]);
 
   // Extract dynamic album palette and Morandi/contrast tones on song switch
+  // Deferred slightly so the initial card slide/spring animation starts at a locked 60/120fps without main-thread canvas readback stalls
   useEffect(() => {
     if (!currentSong?.albumArtUrl) return;
     let isCancelled = false;
 
-    extractDominantPalette(currentSong.albumArtUrl).then((theme) => {
-      if (!isCancelled && theme?.palette) {
-        setAmbientColors(theme.palette);
-        applyAmbientGlowColors(theme.palette);
-        setColorTheme({
-          mattingBg: theme.mattingBg,
-          mattingBgDark: theme.mattingBgDark,
-          accentBtn: theme.accentBtn,
-          accentBtnDark: theme.accentBtnDark
-        });
-      }
-    });
+    const timer = window.setTimeout(() => {
+      extractDominantPalette(currentSong.albumArtUrl).then((theme) => {
+        if (!isCancelled && theme?.palette) {
+          setAmbientColors(theme.palette);
+          applyAmbientGlowColors(theme.palette);
+          setColorTheme({
+            mattingBg: theme.mattingBg,
+            mattingBgDark: theme.mattingBgDark,
+            accentBtn: theme.accentBtn,
+            accentBtnDark: theme.accentBtnDark
+          });
+        }
+      });
+    }, 180);
 
     return () => {
       isCancelled = true;
+      window.clearTimeout(timer);
     };
   }, [currentSong, setAmbientColors]);
 
@@ -537,6 +541,86 @@ export const MusicPlayerPanel: React.FC<MusicPlayerPanelProps> = ({ onOpenNotebo
     setFallbackStreamUrl('');
   }, [currentSong?.id]);
 
+  // Pre-decode adjacent song album covers in background so vertical swipe transitions have 0ms image decode latency
+  useEffect(() => {
+    if (!songs || songs.length <= 1) return;
+    const nextIdx = (currentSongIndex + 1) % songs.length;
+    const prevIdx = (currentSongIndex - 1 + songs.length) % songs.length;
+    [songs[nextIdx]?.albumArtUrl, songs[prevIdx]?.albumArtUrl].forEach((url) => {
+      if (url) {
+        const img = new Image();
+        img.decoding = 'async';
+        img.src = url;
+        if (typeof img.decode === 'function') {
+          img.decode().catch(() => {});
+        }
+      }
+    });
+  }, [currentSongIndex, songs]);
+
+  // Trigger smooth compositor entry transition when song changes via buttons/auto-advance (when not already driven by gesture engine)
+  const lastAnimatedSongIdRef = useRef<string>(currentSong.id);
+  useEffect(() => {
+    if (lastAnimatedSongIdRef.current === currentSong.id) return;
+    lastAnimatedSongIdRef.current = currentSong.id;
+
+    const wrapper = document.getElementById('gallery-card-drag-stage');
+    const titleStage = document.getElementById('gallery-title-stage');
+    const quoteStage = document.getElementById('gallery-quote-stage');
+    if (!wrapper) return;
+
+    // Only trigger if useGestureEngine didn't already set up the vertical entry transform on this frame
+    if (songTransitionDirection === 'left' || songTransitionDirection === 'right') {
+      const entryX = songTransitionDirection === 'right' ? 48 : -48;
+      const textEntryX = songTransitionDirection === 'right' ? 18 : -18;
+
+      wrapper.style.transition = 'none';
+      (wrapper.style as any).webkitTransition = 'none';
+      wrapper.style.transform = `translate3d(${entryX}px, 0, 0) scale(0.94)`;
+      (wrapper.style as any).webkitTransform = `translate3d(${entryX}px, 0, 0) scale(0.94)`;
+      wrapper.style.opacity = '0.25';
+
+      if (titleStage) {
+        titleStage.style.transition = 'none';
+        titleStage.style.transform = `translate3d(${textEntryX}px, 0, 0)`;
+        titleStage.style.opacity = '0';
+      }
+      if (quoteStage) {
+        quoteStage.style.transition = 'none';
+        quoteStage.style.transform = `translate3d(${textEntryX}px, 0, 0)`;
+        quoteStage.style.opacity = '0';
+      }
+
+      void wrapper.offsetHeight;
+      const enterSpring = 'transform 360ms cubic-bezier(0.16, 1, 0.3, 1), opacity 260ms cubic-bezier(0.16, 1, 0.3, 1)';
+      wrapper.style.transition = enterSpring;
+      (wrapper.style as any).webkitTransition = enterSpring;
+      wrapper.style.transform = 'translate3d(0, 0, 0) scale(1)';
+      (wrapper.style as any).webkitTransform = 'translate3d(0, 0, 0) scale(1)';
+      wrapper.style.opacity = '1';
+
+      if (titleStage) {
+        titleStage.style.transition = enterSpring;
+        titleStage.style.transform = 'translate3d(0, 0, 0)';
+        titleStage.style.opacity = '1';
+      }
+      if (quoteStage) {
+        quoteStage.style.transition = enterSpring;
+        quoteStage.style.transform = 'translate3d(0, 0, 0)';
+        quoteStage.style.opacity = '1';
+      }
+    }
+  }, [currentSong.id, songTransitionDirection]);
+
+  // Defer applying new audio src by 120ms on song switch so media decoder teardown never stalls frame 0 of the swipe animation
+  const [deferredAudioSrc, setDeferredAudioSrc] = useState<string>(resolvedAudioSrc);
+  useEffect(() => {
+    const timer = window.setTimeout(() => {
+      setDeferredAudioSrc(resolvedAudioSrc);
+    }, 120);
+    return () => window.clearTimeout(timer);
+  }, [resolvedAudioSrc]);
+
   // Track audio quality transitions to seamlessly preserve position and continue playing
   useEffect(() => {
     if (prevAudioQualityRef.current !== audioQuality) {
@@ -575,7 +659,7 @@ export const MusicPlayerPanel: React.FC<MusicPlayerPanelProps> = ({ onOpenNotebo
       audio.pause();
       ambientSynth.stop();
     }
-  }, [isPlaying, currentSongIndex, resolvedAudioSrc]);
+  }, [isPlaying, deferredAudioSrc]);
 
   // Helper to safely restore seek position on media stream reload/switch
   const tryRestorePlaybackPosition = (el: HTMLAudioElement) => {
@@ -600,18 +684,28 @@ export const MusicPlayerPanel: React.FC<MusicPlayerPanelProps> = ({ onOpenNotebo
   // RequestAnimationFrame Lyric Engine Loop
   const currentSongOffset = lyricsOffsets[currentSong.id] || 0;
 
+  const lastDispatchedTimeRef = useRef<number>(0);
+  const activeLyricIndexRef = useRef<number>(activeLyricIndex);
+  activeLyricIndexRef.current = activeLyricIndex;
+
   useEffect(() => {
     const updateLyricFrame = () => {
       const audio = audioRef.current;
       if (audio && isPlaying) {
         const curTimeSec = audio.currentTime;
         currentTimeRef.current = curTimeSec;
-        setCurrentTime(curTimeSec);
+
+        // Throttle global store time updates (~4-5Hz) to avoid 60Hz full React tree re-renders during animations
+        if (Math.abs(curTimeSec - lastDispatchedTimeRef.current) >= 0.22 || curTimeSec < 0.1) {
+          lastDispatchedTimeRef.current = curTimeSec;
+          setCurrentTime(curTimeSec);
+        }
 
         const curTimeMs = Math.max(0, (curTimeSec + currentSongOffset) * 1000);
         const newActiveIdx = findActiveLyricIndex(parsedLyrics, curTimeMs);
 
-        if (newActiveIdx !== activeLyricIndex) {
+        if (newActiveIdx !== activeLyricIndexRef.current) {
+          activeLyricIndexRef.current = newActiveIdx;
           setActiveLyricIndex(newActiveIdx);
         }
       }
@@ -625,7 +719,7 @@ export const MusicPlayerPanel: React.FC<MusicPlayerPanelProps> = ({ onOpenNotebo
         cancelAnimationFrame(animationFrameRef.current);
       }
     };
-  }, [isPlaying, parsedLyrics, activeLyricIndex, currentSongOffset, setCurrentTime, setActiveLyricIndex]);
+  }, [isPlaying, parsedLyrics, currentSongOffset, setCurrentTime, setActiveLyricIndex]);
 
   // Re-calculate active index immediately if offset or parsedLyrics change even while paused
   useEffect(() => {
@@ -724,17 +818,14 @@ export const MusicPlayerPanel: React.FC<MusicPlayerPanelProps> = ({ onOpenNotebo
   };
 
   return (
-    <div className="relative w-full h-full flex flex-col justify-between overflow-hidden bg-[#FAF8F5] dark:bg-[#0B0F17] select-none pb-[max(2.25rem,calc(env(safe-area-inset-bottom,0px)+1.5rem))]">
-      {/* Dynamic Ambient Breathing Glow Orbs */}
-      <AmbientBackground />
-
+    <div className="relative w-full h-full flex flex-col justify-between overflow-hidden bg-transparent select-none pb-[max(2.25rem,calc(env(safe-area-inset-bottom,0px)+1.5rem))]">
       {/* Hidden Audio Element */}
       <audio
         ref={(el) => {
           audioRef.current = el;
           if (el) el.volume = 0.2;
         }}
-        src={resolvedAudioSrc}
+        src={deferredAudioSrc}
         loop={playMode === 'single'}
         onLoadedMetadata={handleAudioLoadedMetadata}
         onLoadedData={(e) => tryRestorePlaybackPosition(e.currentTarget)}
@@ -773,285 +864,181 @@ export const MusicPlayerPanel: React.FC<MusicPlayerPanelProps> = ({ onOpenNotebo
       />
 
       {/* Top Header: keyboard_arrow_down | NOW PLAYING | more_horiz */}
-      <TopHeader
-        centerLabel="NOW PLAYING"
-        onOpenNotebook={onOpenNotebook}
-      />
+      {/* Smoothly fades out & disables pointer events when FullscreenLyricsView is open to prevent header overlap */}
+      <div
+        className={`relative z-40 w-full shrink-0 transition-all duration-300 ease-out ${
+          isFullscreenLyricsOpen ? 'opacity-0 -translate-y-2 pointer-events-none' : 'opacity-100'
+        }`}
+      >
+        <TopHeader
+          centerLabel="NOW PLAYING"
+          onOpenNotebook={onOpenNotebook}
+        />
+      </div>
 
       {/* Center Gallery Art Frame Area (Fluid Golden Ratio & Adaptive Vertical Rhythm across all mobile heights) */}
-      <div className="relative flex-1 min-h-0 flex flex-col items-center justify-center px-4 z-10 my-auto py-1 gap-y-2.5 sm:gap-y-4 overflow-hidden">
-        {/* 1. Header Title Area (Directly above the frame) with animated crossfade */}
-        <div className="min-h-[44px] sm:min-h-[52px] shrink-0 flex items-center justify-center">
-          <AnimatePresence mode="wait" custom={songTransitionDirection}>
-            <motion.div
-              key={currentSong.id + '-title'}
-              custom={songTransitionDirection}
-              variants={{
-                initial: (dir: 'up' | 'down' | 'left' | 'right') => {
-                  if (dir === 'up') return { opacity: 0, y: 16, x: 0 };
-                  if (dir === 'down') return { opacity: 0, y: -16, x: 0 };
-                  return { opacity: 0, y: 0, x: dir === 'right' ? 12 : -12 };
-                },
-                animate: { opacity: 1, y: 0, x: 0 },
-                exit: (dir: 'up' | 'down' | 'left' | 'right') => {
-                  if (dir === 'up') return { opacity: 0, y: -16, x: 0 };
-                  if (dir === 'down') return { opacity: 0, y: 16, x: 0 };
-                  return { opacity: 0, y: 0, x: dir === 'right' ? -12 : 12 };
-                }
-              }}
-              initial="initial"
-              animate="animate"
-              exit="exit"
-              transition={{ duration: 0.32, ease: [0.16, 1, 0.3, 1] }}
-              className="text-center select-none"
+      <div
+        className={`relative flex-1 min-h-0 flex flex-col items-center justify-center px-4 z-10 my-auto py-1 gap-y-2.5 sm:gap-y-4 overflow-hidden transition-all duration-300 ease-out ${
+          isFullscreenLyricsOpen ? 'opacity-0 scale-[0.95] pointer-events-none' : 'opacity-100 scale-100'
+        }`}
+      >
+        {/* 1. Header Title Area (Directly above the frame) with 120fps Compositor Transform */}
+        <div className="min-h-[44px] sm:min-h-[52px] shrink-0 flex items-center justify-center w-full px-3">
+          <div
+            id="gallery-title-stage"
+            style={{
+              transform: 'translate3d(0, 0, 0)',
+              WebkitTransform: 'translate3d(0, 0, 0)',
+              willChange: 'transform, opacity',
+              backfaceVisibility: 'hidden',
+              WebkitBackfaceVisibility: 'hidden'
+            }}
+            className="text-center select-none max-w-full overflow-hidden hardware-accelerated"
+          >
+            <p
+              className="font-sans text-[11px] uppercase tracking-[0.3em] text-[#78716C] dark:text-stone-400 font-normal truncate"
             >
-              <motion.p
-                layoutId={`track-artist-${currentSong.id}`}
-                transition={{ type: 'spring', stiffness: 350, damping: 30 }}
-                className="font-sans text-[11px] uppercase tracking-[0.3em] text-[#78716C] dark:text-stone-400 font-normal"
-              >
-                {currentSong.artist ? currentSong.artist.toUpperCase() : 'ETHEREAL SOUNDS'}
-              </motion.p>
-              <motion.h1
-                layoutId={`track-title-${currentSong.id}`}
-                transition={{ type: 'spring', stiffness: 350, damping: 30 }}
-                className="font-serif-luxury text-[21px] font-normal text-[#292524] dark:text-stone-100 tracking-[0.15em] uppercase mt-1"
-              >
-                {currentSong.title}
-              </motion.h1>
-            </motion.div>
-          </AnimatePresence>
+              {currentSong.artist ? currentSong.artist.toUpperCase() : 'ETHEREAL SOUNDS'}
+            </p>
+            <h1
+              className="font-serif-luxury text-[21px] font-normal text-[#292524] dark:text-stone-100 tracking-[0.15em] uppercase mt-1 truncate"
+            >
+              {currentSong.title}
+            </h1>
+          </div>
         </div>
 
-        {/* 2. Realistic Photo Mount Frame with Card Slide & Depth Push */}
-        <div className="relative flex items-center justify-center min-h-0 shrink w-full">
+        {/* 2. Realistic Photo Mount Frame with Real-Time Finger Drag & Pure GPU Compositor Slide */}
+        <div
+          id="gallery-card-drag-stage"
+          style={{
+            transform: 'translate3d(0, 0, 0) scale(1)',
+            WebkitTransform: 'translate3d(0, 0, 0) scale(1)',
+            willChange: 'transform, opacity',
+            backfaceVisibility: 'hidden',
+            WebkitBackfaceVisibility: 'hidden'
+          }}
+          className="relative flex items-center justify-center min-h-0 shrink w-full hardware-accelerated"
+        >
           {/* Gentle, ethereal ambient backlight (Ultra-clean) */}
           <div
-            className={`absolute -inset-4 rounded-full blur-[70px] transition-all duration-1000 pointer-events-none ${
-              isPlaying ? 'opacity-25 dark:opacity-20 scale-105' : 'opacity-15 dark:opacity-10 scale-95'
+            className={`absolute -inset-4 rounded-full blur-[64px] transition-opacity duration-700 pointer-events-none ${
+              isPlaying ? 'opacity-25 dark:opacity-20' : 'opacity-15 dark:opacity-10'
             }`}
             style={{
-              backgroundColor: currentSong?.palette?.[0] || '#E8E4DC'
+              backgroundColor: currentSong?.palette?.[0] || '#E8E4DC',
+              transform: 'translate3d(0, 0, 0)'
             }}
           />
 
-          <AnimatePresence mode="popLayout" custom={songTransitionDirection}>
-            <motion.div
-              key={currentSong.id}
-              custom={songTransitionDirection}
-              variants={{
-                initial: (dir: 'up' | 'down' | 'left' | 'right') => {
-                  if (dir === 'up') {
-                    return {
-                      y: 75,
-                      x: 0,
-                      opacity: 0,
-                      scale: 0.92,
-                      rotateX: -10,
-                      rotate: 0,
-                      filter: 'blur(3px)'
-                    };
-                  }
-                  if (dir === 'down') {
-                    return {
-                      y: -75,
-                      x: 0,
-                      opacity: 0,
-                      scale: 0.92,
-                      rotateX: 10,
-                      rotate: 0,
-                      filter: 'blur(3px)'
-                    };
-                  }
-                  return {
-                    x: dir === 'right' ? 55 : -55,
-                    y: 0,
-                    opacity: 0,
-                    scale: 0.94,
-                    rotateX: 0,
-                    rotate: dir === 'right' ? 1.5 : -1.5,
-                    filter: 'blur(3px)'
-                  };
-                },
-                animate: {
-                  x: 0,
-                  y: 0,
-                  opacity: 1,
-                  scale: 1,
-                  rotateX: 0,
-                  rotate: 0,
-                  filter: 'blur(0px)',
-                  transition: {
-                    x: { type: 'spring', stiffness: 300, damping: 26, mass: 0.8 },
-                    y: { type: 'spring', stiffness: 280, damping: 24, mass: 0.85 },
-                    opacity: { duration: 0.35, ease: [0.16, 1, 0.3, 1] },
-                    scale: { duration: 0.38, ease: [0.16, 1, 0.3, 1] },
-                    rotateX: { duration: 0.36, ease: [0.16, 1, 0.3, 1] },
-                    rotate: { duration: 0.35, ease: [0.16, 1, 0.3, 1] },
-                    filter: { duration: 0.25 }
-                  }
-                },
-                exit: (dir: 'up' | 'down' | 'left' | 'right') => {
-                  if (dir === 'up') {
-                    return {
-                      y: -75,
-                      x: 0,
-                      opacity: 0,
-                      scale: 0.92,
-                      rotateX: 10,
-                      rotate: 0,
-                      filter: 'blur(3px)',
-                      transition: {
-                        y: { duration: 0.28, ease: [0.32, 0, 0.67, 0] },
-                        opacity: { duration: 0.2 },
-                        scale: { duration: 0.25 },
-                        rotateX: { duration: 0.25 },
-                        filter: { duration: 0.18 }
-                      }
-                    };
-                  }
-                  if (dir === 'down') {
-                    return {
-                      y: 75,
-                      x: 0,
-                      opacity: 0,
-                      scale: 0.92,
-                      rotateX: -10,
-                      rotate: 0,
-                      filter: 'blur(3px)',
-                      transition: {
-                        y: { duration: 0.28, ease: [0.32, 0, 0.67, 0] },
-                        opacity: { duration: 0.2 },
-                        scale: { duration: 0.25 },
-                        rotateX: { duration: 0.25 },
-                        filter: { duration: 0.18 }
-                      }
-                    };
-                  }
-                  return {
-                    x: dir === 'right' ? -55 : 55,
-                    y: 0,
-                    opacity: 0,
-                    scale: 0.94,
-                    rotateX: 0,
-                    rotate: dir === 'right' ? -1.5 : 1.5,
-                    filter: 'blur(3px)',
-                    transition: {
-                      x: { duration: 0.25, ease: [0.32, 0, 0.67, 0] },
-                      opacity: { duration: 0.2 },
-                      scale: { duration: 0.25 },
-                      rotate: { duration: 0.25 },
-                      filter: { duration: 0.18 }
-                    }
-                  };
-                }
+          <div
+            id="gallery-polaroid-frame"
+            onPointerDown={handleCardPointerDown}
+            onClick={handleCardClick}
+            style={{
+              willChange: 'transform, opacity',
+              backfaceVisibility: 'hidden',
+              WebkitBackfaceVisibility: 'hidden'
+            }}
+            className="relative w-[min(264px,68vw,35dvh)] p-[11px] pb-[38px] sm:p-[12px] sm:pb-[42px] rounded-[4px] bg-white dark:bg-[#1E242C] shadow-[0_20px_45px_-10px_rgba(0,0,0,0.18),0_6px_18px_-4px_rgba(0,0,0,0.08)] dark:shadow-[0_25px_55px_-12px_rgba(0,0,0,0.8)] select-none border border-stone-100/90 dark:border-white/5 cursor-pointer active:scale-[0.99] transition-transform hardware-accelerated"
+          >
+            {/* Inner Matting Layer with Soft Color Wash */}
+            <div
+              className="relative w-full aspect-[4/4.5] rounded-[2px] flex items-center justify-center overflow-hidden p-3.5 sm:p-4 transition-colors duration-500"
+              style={{
+                backgroundColor: isDark ? colorTheme.mattingBgDark : colorTheme.mattingBg,
+                contain: 'paint'
               }}
-              initial="initial"
-              animate="animate"
-              exit="exit"
-              id="gallery-polaroid-frame"
-              onPointerDown={handleCardPointerDown}
-              onClick={handleCardClick}
-              className="relative w-[min(264px,68vw,35dvh)] p-[11px] pb-[38px] sm:p-[12px] sm:pb-[42px] rounded-[4px] bg-white dark:bg-[#1E242C] shadow-[0_20px_45px_-10px_rgba(0,0,0,0.18),0_6px_18px_-4px_rgba(0,0,0,0.08)] dark:shadow-[0_25px_55px_-12px_rgba(0,0,0,0.8)] select-none border border-stone-100/90 dark:border-white/5 cursor-pointer active:scale-[0.99] transition-transform"
             >
-              {/* Inner Matting Layer with Gaussian Blur Bleed from Cover */}
-              <div
-                className="relative w-full aspect-[4/4.5] rounded-[2px] flex items-center justify-center overflow-hidden p-3.5 sm:p-4 transition-colors duration-700"
+              {/* Blur Bleed Extension Layer (GPU-isolated static layer) */}
+              <img
+                src={currentSong.albumArtUrl}
+                alt=""
+                aria-hidden="true"
+                decoding="async"
+                className="absolute inset-0 w-full h-full object-cover scale-125 pointer-events-none"
                 style={{
-                  backgroundColor: isDark ? colorTheme.mattingBgDark : colorTheme.mattingBg
+                  filter: 'blur(16px) saturate(1.25)',
+                  opacity: 0.52,
+                  transform: 'translate3d(0, 0, 0) scale(1.25)',
+                  backfaceVisibility: 'hidden'
+                }}
+              />
+
+              {/* Upper 1:1 Album Artwork Tile with Soft Natural Shadow */}
+              <div
+                className={`relative w-full aspect-square rounded-[2px] overflow-hidden bg-stone-900 shadow-[0_4px_16px_rgba(0,0,0,0.15)] transition-transform duration-500 ${
+                  isPlaying ? 'scale-[1.015]' : 'scale-100'
+                }`}
+                style={{
+                  transform: 'translate3d(0, 0, 0)',
+                  backfaceVisibility: 'hidden'
                 }}
               >
-                {/* Blur Bleed Extension Layer */}
                 <img
                   src={currentSong.albumArtUrl}
-                  alt=""
-                  aria-hidden="true"
-                  className="absolute inset-0 w-full h-full object-cover scale-125 pointer-events-none transition-all duration-1000"
-                  style={{
-                    filter: 'blur(20px) saturate(1.3) brightness(1.05)',
-                    opacity: 0.55
-                  }}
+                  alt={currentSong.title}
+                  decoding="async"
+                  className="w-full h-full object-cover block"
                 />
-
-                {/* Upper 1:1 Album Artwork Tile with Soft Natural Shadow */}
-                <div
-                  className={`relative w-full aspect-square rounded-[2px] overflow-hidden bg-stone-900 shadow-[0_4px_16px_rgba(0,0,0,0.15)] transition-all duration-700 ${
-                    isPlaying ? 'scale-[1.018]' : 'scale-100'
-                  }`}
-                >
-                  <img
-                    src={currentSong.albumArtUrl}
-                    alt={currentSong.title}
-                    className="w-full h-full object-cover block"
-                  />
-                </div>
               </div>
+            </div>
 
-              {/* Bottom Subtle Photo Margin Metadata & Vocab Radar */}
-              <div className="absolute bottom-3 left-0 right-0 px-4 flex items-center justify-between text-[10px] tracking-wider text-stone-400 dark:text-stone-500 font-mono">
-                <span className="tabular-nums font-mono text-[10px] text-stone-400 dark:text-stone-500 font-medium">
-                  {realTimeStr}
+            {/* Bottom Subtle Photo Margin Metadata & Vocab Radar */}
+            <div className="absolute bottom-3 left-0 right-0 px-4 flex items-center justify-between text-[10px] tracking-wider text-stone-400 dark:text-stone-500 font-mono">
+              <span className="tabular-nums font-mono text-[10px] text-stone-400 dark:text-stone-500 font-medium">
+                {realTimeStr}
+              </span>
+              <button
+                type="button"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  setIsVocabRadarOpen(true);
+                }}
+                className="flex items-center gap-1.5 px-2 py-0.5 -mr-1 rounded-full bg-stone-100/90 dark:bg-stone-800/90 hover:bg-[#516050]/15 dark:hover:bg-[#8FB996]/20 border border-stone-200/80 dark:border-stone-700/80 text-stone-600 dark:text-stone-300 hover:text-[#516050] dark:hover:text-[#8FB996] active:scale-95 transition-all cursor-pointer group shadow-2xs"
+                title="查看本曲核心生词雷达"
+              >
+                <span className="text-[#516050] dark:text-[#8FB996] group-hover:scale-125 transition-transform text-[10px] leading-none">✦</span>
+                <span className="tracking-wider text-[9px] font-sans font-semibold uppercase">
+                  {songVocabList.length} WORDS
                 </span>
-                <button
-                  type="button"
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    setIsVocabRadarOpen(true);
-                  }}
-                  className="flex items-center gap-1.5 px-2 py-0.5 -mr-1 rounded-full bg-stone-100/90 dark:bg-stone-800/90 hover:bg-[#516050]/15 dark:hover:bg-[#8FB996]/20 border border-stone-200/80 dark:border-stone-700/80 text-stone-600 dark:text-stone-300 hover:text-[#516050] dark:hover:text-[#8FB996] active:scale-95 transition-all cursor-pointer group shadow-2xs"
-                  title="查看本曲核心生词雷达"
-                >
-                  <span className="text-[#516050] dark:text-[#8FB996] group-hover:scale-125 transition-transform text-[10px] leading-none">✦</span>
-                  <span className="tracking-wider text-[9px] font-sans font-semibold uppercase">
-                    {songVocabList.length} WORDS
-                  </span>
-                </button>
-              </div>
-            </motion.div>
-          </AnimatePresence>
+              </button>
+            </div>
+          </div>
         </div>
 
-        {/* 3. Highlight Golden Quote with smooth animated transition */}
-        <div className="w-full max-w-[320px] text-center px-2 min-h-[30px] flex items-center justify-center">
-          <AnimatePresence mode="wait" custom={songTransitionDirection}>
-            <motion.p
-              key={currentSong.id + '-quote'}
-              custom={songTransitionDirection}
-              variants={{
-                initial: (dir: 'up' | 'down' | 'left' | 'right') => {
-                  if (dir === 'up') return { opacity: 0, y: 12, x: 0 };
-                  if (dir === 'down') return { opacity: 0, y: -12, x: 0 };
-                  return { opacity: 0, y: 0, x: dir === 'right' ? 10 : -10 };
-                },
-                animate: { opacity: 1, y: 0, x: 0 },
-                exit: (dir: 'up' | 'down' | 'left' | 'right') => {
-                  if (dir === 'up') return { opacity: 0, y: -12, x: 0 };
-                  if (dir === 'down') return { opacity: 0, y: 12, x: 0 };
-                  return { opacity: 0, y: 0, x: dir === 'right' ? -10 : 10 };
-                }
-              }}
-              initial="initial"
-              animate="animate"
-              exit="exit"
-              transition={{ duration: 0.32, ease: [0.16, 1, 0.3, 1] }}
-              className="font-serif-luxury italic text-[17px] sm:text-[18px] text-stone-800 dark:text-stone-200 leading-relaxed font-normal"
+        {/* 3. Highlight Golden Quote with 120fps Compositor Transform & Safe Line Clamp */}
+        <div className="w-full max-w-[320px] text-center px-2 min-h-[30px] max-h-[54px] flex items-center justify-center overflow-hidden">
+          <p
+            id="gallery-quote-stage"
+            style={{
+              transform: 'translate3d(0, 0, 0)',
+              WebkitTransform: 'translate3d(0, 0, 0)',
+              willChange: 'transform, opacity',
+              backfaceVisibility: 'hidden',
+              WebkitBackfaceVisibility: 'hidden'
+            }}
+            className="font-serif-luxury italic text-[16px] sm:text-[17px] text-stone-800 dark:text-stone-200 leading-snug font-normal line-clamp-2 hardware-accelerated"
+          >
+            {curQuote.quotePrefix}
+            <span
+              onClick={() => handleWordClick(curQuote.targetWord, curQuote.fullSentence)}
+              className="vocab-target font-normal italic text-stone-900 dark:text-white underline decoration-amber-600/60 dark:decoration-amber-400/70 underline-offset-4 decoration-2 cursor-pointer hover:bg-amber-100/40 dark:hover:bg-amber-950/30 px-1 py-0.5 rounded transition-all"
+              title={`Click '${curQuote.targetWord}' to view Cambridge phonetics & dual context`}
             >
-              {curQuote.quotePrefix}
-              <span
-                onClick={() => handleWordClick(curQuote.targetWord, curQuote.fullSentence)}
-                className="vocab-target font-normal italic text-stone-900 dark:text-white underline decoration-amber-600/60 dark:decoration-amber-400/70 underline-offset-4 decoration-2 cursor-pointer hover:bg-amber-100/40 dark:hover:bg-amber-950/30 px-1 py-0.5 rounded transition-all"
-                title={`Click '${curQuote.targetWord}' to view Cambridge phonetics & dual context`}
-              >
-                {curQuote.targetWord}
-              </span>
-              {curQuote.quoteSuffix}
-            </motion.p>
-          </AnimatePresence>
+              {curQuote.targetWord}
+            </span>
+            {curQuote.quoteSuffix}
+          </p>
         </div>
       </div>
 
       {/* 4. Bottom Playback Controls Bar with timeline */}
-      <div className="relative w-full max-w-[356px] mx-auto px-6 z-20 pb-2 shrink-0">
+      <div
+        className={`relative w-full max-w-[356px] mx-auto px-6 z-20 pb-2 shrink-0 transition-all duration-300 ease-out ${
+          isFullscreenLyricsOpen ? 'opacity-0 translate-y-2 pointer-events-none' : 'opacity-100 translate-y-0'
+        }`}
+      >
         {/* Custom Rounded Dual-Layer Timeline Slider */}
         <div className="w-full mb-3">
           <div className="relative h-5 flex items-center group cursor-pointer">
