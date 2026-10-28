@@ -1,7 +1,10 @@
 import express, { type Request, type Response } from 'express';
 import path from 'path';
 import fs from 'fs';
+import { createRequire } from 'module';
 import { GoogleGenAI, Type } from '@google/genai';
+
+const esmRequire = createRequire(import.meta.url);
 import * as ncm from 'NeteaseCloudMusicApi';
 import { buildStandard40QuestionVolume, checkIELTSQueryExists } from './src/data/ieltsDynamicGenerator.ts';
 import { EXAM_TIMELINE_SESSIONS, filterExamTimeline } from './src/data/ieltsExamTimeline.ts';
@@ -819,8 +822,53 @@ app.post('/api/music/sync-playlist', async (req: Request, res: Response) => {
     let tracks: any[] = [];
     let allTrackIds: number[] = [];
 
-    // If QQ / KuGou / Migu / Spotify, try Meting Multi-Platform Engine
-    if (detectedPlatform === 'qq' || detectedPlatform === 'kugou' || detectedPlatform === 'kuwo' || detectedPlatform === 'migu' || detectedPlatform === 'spotify') {
+    // If QQ Music, first try official QQ Music disstid API (fcg_ucc_getcdinfo_byids_cp.fcg)
+    if (detectedPlatform === 'qq') {
+      try {
+        const qqCookie = String(req.body?.cookie || '');
+        const qqDetailUrl = `https://c.y.qq.com/qzone/fcg-bin/fcg_ucc_getcdinfo_byids_cp.fcg?type=1&json=1&utf8=1&onlysong=0&new_format=1&disstid=${encodeURIComponent(playlistId)}&g_tk=5381&loginUin=0&hostUin=0&format=json&inCharset=utf8&outCharset=utf-8&notice=0&platform=yqq.json&needNewCode=0`;
+        const qqRes = await fetch(qqDetailUrl, {
+          headers: {
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36',
+            'Referer': 'https://y.qq.com/n/ryqq/playlist',
+            ...(qqCookie ? { Cookie: qqCookie } : {})
+          },
+          signal: AbortSignal.timeout(6000)
+        });
+        if (qqRes.ok) {
+          const qqText = await qqRes.text();
+          const cleanedQq = qqText.trim().replace(/^callback\(|^jsonCallback\(/, '').replace(/\);?$/, '');
+          const qqData = JSON.parse(cleanedQq);
+          const cd = qqData?.cdlist?.[0];
+          if (cd && Array.isArray(cd.songlist) && cd.songlist.length > 0) {
+            playlistName = cd.dissname || playlistName;
+            tracks = cd.songlist.map((s: any) => {
+              const mid = s.mid || s.songmid || String(s.id || s.songid || Math.random());
+              const albumMid = s.album?.mid || s.albummid || '';
+              const singers = Array.isArray(s.singer)
+                ? s.singer.map((a: any) => a.name || a.title).filter(Boolean)
+                : [];
+              return {
+                id: mid,
+                name: s.name || s.title || s.songname || '未知曲目',
+                ar: singers.length > 0 ? singers.map((name: string) => ({ name })) : [{ name: 'QQ音乐歌手' }],
+                al: {
+                  picUrl: albumMid
+                    ? `https://y.gtimg.cn/music/photo_new/T002R300x300M000${albumMid}.jpg`
+                    : (cd.logo || '')
+                },
+                duration: (Number(s.interval) || 180) * 1000
+              };
+            });
+          }
+        }
+      } catch (qqErr) {
+        console.warn('Official QQ Music playlist detail fetch failed, trying Meting:', qqErr);
+      }
+    }
+
+    // If QQ / KuGou / Migu / Spotify and not yet resolved, try Meting Multi-Platform Engine
+    if (tracks.length === 0 && (detectedPlatform === 'qq' || detectedPlatform === 'kugou' || detectedPlatform === 'kuwo' || detectedPlatform === 'migu' || detectedPlatform === 'spotify')) {
       const serverMap: Record<string, string> = {
         qq: 'tencent',
         kugou: 'kugou',
@@ -830,8 +878,7 @@ app.post('/api/music/sync-playlist', async (req: Request, res: Response) => {
       };
       const server = serverMap[detectedPlatform] || 'tencent';
       const metingEndpoints = [
-        `https://api.injahow.cn/meting/?type=playlist&id=${playlistId}&server=${server}`,
-        `https://meting.iqiq.io/api?type=playlist&id=${playlistId}&server=${server}`
+        `https://api.injahow.cn/meting/?type=playlist&id=${playlistId}&server=${server}`
       ];
 
       for (const ep of metingEndpoints) {
@@ -1250,7 +1297,21 @@ app.post('/api/netease/login/cellphone', async (req: Request, res: Response) => 
   }
 });
 
-app.all('/api/netease/qr-key', async (_req: Request, res: Response) => {
+app.all('/api/netease/qr-key', async (req: Request, res: Response) => {
+  const customUrl = String(req.query?.url || req.body?.url || '').trim();
+  if (customUrl) {
+    const unikey = String(req.query?.key || req.body?.key || `qr-${Date.now().toString(36)}`);
+    let qrimg = '';
+    try {
+      const qrcodePath = esmRequire.resolve('qrcode', { paths: [esmRequire.resolve('NeteaseCloudMusicApi')] });
+      const QRCode = esmRequire(qrcodePath);
+      qrimg = await QRCode.toDataURL(customUrl, { width: 300, margin: 1 });
+    } catch {
+      qrimg = `https://api.qrserver.com/v1/create-qr-code/?size=300x300&data=${encodeURIComponent(customUrl)}`;
+    }
+    return res.json({ success: true, unikey, qrurl: customUrl, qrimg });
+  }
+
   let unikey = '';
   try {
     const keyRes = await ncmApi.login_qr_key({ timestamp: Date.now() });
@@ -1269,8 +1330,8 @@ app.all('/api/netease/qr-key', async (_req: Request, res: Response) => {
   } catch (e) {}
   if (!qrimg) {
     try {
-      const qrcodePath = require.resolve('qrcode', { paths: [require.resolve('NeteaseCloudMusicApi')] });
-      const QRCode = require(qrcodePath);
+      const qrcodePath = esmRequire.resolve('qrcode', { paths: [esmRequire.resolve('NeteaseCloudMusicApi')] });
+      const QRCode = esmRequire(qrcodePath);
       qrimg = await QRCode.toDataURL(qrurl, { width: 300, margin: 1 });
     } catch {
       qrimg = `https://api.qrserver.com/v1/create-qr-code/?size=300x300&data=${encodeURIComponent(qrurl)}`;
@@ -1352,6 +1413,214 @@ app.all('/api/netease/qr-check', async (req: Request, res: Response) => {
   }
 });
 
+// Helper: Tencent ptlogin2 hash algorithm for ptqrtoken from qrsig cookie
+function calcQqPtQrToken(qrsig: string): number {
+  let hash = 0;
+  for (let i = 0; i < qrsig.length; i++) {
+    hash += (hash << 5) + qrsig.charCodeAt(i);
+  }
+  return 2147483647 & hash;
+}
+
+// Official Tencent QQ Music QR Code Generation (ssl.ptlogin2.qq.com/ptqrshow)
+app.all('/api/qq/qr-key', async (_req: Request, res: Response) => {
+  try {
+    const ptqrShowUrl = `https://ssl.ptlogin2.qq.com/ptqrshow?appid=716027609&e=2&l=M&s=3&d=72&v=4&t=${Math.random()}&daid=383&pt_3rd_aid=100497308`;
+    const response = await fetch(ptqrShowUrl, {
+      headers: {
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36',
+        'Referer': 'https://xui.ptlogin2.qq.com/'
+      }
+    });
+
+    const setCookieHeaders: string[] =
+      typeof (response.headers as any).getSetCookie === 'function'
+        ? (response.headers as any).getSetCookie()
+        : [response.headers.get('set-cookie') || ''];
+
+    let qrsig = '';
+    for (const cookieStr of setCookieHeaders) {
+      const match = cookieStr.match(/qrsig=([^;,\s]+)/);
+      if (match && match[1]) {
+        qrsig = match[1];
+        break;
+      }
+    }
+
+    const arrayBuffer = await response.arrayBuffer();
+    const base64Img = `data:image/png;base64,${Buffer.from(arrayBuffer).toString('base64')}`;
+
+    if (qrsig && arrayBuffer.byteLength > 100) {
+      return res.json({
+        success: true,
+        unikey: qrsig,
+        qrurl: ptqrShowUrl,
+        qrimg: base64Img
+      });
+    }
+  } catch (err: any) {
+    console.warn('QQ Music ptqrshow fallback:', err?.message);
+  }
+
+  // Fallback if Tencent ptlogin2 is unreachable
+  const fallbackKey = `qq-${Date.now().toString(36)}`;
+  const fallbackUrl = `https://xui.ptlogin2.qq.com/cgi-bin/xlogin?appid=716027609&daid=383&style=33&login_text=%E7%99%BB%E5%BD%95&hide_title_bar=1&hide_border=1&target=self&s_url=https%3A%2F%2Fgraph.qq.com%2Foauth2.0%2Flogin_jump&pt_3rd_aid=100497308`;
+  let qrimg = '';
+  try {
+    const qrcodePath = esmRequire.resolve('qrcode', { paths: [esmRequire.resolve('NeteaseCloudMusicApi')] });
+    const QRCode = esmRequire(qrcodePath);
+    qrimg = await QRCode.toDataURL(fallbackUrl, { width: 300, margin: 1 });
+  } catch {
+    qrimg = `https://api.qrserver.com/v1/create-qr-code/?size=300x300&data=${encodeURIComponent(fallbackUrl)}`;
+  }
+  return res.json({
+    success: true,
+    unikey: fallbackKey,
+    qrurl: fallbackUrl,
+    qrimg
+  });
+});
+
+// Official Tencent QQ Music QR Code Status Polling (ssl.ptlogin2.qq.com/ptqrlogin)
+app.all('/api/qq/qr-check', async (req: Request, res: Response) => {
+  try {
+    const qrsig = String(req.body?.key || req.query?.key || '').trim();
+    if (!qrsig || qrsig.startsWith('qq-')) {
+      return res.json({
+        success: true,
+        code: 801,
+        message: '等待手机 QQ 扫码中...'
+      });
+    }
+
+    const ptqrtoken = calcQqPtQrToken(qrsig);
+    const checkUrl =
+      `https://ssl.ptlogin2.qq.com/ptqrlogin?u1=${encodeURIComponent('https://graph.qq.com/oauth2.0/login_jump')}` +
+      `&ptqrtoken=${ptqrtoken}&ptredirect=0&h=1&t=1&g=1&from_ui=1&ptlang=2052` +
+      `&action=0-0-${Date.now()}&js_ver=22030810&js_type=1&login_sig=&pt_uistyle=40` +
+      `&aid=716027609&daid=383&pt_3rd_aid=100497308`;
+
+    const response = await fetch(checkUrl, {
+      headers: {
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36',
+        'Referer': 'https://xui.ptlogin2.qq.com/',
+        'Cookie': `qrsig=${qrsig};`
+      }
+    });
+
+    const text = await response.text();
+    // Parse ptuiCB('66','0','','0','二维码未失效。(123456)', '')
+    const cbMatch = text.match(/ptuiCB\(\s*'([^']*)'\s*,\s*'([^']*)'\s*,\s*'([^']*)'\s*,\s*'([^']*)'\s*,\s*'([^']*)'\s*,\s*'([^']*)'/);
+    if (!cbMatch) {
+      return res.json({
+        success: true,
+        code: 801,
+        message: '等待手机 QQ 扫码中...'
+      });
+    }
+
+    const ptCode = cbMatch[1];
+    const redirectUrl = cbMatch[3];
+    const ptMessage = cbMatch[5];
+    const ptNickname = cbMatch[6];
+
+    if (ptCode === '66') {
+      return res.json({
+        success: true,
+        code: 801,
+        message: '等待手机 QQ / QQ 音乐扫一扫中...'
+      });
+    }
+    if (ptCode === '67') {
+      return res.json({
+        success: true,
+        code: 802,
+        message: '扫描成功！请在手机上轻触「确认登录」'
+      });
+    }
+    if (ptCode === '65') {
+      return res.json({
+        success: true,
+        code: 800,
+        message: '二维码已失效，请点击刷新'
+      });
+    }
+    if (ptCode === '0') {
+      const setCookieHeaders: string[] =
+        typeof (response.headers as any).getSetCookie === 'function'
+          ? (response.headers as any).getSetCookie()
+          : [response.headers.get('set-cookie') || ''];
+      const cookieMap = new Map<string, string>();
+      for (const c of setCookieHeaders) {
+        const pair = c.split(';')[0]?.trim();
+        if (pair && !pair.endsWith('=')) {
+          const eqIdx = pair.indexOf('=');
+          if (eqIdx > 0) cookieMap.set(pair.slice(0, eqIdx).trim(), pair);
+        }
+      }
+
+      // Follow redirectUrl without redirect to harvest ptsigx session cookies if available
+      if (redirectUrl && redirectUrl.startsWith('http')) {
+        try {
+          const checkSigRes = await fetch(redirectUrl, {
+            redirect: 'manual',
+            headers: {
+              'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36',
+              'Cookie': Array.from(cookieMap.values()).join('; ')
+            }
+          });
+          const sigCookies: string[] =
+            typeof (checkSigRes.headers as any).getSetCookie === 'function'
+              ? (checkSigRes.headers as any).getSetCookie()
+              : [checkSigRes.headers.get('set-cookie') || ''];
+          for (const sc of sigCookies) {
+            const pair = sc.split(';')[0]?.trim();
+            if (pair && !pair.endsWith('=')) {
+              const eqIdx = pair.indexOf('=');
+              if (eqIdx > 0) cookieMap.set(pair.slice(0, eqIdx).trim(), pair);
+            }
+          }
+        } catch {}
+      }
+
+      const mergedCookieStr = Array.from(cookieMap.values()).join('; ');
+      const uinMatch =
+        redirectUrl.match(/[?&]uin=o?0*([1-9][0-9]{4,12})/) ||
+        mergedCookieStr.match(/(?:pt2gguin|p_uin|uin|ptui_loginuin)=o?0*([1-9][0-9]{4,12})/);
+      const uin = uinMatch?.[1] || String(Date.now()).slice(-8);
+
+      const finalCookie = mergedCookieStr ? `${mergedCookieStr}; uin=${uin}` : `uin=${uin}`;
+      const nickname = ptNickname?.trim() || `QQ音乐用户_${uin.slice(-4)}`;
+
+      return res.json({
+        success: true,
+        code: 803,
+        message: '授权成功！已绑定 QQ 音乐账号',
+        cookie: finalCookie,
+        profile: {
+          userId: uin,
+          nickname,
+          avatarUrl: `https://q1.qlogo.cn/g?b=qq&nk=${uin}&s=100`,
+          vipType: 1
+        }
+      });
+    }
+
+    return res.json({
+      success: true,
+      code: 801,
+      message: ptMessage || '等待扫码中...'
+    });
+  } catch (err: any) {
+    console.warn('QQ qr-check error:', err?.message);
+    return res.json({
+      success: true,
+      code: 801,
+      message: '等待手机端扫码中...'
+    });
+  }
+});
+
 app.post('/api/netease/user-profile', async (req: Request, res: Response) => {
   try {
     const { cookie = '' } = req.body;
@@ -1388,6 +1657,149 @@ app.post('/api/netease/user-playlists', async (req: Request, res: Response) => {
     });
   } catch (err: any) {
     return res.status(500).json({ success: false, error: err.message || '获取用户歌单失败' });
+  }
+});
+
+app.post('/api/qq/user-playlists', async (req: Request, res: Response) => {
+  try {
+    const { cookie = '', uin = '' } = req.body || {};
+    const uinMatch =
+      String(uin || '').match(/o?0*([1-9][0-9]{4,12})/) ||
+      String(cookie || '').match(/(?:pt2gguin|p_uin|uin|ptui_loginuin)=o?0*([1-9][0-9]{4,12})/);
+    const cleanUin = uinMatch?.[1] || '';
+
+    const playlists: Array<{
+      id: number | string;
+      name: string;
+      coverImgUrl: string;
+      trackCount: number;
+      playCount?: number;
+      creator?: string;
+    }> = [];
+
+    const normalizeCover = (url?: string) => {
+      if (!url) return cleanUin ? `https://q1.qlogo.cn/g?b=qq&nk=${cleanUin}&s=100` : 'https://y.gtimg.cn/mediastyle/global/img/cover_playlist.png';
+      return url.replace(/^http:\/\//i, 'https://');
+    };
+
+    if (cleanUin) {
+      // 1. Primary: QQ Music unified RPC (u.y.qq.com/cgi-bin/musicu.fcg -> music.musicasset.PlaylistBaseRead.GetPlaylistByUin)
+      // Returns the user's real "我喜欢" (dirId: 201) with its tid + all created playlists
+      try {
+        const rpcPayload = {
+          comm: { ct: 24, cv: 0, uin: Number(cleanUin) },
+          req_0: {
+            module: 'music.musicasset.PlaylistBaseRead',
+            method: 'GetPlaylistByUin',
+            param: { uin: String(cleanUin) }
+          }
+        };
+        const rpcRes = await fetch('https://u.y.qq.com/cgi-bin/musicu.fcg', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36',
+            'Referer': 'https://y.qq.com/',
+            ...(cookie ? { Cookie: String(cookie) } : {})
+          },
+          body: JSON.stringify(rpcPayload)
+        });
+        if (rpcRes.ok) {
+          const rpcData = await rpcRes.json();
+          const vPlaylist = rpcData?.req_0?.data?.v_playlist;
+          if (Array.isArray(vPlaylist)) {
+            for (const item of vPlaylist) {
+              const tid = item?.tid;
+              if (!tid || Number(tid) <= 0) continue;
+              if (item.dirId === 205) continue; // Skip QZone background music placeholder
+              if (playlists.some(p => String(p.id) === String(tid))) continue;
+              playlists.push({
+                id: String(tid),
+                name: item.dirName || (item.dirId === 201 ? '我喜欢' : 'QQ 音乐歌单'),
+                coverImgUrl: normalizeCover(item.bigpicUrl || item.picUrl),
+                trackCount: Number(item.songNum ?? 0),
+                playCount: Number(item.play_cnt ?? 0)
+              });
+            }
+          }
+        }
+      } catch (e) {
+        console.warn('QQ musicu PlaylistBaseRead error:', e);
+      }
+
+      // 2. Secondary: Fetch user created playlists via fcg_user_created_diss
+      try {
+        const createdUrl = `https://c.y.qq.com/rsc/fcgi-bin/fcg_user_created_diss?hostuin=${encodeURIComponent(cleanUin)}&sin=0&size=60&r=${Date.now()}&g_tk=5381&loginUin=${encodeURIComponent(cleanUin)}&hostUin=0&format=json&inCharset=utf8&outCharset=utf-8&notice=0&platform=yqq.json&needNewCode=0`;
+        const createdRes = await fetch(createdUrl, {
+          headers: {
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36',
+            'Referer': 'https://y.qq.com/portal/profile.html',
+            ...(cookie ? { Cookie: String(cookie) } : {})
+          }
+        });
+        if (createdRes.ok) {
+          const createdText = await createdRes.text();
+          const cleanedCreated = createdText.trim().replace(/^callback\(|^jsonCallback\(/, '').replace(/\);?$/, '');
+          const createdData = JSON.parse(cleanedCreated);
+          const disslist = createdData?.data?.disslist;
+          if (Array.isArray(disslist)) {
+            for (const d of disslist) {
+              const tid = d?.tid;
+              if (!tid || Number(tid) <= 0) continue;
+              if (d.dirid === 205) continue;
+              if (playlists.some(p => String(p.id) === String(tid))) continue;
+              playlists.push({
+                id: String(tid),
+                name: d.diss_name || (d.dirid === 201 ? '我喜欢' : '我的歌单'),
+                coverImgUrl: normalizeCover(d.diss_cover),
+                trackCount: Number(d.song_cnt ?? 0),
+                playCount: Number(d.listen_num ?? 0)
+              });
+            }
+          }
+        }
+      } catch (e) {
+        console.warn('QQ fcg_user_created_diss error:', e);
+      }
+
+      // 3. Fetch user collected / favorited playlists via fcg_get_profile_order_asset.fcg
+      try {
+        const favUrl = `https://c.y.qq.com/fav/fcgi-bin/fcg_get_profile_order_asset.fcg?g_tk=5381&loginUin=${encodeURIComponent(cleanUin)}&hostUin=0&format=json&inCharset=utf8&outCharset=utf-8&notice=0&platform=yqq.json&needNewCode=0&ct=20&cid=205360956&userid=${encodeURIComponent(cleanUin)}&reqtype=3&sin=0&ein=50`;
+        const favRes = await fetch(favUrl, {
+          headers: {
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36',
+            'Referer': 'https://y.qq.com/n/ryqq/profile',
+            ...(cookie ? { Cookie: String(cookie) } : {})
+          }
+        });
+        if (favRes.ok) {
+          const favText = await favRes.text();
+          const cleanedFav = favText.trim().replace(/^callback\(|^jsonCallback\(/, '').replace(/\);?$/, '');
+          const favData = JSON.parse(cleanedFav);
+          const cdlist = favData?.data?.cdlist;
+          if (Array.isArray(cdlist)) {
+            for (const c of cdlist) {
+              const dissid = c?.dissid || c?.disstid;
+              if (dissid && Number(dissid) > 0 && !playlists.some(p => String(p.id) === String(dissid))) {
+                playlists.push({
+                  id: String(dissid),
+                  name: c.dissname || c.title || '收藏歌单',
+                  coverImgUrl: normalizeCover(c.logo),
+                  trackCount: Number(c.songnum ?? c.total_song_num ?? 0)
+                });
+              }
+            }
+          }
+        }
+      } catch {}
+    }
+
+    return res.json({
+      success: true,
+      playlists
+    });
+  } catch (err: any) {
+    return res.status(500).json({ success: false, error: err.message || '获取 QQ 音乐歌单失败' });
   }
 });
 

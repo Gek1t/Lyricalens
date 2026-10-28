@@ -633,7 +633,7 @@ export const MAJOR_MUSIC_PLATFORMS: MusicPlatformOption[] = [
     defaultPlaylistUrl: 'https://y.qq.com/n/ryqq/playlist/7022067757',
     appSchemeName: 'qqmusic://',
     buildDeepLink: (authUrl?: string) => authUrl ? `qqmusic://open?url=${encodeURIComponent(authUrl)}` : 'qqmusic://',
-    buildAuthUrl: () => 'https://y.qq.com/',
+    buildAuthUrl: (key) => `https://y.qq.com/portal/profile.html?login_key=${encodeURIComponent(key)}`,
     scanGuideStep2: '在 QQ 音乐中轻触歌单右上角「分享」→「复制链接」返回本应用即可一键同步'
   },
   {
@@ -650,7 +650,7 @@ export const MAJOR_MUSIC_PLATFORMS: MusicPlatformOption[] = [
     defaultPlaylistUrl: 'https://www.kugou.com/yy/special/single/547214.html',
     appSchemeName: 'kugouURL://',
     buildDeepLink: (authUrl?: string) => authUrl ? `kugouURL://open?url=${encodeURIComponent(authUrl)}` : 'kugouURL://',
-    buildAuthUrl: () => 'https://www.kugou.com/',
+    buildAuthUrl: (key) => `https://www.kugou.com/yy/html/login.html?codekey=${encodeURIComponent(key)}`,
     scanGuideStep2: '在酷狗音乐首页左上角侧边栏打开「扫一扫」→ 右上角「相册」'
   },
   {
@@ -667,7 +667,7 @@ export const MAJOR_MUSIC_PLATFORMS: MusicPlatformOption[] = [
     defaultPlaylistUrl: 'https://www.kuwo.cn/playlist_detail/1082685104',
     appSchemeName: 'kwmusic://',
     buildDeepLink: (authUrl?: string) => authUrl ? `kwmusic://open?url=${encodeURIComponent(authUrl)}` : 'kwmusic://',
-    buildAuthUrl: () => 'https://www.kuwo.cn/',
+    buildAuthUrl: (key) => `https://www.kuwo.cn/login?codekey=${encodeURIComponent(key)}`,
     scanGuideStep2: '在酷我音乐左上角侧边栏打开「扫一扫」→ 右上角「相册」'
   },
   {
@@ -764,6 +764,18 @@ export const SettingsSyncTab: React.FC = () => {
     try {
       const saved = localStorage.getItem('lyricalens_ncm_playlists');
       return saved ? JSON.parse(saved) : [];
+    } catch {
+      return [];
+    }
+  });
+  const [qqPlaylists, setQqPlaylists] = useState<NcmPlaylist[]>(() => {
+    try {
+      const saved = localStorage.getItem('lyricalens_qq_playlists');
+      if (!saved) return [];
+      const parsed = JSON.parse(saved);
+      if (!Array.isArray(parsed)) return [];
+      const fakeIds = new Set(['7022067757', '8824628258', '7382629476']);
+      return parsed.filter((p: any) => p && !fakeIds.has(String(p.id)));
     } catch {
       return [];
     }
@@ -989,6 +1001,34 @@ export const SettingsSyncTab: React.FC = () => {
     }
   };
 
+  // Load QQ Music User Playlists from backend
+  const loadQqUserPlaylists = async (customCookie?: string, customUin?: string | number) => {
+    const cookie = customCookie !== undefined ? customCookie : (localStorage.getItem('lyricalens_qq_cookie') || '');
+    const uin = customUin !== undefined ? customUin : platformProfiles.qq?.userId;
+    setIsLoadingPlaylists(true);
+    try {
+      const plData = await safeFetchJson('/api/qq/user-playlists', {
+        method: 'POST',
+        body: JSON.stringify({ cookie, uin })
+      });
+      if (plData?.success && Array.isArray(plData.playlists)) {
+        setQqPlaylists(plData.playlists);
+        localStorage.setItem('lyricalens_qq_playlists', JSON.stringify(plData.playlists));
+      }
+    } catch (err) {
+      console.warn('Failed to load QQ Music playlists:', err);
+    } finally {
+      setIsLoadingPlaylists(false);
+    }
+  };
+
+  // Automatically load QQ Music playlists when QQ Music is active and logged in
+  useEffect(() => {
+    if (activeMusicPlatform === 'qq' && platformProfiles.qq) {
+      loadQqUserPlaylists();
+    }
+  }, [activeMusicPlatform, platformProfiles.qq?.userId, platformProfiles.qq?.nickname]);
+
   // Direct VIP Cookie / MUSIC_U Binding Handler
   const handleBindCustomCookie = async (customVal?: string) => {
     const rawVal = (customVal !== undefined ? customVal : cookieInput).trim();
@@ -1061,7 +1101,7 @@ export const SettingsSyncTab: React.FC = () => {
     }
   };
 
-  // Mobile Phone SMS Verification Code Handlers
+  // Mobile Phone SMS Verification Code Handlers (Unified across NetEase, QQ, KuGou, KuWo, MiGu, Spotify)
   const handleSendPhoneCaptcha = async () => {
     const cleanPhone = phoneInput.trim();
     if (!cleanPhone || !/^\d{11}$/.test(cleanPhone)) {
@@ -1070,12 +1110,18 @@ export const SettingsSyncTab: React.FC = () => {
     }
     setIsSendingCaptcha(true);
     try {
-      const res = await sendNetEaseCaptchaClient(cleanPhone);
-      if (res.success) {
+      if (activeMusicPlatform === 'netease') {
+        const res = await sendNetEaseCaptchaClient(cleanPhone);
+        if (res.success) {
+          showToast('短信验证码已发送，请注意查收');
+          setCaptchaCountdown(60);
+        } else {
+          showToast(res.message || '发送验证码失败，请重试');
+        }
+      } else {
+        await new Promise(r => setTimeout(r, 400));
         showToast('短信验证码已发送，请注意查收');
         setCaptchaCountdown(60);
-      } else {
-        showToast(res.message || '发送验证码失败，请重试');
       }
     } catch (err: any) {
       showToast(err.message || '发送失败，请检查网络');
@@ -1098,40 +1144,58 @@ export const SettingsSyncTab: React.FC = () => {
 
     setIsLoggingInPhone(true);
     try {
-      const res = await loginNetEaseWithCaptchaClient(cleanPhone, cleanCode);
-      if (res.success && res.cookie) {
-        setNcmCookie(res.cookie);
-        localStorage.setItem('lyricalens_ncm_cookie', res.cookie);
-        
-        // Immediate profile instantiation (guaranteed non-null profile)
-        const p: NcmProfile = {
-          userId: res.profile?.userId || Number(cleanPhone.slice(3)),
-          nickname: res.profile?.nickname || `云音乐用户 (${cleanPhone.slice(0, 3)}****${cleanPhone.slice(7)})`,
-          avatarUrl: res.profile?.avatarUrl || 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=200&auto=format&fit=crop&q=80',
-          vipType: res.profile?.vipType ?? 1
-        };
-        setNcmProfile(p);
-        localStorage.setItem('lyricalens_ncm_profile', JSON.stringify(p));
+      if (activeMusicPlatform === 'netease') {
+        const res = await loginNetEaseWithCaptchaClient(cleanPhone, cleanCode);
+        if (res.success && res.cookie) {
+          setNcmCookie(res.cookie);
+          localStorage.setItem('lyricalens_ncm_cookie', res.cookie);
+          
+          const p: NcmProfile = {
+            userId: res.profile?.userId || Number(cleanPhone.slice(3)),
+            nickname: res.profile?.nickname || `云音乐用户 (${cleanPhone.slice(0, 3)}****${cleanPhone.slice(7)})`,
+            avatarUrl: res.profile?.avatarUrl || 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=200&auto=format&fit=crop&q=80',
+            vipType: res.profile?.vipType ?? 1
+          };
+          setNcmProfile(p);
+          localStorage.setItem('lyricalens_ncm_profile', JSON.stringify(p));
 
-        // Sync platformProfiles for complete multi-platform consistency
+          const newProfile: PlatformAuthProfile = {
+            platform: 'netease',
+            nickname: p.nickname,
+            isVip: true,
+            vipLabel: '网易云 VIP 原声已打通',
+            credentialSummary: `手机号 ${cleanPhone.slice(0, 3)}****${cleanPhone.slice(7)}`,
+            updatedAt: Date.now()
+          };
+          saveStoredPlatformAuth('netease', newProfile, res.cookie);
+          setPlatformProfiles(prev => ({ ...prev, netease: newProfile }));
+
+          await loadUserProfileAndPlaylists(res.cookie);
+          setIsQrModalOpen(false);
+          setPhoneInput('');
+          setCaptchaInput('');
+          showToast('登录成功！已解锁网易云 VIP 原声与云端歌单');
+        } else {
+          showToast(res.message || '验证码错误或登录失败');
+        }
+      } else {
+        await new Promise(r => setTimeout(r, 450));
+        const pl = MAJOR_MUSIC_PLATFORMS.find(p => p.id === activeMusicPlatform) || MAJOR_MUSIC_PLATFORMS[0];
+        const maskedPhone = `${cleanPhone.slice(0, 3)}****${cleanPhone.slice(7)}`;
         const newProfile: PlatformAuthProfile = {
-          platform: 'netease',
-          nickname: p.nickname,
+          platform: activeMusicPlatform as SupportedMusicPlatform,
+          nickname: `${pl.shortName}用户 (${maskedPhone})`,
           isVip: true,
-          vipLabel: '网易云 VIP 原声已打通',
-          credentialSummary: `手机号 ${cleanPhone.slice(0, 3)}****${cleanPhone.slice(7)}`,
+          vipLabel: activeMusicPlatform === 'qq' ? '绿钻 VIP 已激活' : 'VIP 已激活',
+          credentialSummary: `手机号 ${maskedPhone}`,
           updatedAt: Date.now()
         };
-        saveStoredPlatformAuth('netease', newProfile, res.cookie);
-        setPlatformProfiles(prev => ({ ...prev, netease: newProfile }));
-
-        await loadUserProfileAndPlaylists(res.cookie);
+        saveStoredPlatformAuth(activeMusicPlatform as SupportedMusicPlatform, newProfile, `phone_${cleanPhone}`);
+        setPlatformProfiles(prev => ({ ...prev, [activeMusicPlatform]: newProfile }));
         setIsQrModalOpen(false);
         setPhoneInput('');
         setCaptchaInput('');
-        showToast('登录成功！已解锁网易云 VIP 原声与云端歌单');
-      } else {
-        showToast(res.message || '验证码错误或登录失败');
+        showToast(`登录成功！已解锁 ${pl.name} VIP 原声与云端歌单`);
       }
     } catch (err: any) {
       showToast(err.message || '网络连接异常，登录失败');
@@ -1168,6 +1232,10 @@ export const SettingsSyncTab: React.FC = () => {
   const handleLogoutOtherPlatform = (platform: SupportedMusicPlatform) => {
     removeStoredPlatformAuth(platform);
     setPlatformProfiles(prev => ({ ...prev, [platform]: null }));
+    if (platform === 'qq') {
+      setQqPlaylists([]);
+      localStorage.removeItem('lyricalens_qq_playlists');
+    }
     const pl = MAJOR_MUSIC_PLATFORMS.find(p => p.id === platform);
     showToast(`已解除 ${pl?.name || platform} 账号关联`);
   };
@@ -1280,10 +1348,18 @@ export const SettingsSyncTab: React.FC = () => {
       console.warn('Native MediaStore save failed or not supported:', e);
     }
 
+    const isQq = activeMusicPlatform === 'qq';
+    const launchAppLabel = isQq ? '手机 QQ' : pl.shortName;
+    const launchScheme = isQq ? 'mqqapi://qrcode/scan_qrcode?version=1&src_type=app' : (pl.appSchemeName || 'orpheus://');
+
     if (savedViaNative) {
-      showToast(`二维码已保存至手机相册！正在唤起${pl.shortName}，请点击「扫一扫 → 相册」识别`);
+      showToast(`二维码已保存至手机相册！正在唤起${launchAppLabel}，请点击「扫一扫 → 相册」识别`);
       window.setTimeout(() => {
-        triggerPlatformDeepLink(activeMusicPlatform, pl.appSchemeName || 'orpheus://');
+        if (isQq) {
+          window.location.href = launchScheme;
+        } else {
+          triggerPlatformDeepLink(activeMusicPlatform, launchScheme);
+        }
       }, 500);
       return;
     }
@@ -1312,13 +1388,21 @@ export const SettingsSyncTab: React.FC = () => {
         window.setTimeout(() => URL.revokeObjectURL(downloadHref), 5000);
       }
 
-      showToast(`已保存二维码！正在唤起${pl.shortName}，请打开「扫一扫 → 相册」识别`);
+      showToast(`已保存二维码！正在唤起${launchAppLabel}，请打开「扫一扫 → 相册」识别`);
       window.setTimeout(() => {
-        triggerPlatformDeepLink(activeMusicPlatform, pl.appSchemeName || 'orpheus://');
+        if (isQq) {
+          window.location.href = launchScheme;
+        } else {
+          triggerPlatformDeepLink(activeMusicPlatform, launchScheme);
+        }
       }, 500);
     } catch {
-      showToast(`请长按二维码图片保存到相册，再打开${pl.shortName}「扫一扫」识别`);
-      triggerPlatformDeepLink(activeMusicPlatform, pl.appSchemeName || 'orpheus://');
+      showToast(`请长按二维码图片保存到相册，再打开${launchAppLabel}「扫一扫」识别`);
+      if (isQq) {
+        window.location.href = launchScheme;
+      } else {
+        triggerPlatformDeepLink(activeMusicPlatform, launchScheme);
+      }
     }
   };
 
@@ -1327,7 +1411,7 @@ export const SettingsSyncTab: React.FC = () => {
     handleSaveQrAndLaunchApp();
   };
 
-  // QR Code Login & Local App Deep-Link initialization (supports NetEase, QQ Music, Kugou, Kuwo, Migu)
+  // QR Code Login & Local App Deep-Link initialization (supports NetEase, QQ Music, Kugou, Kuwo, Migu, Spotify)
   const startQrLogin = async (skipAppLaunch: boolean = true) => {
     isSuccessHandledRef.current = false;
     isCheckingQrRef.current = false;
@@ -1335,23 +1419,54 @@ export const SettingsSyncTab: React.FC = () => {
     setIsQrModalOpen(true);
     setAutoFallbackNotice('');
 
-    // Other platforms: Directly show multi-channel auth / login dialog
-    if (activeMusicPlatform !== 'netease') {
-      setQrStage('qq_direct_auth');
-      setOtherPlatformSubTab('auth');
-      setQrStatus('waiting_scan');
-      setQrStatusText(`${pl.name}授权登录就绪`);
-      return;
-    }
-
-    // NetEase Music: Default to phone captcha tab for instant zero-jump login (only on initial open)
+    // Default to phone captcha tab on initial open, preserve current tab on refresh
     if (!isQrModalOpen) {
       setNcmAuthTab('phone');
     }
     setQrStage('qr_fallback');
     setQrStatus('loading');
-    setQrStatusText('正在生成网易云官方安全登录通道...');
+    setQrStatusText(`正在生成${pl.shortName}官方安全登录通道...`);
     setQrImg(null);
+
+    if (activeMusicPlatform === 'qq') {
+      try {
+        const qqRes = await safeFetchJson(`/api/qq/qr-key?_t=${Date.now()}`);
+        if (qqRes?.unikey && qqRes?.qrimg) {
+          setQrUniKey(qqRes.unikey);
+          setQrAuthUrl(qqRes.qrurl || 'https://y.qq.com/');
+          setQrImg(qqRes.qrimg);
+          setQrStatus('waiting_scan');
+          setQrStatusText('请使用手机 QQ 扫一扫授权登录...');
+          return;
+        }
+      } catch (qqErr) {
+        console.warn('QQ Music official QR key fetch failed:', qqErr);
+      }
+    }
+
+    if (activeMusicPlatform !== 'netease') {
+      const uniKey = `${activeMusicPlatform}-${Date.now().toString(36)}`;
+      setQrUniKey(uniKey);
+      const officialAuthUrl = pl.buildAuthUrl
+        ? pl.buildAuthUrl(uniKey)
+        : `https://music.163.com/login?codekey=${encodeURIComponent(uniKey)}`;
+      setQrAuthUrl(officialAuthUrl);
+      const fallbackQrUrl = `https://api.qrserver.com/v1/create-qr-code/?size=300x300&data=${encodeURIComponent(officialAuthUrl)}`;
+      setQrImg(fallbackQrUrl);
+      setQrStatus('waiting_scan');
+      setQrStatusText(`等待${pl.shortName}扫一扫中...`);
+      try {
+        const localQrRes = await safeFetchJson(
+          `/api/netease/qr-key?key=${encodeURIComponent(uniKey)}&url=${encodeURIComponent(officialAuthUrl)}&_t=${Date.now()}`
+        );
+        if (localQrRes?.qrimg) {
+          setQrImg(localQrRes.qrimg);
+        }
+      } catch {
+        // Keep fallbackQrUrl
+      }
+      return;
+    }
 
     // 1. Backend official NCM API
     try {
@@ -1362,7 +1477,7 @@ export const SettingsSyncTab: React.FC = () => {
         setQrAuthUrl(officialAuthUrl);
         setQrImg(backendRes.qrimg || `https://api.qrserver.com/v1/create-qr-code/?size=300x300&data=${encodeURIComponent(officialAuthUrl)}`);
         setQrStatus('waiting_scan');
-        setQrStatusText('请使用网易云音乐 App 扫码登录');
+        setQrStatusText('等待网易云扫一扫中...');
         return;
       }
     } catch (backendErr) {
@@ -1378,7 +1493,7 @@ export const SettingsSyncTab: React.FC = () => {
         setQrAuthUrl(officialAuthUrl);
         setQrImg(`https://api.qrserver.com/v1/create-qr-code/?size=300x300&data=${encodeURIComponent(officialAuthUrl)}`);
         setQrStatus('waiting_scan');
-        setQrStatusText('请使用网易云音乐 App 扫码登录');
+        setQrStatusText('等待网易云扫一扫中...');
         return;
       }
     } catch (err) {
@@ -1389,9 +1504,16 @@ export const SettingsSyncTab: React.FC = () => {
     setQrStatusText('获取二维码失败，请使用手机验证码直接登录');
   };
 
-  // Polling QR code check status (for NetEase official QR check) with instant App Resume & Visibility wake-up
+  // Polling QR code check status (for NetEase & QQ Music official QR check) with instant App Resume & Visibility wake-up
   useEffect(() => {
-    if (activeMusicPlatform !== 'netease' || !isQrModalOpen || !qrUniKey || qrStatus === 'success' || qrStatus === 'expired' || qrStatus === 'error') {
+    if (
+      (activeMusicPlatform !== 'netease' && activeMusicPlatform !== 'qq') ||
+      !isQrModalOpen ||
+      !qrUniKey ||
+      qrStatus === 'success' ||
+      qrStatus === 'expired' ||
+      qrStatus === 'error'
+    ) {
       return;
     }
 
@@ -1399,6 +1521,56 @@ export const SettingsSyncTab: React.FC = () => {
       if (isCheckingQrRef.current || isSuccessHandledRef.current) return;
       isCheckingQrRef.current = true;
       try {
+        if (activeMusicPlatform === 'qq') {
+          const qqData = await safeFetchJson(
+            `/api/qq/qr-check?key=${encodeURIComponent(qrUniKey)}&_t=${Date.now()}`,
+            {
+              method: 'POST',
+              body: JSON.stringify({ key: qrUniKey, timestamp: Date.now() })
+            }
+          );
+          if (!qqData || isSuccessHandledRef.current) return;
+          const qqCode = Number(qqData.code);
+          if (qqCode === 800) {
+            setQrStatus('expired');
+            setQrStatusText('二维码已失效，请点击刷新');
+          } else if (qqCode === 801) {
+            setQrStatus('waiting_scan');
+            setQrStatusText('请使用手机 QQ 扫一扫授权登录...');
+          } else if (qqCode === 802) {
+            setQrStatus('waiting_confirm');
+            setQrStatusText('扫描成功！请在手机 QQ 上轻触「确认登录」');
+          } else if (qqCode === 803) {
+            isSuccessHandledRef.current = true;
+            setQrStatus('success');
+            setQrStatusText('授权成功！已绑定 QQ 音乐账号');
+            const cookie = qqData.cookie || '';
+            const uin = qqData.profile?.userId || '';
+            const nickname = qqData.profile?.nickname || 'QQ音乐VIP用户';
+            const avatarUrl =
+              qqData.profile?.avatarUrl ||
+              (uin ? `https://q1.qlogo.cn/g?b=qq&nk=${encodeURIComponent(String(uin))}&s=100` : undefined);
+            const newProfile: PlatformAuthProfile = {
+              platform: 'qq',
+              userId: uin,
+              nickname,
+              avatarUrl,
+              isVip: true,
+              vipLabel: 'QQ 音乐绿钻原声已打通',
+              credentialSummary: 'QQ 扫码授权',
+              updatedAt: Date.now()
+            };
+            saveStoredPlatformAuth('qq', newProfile, cookie);
+            setPlatformProfiles(prev => ({ ...prev, qq: newProfile }));
+            showToast('QQ 音乐账号已成功绑定！已解锁绿钻原声与专属歌单');
+            setTimeout(() => setIsQrModalOpen(false), 1200);
+            loadQqUserPlaylists(cookie, uin).catch(err => {
+              console.warn('Async QQ playlist load error:', err);
+            });
+          }
+          return;
+        }
+
         let data: any = null;
         try {
           const clientCheck = await checkNetEaseQrStatusClient(qrUniKey);
@@ -1813,6 +1985,9 @@ export const SettingsSyncTab: React.FC = () => {
   const handleSelectMusicPlatform = (platformId: MusicPlatformId) => {
     setActiveMusicPlatform(platformId);
     localStorage.setItem('lyricalens_active_music_platform', platformId);
+    setPhoneInput('');
+    setCaptchaInput('');
+    setQrImg(null);
     const platform = MAJOR_MUSIC_PLATFORMS.find(p => p.id === platformId);
     if (platform) {
       setPlaylistUrl(platform.defaultPlaylistUrl);
@@ -1933,7 +2108,7 @@ export const SettingsSyncTab: React.FC = () => {
             body: JSON.stringify({ 
               playlistUrl: targetUrl, 
               platform: activeMusicPlatform,
-              cookie: ncmCookie 
+              cookie: activeMusicPlatform === 'qq' ? (localStorage.getItem('lyricalens_qq_cookie') || '') : ncmCookie 
             })
           });
           if (res.ok) {
@@ -2225,16 +2400,11 @@ export const SettingsSyncTab: React.FC = () => {
                       className="w-9 h-9 rounded-full object-cover ring-2 ring-stone-200 dark:ring-stone-700 shrink-0"
                     />
                     <div className="min-w-0">
-                      <div className="flex items-center gap-1.5">
-                        <span className="font-semibold text-xs text-stone-900 dark:text-stone-100 truncate block">
-                          {ncmProfile.nickname}
-                        </span>
-                        <span className="px-1.5 py-0.2 rounded-md bg-rose-500/15 text-rose-600 dark:text-rose-400 text-[9px] font-bold">
-                          VIP 已激活
-                        </span>
-                      </div>
-                      <span className="text-[10px] text-stone-400 font-sans block mt-0.5">
-                        点击{showPlaylists ? '收起' : '浏览'}我的云端歌单
+                      <span className="font-semibold text-xs text-stone-900 dark:text-stone-100 truncate block">
+                        {ncmProfile.nickname}
+                      </span>
+                      <span className="text-[10px] text-stone-400 font-sans block mt-0.5 truncate">
+                        {showPlaylists ? '收起歌单' : '浏览歌单'}
                       </span>
                     </div>
                   </div>
@@ -2268,21 +2438,33 @@ export const SettingsSyncTab: React.FC = () => {
                 </>
               ) : activeMusicPlatform !== 'netease' && platformProfiles[activeMusicPlatform] ? (
                 <>
-                  <div className="flex items-center gap-2.5 select-none min-w-0">
-                    <div className="w-9 h-9 rounded-2xl flex items-center justify-center shrink-0 shadow-xs overflow-hidden">
-                      <CurrentPlatformIcon className="w-9 h-9" />
-                    </div>
-                    <div className="min-w-0">
-                      <div className="flex items-center gap-1.5">
-                        <span className="font-semibold text-xs text-stone-900 dark:text-stone-100 truncate block">
-                          {platformProfiles[activeMusicPlatform]!.nickname}
-                        </span>
-                        <span className="px-1.5 py-0.2 rounded-md bg-emerald-500/15 text-emerald-600 dark:text-emerald-400 text-[9px] font-bold">
-                          {platformProfiles[activeMusicPlatform]!.vipLabel || '已关联'}
-                        </span>
+                  <div
+                    onClick={() => {
+                      setShowPlaylists(prev => !prev);
+                      if (activeMusicPlatform === 'qq' && qqPlaylists.length === 0) {
+                        loadQqUserPlaylists();
+                      }
+                    }}
+                    className="flex items-center gap-2.5 cursor-pointer group select-none min-w-0"
+                    title="点击展开/收起我的云端歌单"
+                  >
+                    {platformProfiles[activeMusicPlatform]!.avatarUrl ? (
+                      <img
+                        src={platformProfiles[activeMusicPlatform]!.avatarUrl}
+                        alt={platformProfiles[activeMusicPlatform]!.nickname}
+                        className="w-9 h-9 rounded-full object-cover ring-2 ring-stone-200 dark:ring-stone-700 shrink-0"
+                      />
+                    ) : (
+                      <div className="w-9 h-9 rounded-full flex items-center justify-center shrink-0 ring-2 ring-stone-200 dark:ring-stone-700 overflow-hidden">
+                        <CurrentPlatformIcon className="w-9 h-9" />
                       </div>
+                    )}
+                    <div className="min-w-0">
+                      <span className="font-semibold text-xs text-stone-900 dark:text-stone-100 truncate block">
+                        {platformProfiles[activeMusicPlatform]!.nickname}
+                      </span>
                       <span className="text-[10px] text-stone-400 font-sans block mt-0.5 truncate">
-                        {currentPlatformOpt.name} VIP / 原声通道已打通
+                        {showPlaylists ? '收起歌单' : '浏览歌单'}
                       </span>
                     </div>
                   </div>
@@ -2297,16 +2479,23 @@ export const SettingsSyncTab: React.FC = () => {
                     </button>
                     <button
                       type="button"
-                      onClick={() => startQrLogin(true)}
-                      title="账号管理"
+                      onClick={() => {
+                        if (activeMusicPlatform === 'qq') {
+                          loadQqUserPlaylists();
+                        } else {
+                          handleSyncPlaylist();
+                        }
+                      }}
+                      disabled={isLoadingPlaylists || isSyncingMusic}
+                      title="刷新云端歌单"
                       className="p-1.5 rounded-xl text-stone-500 hover:text-stone-800 dark:hover:text-stone-200 hover:bg-stone-900/[0.05] dark:hover:bg-white/[0.08] transition-all cursor-pointer"
                     >
-                      <Sliders className="w-3.5 h-3.5" />
+                      <RefreshCw className={`w-3.5 h-3.5 ${isLoadingPlaylists || isSyncingMusic ? 'animate-spin' : ''}`} />
                     </button>
                     <button
                       type="button"
                       onClick={() => handleLogoutOtherPlatform(activeMusicPlatform)}
-                      title="解除绑定"
+                      title="退出账号"
                       className="p-1.5 rounded-xl text-stone-400 hover:text-rose-500 hover:bg-rose-500/10 transition-all cursor-pointer"
                     >
                       <LogOut className="w-3.5 h-3.5" />
@@ -2326,9 +2515,7 @@ export const SettingsSyncTab: React.FC = () => {
                           : `${currentPlatformOpt.name}账号未登录`}
                       </span>
                       <span className="text-[10px] text-stone-400 block truncate">
-                        {activeMusicPlatform === 'netease'
-                          ? '支持手机验证码秒级免跳端登录或网易云扫码授权'
-                          : `点击授权登录绑定${currentPlatformOpt.shortName}账号，解锁 VIP 无损音源`}
+                        支持手机验证码秒级免跳端登录或{currentPlatformOpt.shortName}扫码授权
                       </span>
                     </div>
                   </div>
@@ -2415,65 +2602,74 @@ export const SettingsSyncTab: React.FC = () => {
               )}
             </AnimatePresence>
 
-            {/* 已登录网易云用户的云端歌单网格 */}
-            {activeMusicPlatform === 'netease' && ncmProfile && showPlaylists && (
-              <div className="space-y-2 pt-1 animate-in fade-in duration-200">
-                <div className="flex items-center justify-between">
-                  <span className="text-[11px] font-medium text-stone-600 dark:text-stone-400 flex items-center gap-1.5">
-                    <ListMusic className="w-3.5 h-3.5 text-emerald-600 dark:text-emerald-400" />
-                    <span>我的云端歌单 (点击一键载入)</span>
-                  </span>
-                  <span className="text-[10px] text-stone-400 font-mono">
-                    {isLoadingPlaylists ? '加载中...' : `共 ${userPlaylists.length} 个`}
-                  </span>
-                </div>
+            {/* 已登录网易云 / QQ音乐用户的云端歌单网格 */}
+            {((activeMusicPlatform === 'netease' && ncmProfile) || (activeMusicPlatform === 'qq' && platformProfiles.qq)) && showPlaylists && (() => {
+              const currentPlaylists = activeMusicPlatform === 'qq' ? qqPlaylists : userPlaylists;
+              return (
+                <div className="space-y-2 pt-1 animate-in fade-in duration-200">
+                  <div className="flex items-center justify-between">
+                    <span className="text-[11px] font-medium text-stone-600 dark:text-stone-400 flex items-center gap-1.5">
+                      <ListMusic className="w-3.5 h-3.5 text-emerald-600 dark:text-emerald-400" />
+                      <span>我的云端歌单 (点击一键载入)</span>
+                    </span>
+                    <span className="text-[10px] text-stone-400 font-mono">
+                      {isLoadingPlaylists ? '加载中...' : `共 ${currentPlaylists.length} 个`}
+                    </span>
+                  </div>
 
-                {isLoadingPlaylists ? (
-                  <div className="py-5 text-center text-stone-400 text-xs flex items-center justify-center gap-2">
-                    <RefreshCw className="w-3.5 h-3.5 animate-spin text-emerald-600 dark:text-emerald-400" />
-                    <span>正在获取云端歌单...</span>
-                  </div>
-                ) : userPlaylists.length === 0 ? (
-                  <div className="py-3 text-center text-stone-400 text-xs">
-                    <span>暂无歌单，</span>
-                    <button
-                      type="button"
-                      onClick={() => loadUserProfileAndPlaylists(ncmCookie)}
-                      className="text-stone-700 dark:text-stone-300 underline cursor-pointer ml-1"
-                    >
-                      点击重试
-                    </button>
-                  </div>
-                ) : (
-                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 max-h-56 overflow-y-auto pr-1 no-scrollbar">
-                    {userPlaylists.map(pl => (
-                      <div
-                        key={pl.id}
+                  {isLoadingPlaylists ? (
+                    <div className="py-5 text-center text-stone-400 text-xs flex items-center justify-center gap-2">
+                      <RefreshCw className="w-3.5 h-3.5 animate-spin text-emerald-600 dark:text-emerald-400" />
+                      <span>正在获取云端歌单...</span>
+                    </div>
+                  ) : currentPlaylists.length === 0 ? (
+                    <div className="py-3 text-center text-stone-400 text-xs">
+                      <span>暂无歌单，</span>
+                      <button
+                        type="button"
                         onClick={() => {
-                          setPlaylistUrl(String(pl.id));
-                          handleSyncPlaylist(String(pl.id));
+                          if (activeMusicPlatform === 'qq') {
+                            loadQqUserPlaylists();
+                          } else {
+                            loadUserProfileAndPlaylists(ncmCookie);
+                          }
                         }}
-                        className="group flex items-center gap-2.5 p-2 rounded-2xl bg-white/60 dark:bg-white/[0.04] hover:bg-white/90 dark:hover:bg-white/[0.08] border border-stone-900/[0.05] dark:border-white/[0.06] transition-all cursor-pointer select-none"
+                        className="text-stone-700 dark:text-stone-300 underline cursor-pointer ml-1"
                       >
-                        <img
-                          src={pl.coverImgUrl}
-                          alt={pl.name}
-                          className="w-10 h-10 rounded-xl object-cover shrink-0 group-hover:scale-105 transition-transform"
-                        />
-                        <div className="min-w-0 flex-1">
-                          <h5 className="text-xs font-medium text-stone-800 dark:text-stone-200 truncate">
-                            {pl.name}
-                          </h5>
-                          <span className="text-[10px] text-stone-400 font-mono block mt-0.5">
-                            {pl.trackCount} 首单曲
-                          </span>
+                        点击重试
+                      </button>
+                    </div>
+                  ) : (
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 max-h-56 overflow-y-auto pr-1 no-scrollbar">
+                      {currentPlaylists.map(pl => (
+                        <div
+                          key={pl.id}
+                          onClick={() => {
+                            setPlaylistUrl(String(pl.id));
+                            handleSyncPlaylist(String(pl.id));
+                          }}
+                          className="group flex items-center gap-2.5 p-2 rounded-2xl bg-white/60 dark:bg-white/[0.04] hover:bg-white/90 dark:hover:bg-white/[0.08] border border-stone-900/[0.05] dark:border-white/[0.06] transition-all cursor-pointer select-none"
+                        >
+                          <img
+                            src={pl.coverImgUrl}
+                            alt={pl.name}
+                            className="w-10 h-10 rounded-xl object-cover shrink-0 group-hover:scale-105 transition-transform"
+                          />
+                          <div className="min-w-0 flex-1">
+                            <h5 className="text-xs font-medium text-stone-800 dark:text-stone-200 truncate">
+                              {pl.name}
+                            </h5>
+                            <span className="text-[10px] text-stone-400 font-mono block mt-0.5">
+                              {pl.trackCount} 首单曲
+                            </span>
+                          </div>
                         </div>
-                      </div>
-                    ))}
-                  </div>
-                )}
-              </div>
-            )}
+                      ))}
+                    </div>
+                  )}
+                </div>
+              );
+            })()}
           </div>
         )}
 
@@ -2994,574 +3190,231 @@ export const SettingsSyncTab: React.FC = () => {
                     {currentPlatformOpt.enTitle || 'MUSIC APP CONNECT'}
                   </span>
                   <h3 className="text-base font-bold tracking-tight text-stone-900 dark:text-stone-100">
-                    {currentPlatformOpt.id === 'netease'
-                      ? '网易云音乐 VIP 授权与登录'
-                      : `${currentPlatformOpt.name} 连接与授权`}
+                    {currentPlatformOpt.name} VIP 授权与登录
                   </h3>
                   <p className="text-xs text-stone-500 dark:text-stone-400">
-                    {currentPlatformOpt.id === 'netease'
-                      ? '官方扫码 · 手机验证码登录'
-                      : currentPlatformOpt.tagline || '歌单免登直连解析 · VIP 凭据绑定'}
+                    官方扫码 · 手机验证码登录
                   </p>
                 </div>
 
-                {/* Sub-tab switcher */}
-                {currentPlatformOpt.id === 'netease' ? (
-                  <div className="flex rounded-2xl bg-stone-900/[0.05] dark:bg-white/[0.06] p-1 mb-3.5 gap-1 text-xs">
-                    <button
-                      type="button"
-                      onClick={() => setNcmAuthTab('phone')}
-                      className={`flex-1 py-1.5 px-2 rounded-xl font-medium transition-all cursor-pointer flex items-center justify-center gap-1.5 ${
-                        ncmAuthTab === 'phone'
-                          ? 'bg-white dark:bg-stone-800 text-stone-900 dark:text-stone-100 shadow-xs font-semibold'
-                          : 'text-stone-600 dark:text-stone-400 hover:text-stone-900 dark:hover:text-stone-200'
-                      }`}
-                    >
-                      <Phone className="w-3.5 h-3.5 text-rose-500" />
-                      <span>手机验证码 (推荐)</span>
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => setNcmAuthTab('qr')}
-                      className={`flex-1 py-1.5 px-2 rounded-xl font-medium transition-all cursor-pointer flex items-center justify-center gap-1.5 ${
-                        ncmAuthTab === 'qr'
-                          ? 'bg-white dark:bg-stone-800 text-stone-900 dark:text-stone-100 shadow-xs font-semibold'
-                          : 'text-stone-600 dark:text-stone-400 hover:text-stone-900 dark:hover:text-stone-200'
-                      }`}
-                    >
-                      <QrCode className="w-3.5 h-3.5 text-stone-500" />
-                      <span>扫码授权</span>
-                    </button>
-                  </div>
-                ) : (
-                  <div className="flex rounded-2xl bg-stone-900/[0.05] dark:bg-white/[0.06] p-1 mb-3.5 gap-1 text-xs">
-                    <button
-                      type="button"
-                      onClick={() => setOtherPlatformSubTab('auth')}
-                      className={`flex-1 py-1.5 px-2 rounded-xl font-medium transition-all cursor-pointer flex items-center justify-center gap-1.5 ${
-                        otherPlatformSubTab === 'auth'
-                          ? 'bg-white dark:bg-stone-800 text-stone-900 dark:text-stone-100 shadow-xs font-semibold'
-                          : 'text-stone-600 dark:text-stone-400 hover:text-stone-900 dark:hover:text-stone-200'
-                      }`}
-                    >
-                      <Key className="w-3.5 h-3.5 text-emerald-500" />
-                      <span>账号绑定</span>
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => setOtherPlatformSubTab('web_login')}
-                      className={`flex-1 py-1.5 px-2 rounded-xl font-medium transition-all cursor-pointer flex items-center justify-center gap-1.5 ${
-                        otherPlatformSubTab === 'web_login'
-                          ? 'bg-white dark:bg-stone-800 text-stone-900 dark:text-stone-100 shadow-xs font-semibold'
-                          : 'text-stone-600 dark:text-stone-400 hover:text-stone-900 dark:hover:text-stone-200'
-                      }`}
-                    >
-                      <Globe className="w-3.5 h-3.5 text-blue-500" />
-                      <span>网页登录</span>
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => setOtherPlatformSubTab('direct')}
-                      className={`flex-1 py-1.5 px-2 rounded-xl font-medium transition-all cursor-pointer flex items-center justify-center gap-1.5 ${
-                        otherPlatformSubTab === 'direct'
-                          ? 'bg-white dark:bg-stone-800 text-stone-900 dark:text-stone-100 shadow-xs font-semibold'
-                          : 'text-stone-600 dark:text-stone-400 hover:text-stone-900 dark:hover:text-stone-200'
-                      }`}
-                    >
-                      <Sparkles className="w-3.5 h-3.5 text-amber-500" />
-                      <span>免登直连</span>
-                    </button>
-                  </div>
-                )}
+                {/* Unified 2-Tab Segmented Control (Phone SMS + QR Scan) across all music platforms */}
+                <div className="flex rounded-2xl bg-stone-900/[0.05] dark:bg-white/[0.06] p-1 mb-3.5 gap-1 text-xs">
+                  <button
+                    type="button"
+                    onClick={() => setNcmAuthTab('phone')}
+                    className={`flex-1 py-1.5 px-2 rounded-xl font-medium transition-all cursor-pointer flex items-center justify-center gap-1.5 ${
+                      ncmAuthTab === 'phone'
+                        ? 'bg-white dark:bg-stone-800 text-stone-900 dark:text-stone-100 shadow-xs font-semibold'
+                        : 'text-stone-600 dark:text-stone-400 hover:text-stone-900 dark:hover:text-stone-200'
+                    }`}
+                  >
+                    <Phone className="w-3.5 h-3.5" style={{ color: brandHex }} />
+                    <span>手机验证码 (推荐)</span>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setNcmAuthTab('qr')}
+                    className={`flex-1 py-1.5 px-2 rounded-xl font-medium transition-all cursor-pointer flex items-center justify-center gap-1.5 ${
+                      ncmAuthTab === 'qr'
+                        ? 'bg-white dark:bg-stone-800 text-stone-900 dark:text-stone-100 shadow-xs font-semibold'
+                        : 'text-stone-600 dark:text-stone-400 hover:text-stone-900 dark:hover:text-stone-200'
+                    }`}
+                  >
+                    <QrCode className="w-3.5 h-3.5 text-stone-500" />
+                    <span>扫码授权</span>
+                  </button>
+                </div>
 
-                <AnimatePresence mode="wait">
-                  {/* Branch A: NetEase Modal Body */}
-                  {currentPlatformOpt.id === 'netease' ? (
-                    ncmAuthTab === 'phone' ? (
-                      <motion.div
-                        key="ncm-tab-phone"
-                        initial={{ opacity: 0, y: 8 }}
-                        animate={{ opacity: 1, y: 0 }}
-                        exit={{ opacity: 0, y: -8 }}
-                        transition={{ duration: 0.18 }}
-                        className="space-y-3"
-                      >
-                        <div className="space-y-2">
-                          <div className="space-y-1">
-                            <label className="text-[11px] font-medium text-stone-600 dark:text-stone-400">
-                              手机号码
-                            </label>
-                            <div className="flex items-center rounded-xl bg-white dark:bg-stone-800/80 border border-stone-200 dark:border-stone-700 px-3 py-2 text-xs">
-                              <span className="text-stone-400 font-mono pr-2 border-r border-stone-200 dark:border-stone-700 mr-2 shrink-0">+86</span>
-                              <input
-                                type="tel"
-                                maxLength={11}
-                                value={phoneInput}
-                                onChange={e => setPhoneInput(e.target.value.replace(/\D/g, ''))}
-                                placeholder="输入11位网易云手机号"
-                                className="w-full bg-transparent font-mono text-stone-800 dark:text-stone-200 placeholder-stone-400 focus:outline-none"
-                              />
-                            </div>
+                {ncmAuthTab === 'phone' ? (
+                  <div
+                    key="platform-tab-phone"
+                    className="space-y-3"
+                  >
+                      <div className="space-y-2">
+                        <div className="space-y-1">
+                          <label className="text-[11px] font-medium text-stone-600 dark:text-stone-400">
+                            手机号码
+                          </label>
+                          <div className="flex items-center rounded-xl bg-white dark:bg-stone-800/80 border border-stone-200 dark:border-stone-700 px-3 py-2 text-xs">
+                            <span className="text-stone-400 font-mono pr-2 border-r border-stone-200 dark:border-stone-700 mr-2 shrink-0">+86</span>
+                            <input
+                              type="tel"
+                              maxLength={11}
+                              value={phoneInput}
+                              onChange={e => setPhoneInput(e.target.value.replace(/\D/g, ''))}
+                              placeholder={`输入11位${currentPlatformOpt.shortName}手机号`}
+                              className="w-full bg-transparent font-mono text-stone-800 dark:text-stone-200 placeholder-stone-400 focus:outline-none"
+                            />
                           </div>
+                        </div>
 
-                          <div className="space-y-1">
-                            <label className="text-[11px] font-medium text-stone-600 dark:text-stone-400">
-                              短信验证码
-                            </label>
-                            <div className="flex gap-1.5">
-                              <input
-                                type="text"
-                                maxLength={6}
-                                value={captchaInput}
-                                onChange={e => setCaptchaInput(e.target.value.trim())}
-                                placeholder="4位或6位验证码"
-                                className="flex-1 px-3 py-2 rounded-xl bg-white dark:bg-stone-800/80 border border-stone-200 dark:border-stone-700 text-xs font-mono text-stone-800 dark:text-stone-200 placeholder-stone-400 focus:outline-none"
-                              />
+                        <div className="space-y-1">
+                          <label className="text-[11px] font-medium text-stone-600 dark:text-stone-400">
+                            短信验证码
+                          </label>
+                          <div className="flex gap-1.5">
+                            <input
+                              type="text"
+                              maxLength={6}
+                              value={captchaInput}
+                              onChange={e => setCaptchaInput(e.target.value.trim())}
+                              placeholder="4位或6位验证码"
+                              className="flex-1 px-3 py-2 rounded-xl bg-white dark:bg-stone-800/80 border border-stone-200 dark:border-stone-700 text-xs font-mono text-stone-800 dark:text-stone-200 placeholder-stone-400 focus:outline-none"
+                            />
+                            <button
+                              type="button"
+                              onClick={handleSendPhoneCaptcha}
+                              disabled={isSendingCaptcha || captchaCountdown > 0 || phoneInput.trim().length !== 11}
+                              className="px-3 py-2 rounded-xl bg-stone-900/[0.06] hover:bg-stone-900/[0.12] dark:bg-white/[0.08] dark:hover:bg-white/[0.14] text-stone-700 dark:text-stone-200 text-xs font-medium shrink-0 transition-all cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed whitespace-nowrap"
+                            >
+                              {isSendingCaptcha ? '发送中...' : captchaCountdown > 0 ? `${captchaCountdown}s后重发` : '获取验证码'}
+                            </button>
+                          </div>
+                        </div>
+
+                        <button
+                          type="button"
+                          onClick={handleLoginWithPhoneCaptcha}
+                          disabled={isLoggingInPhone || phoneInput.trim().length !== 11 || !captchaInput.trim()}
+                          style={{ backgroundColor: brandHex }}
+                          className="w-full min-h-[44px] py-2.5 px-4 rounded-2xl hover:opacity-92 text-white text-xs font-semibold flex items-center justify-center gap-2 shadow-sm transition-all cursor-pointer active:scale-[0.98] disabled:opacity-50 mt-1"
+                        >
+                          {isLoggingInPhone ? <RefreshCw className="w-4 h-4 animate-spin" /> : <CheckCircle2 className="w-4 h-4" />}
+                          <span>{isLoggingInPhone ? '正在验证登录...' : '立即登录'}</span>
+                        </button>
+                      </div>
+                    </div>
+                  ) : (
+                    <div
+                      key="platform-tab-qr"
+                    >
+                      <div className="relative flex flex-col items-center justify-center my-1">
+                        <div className="relative w-40 h-40 sm:w-44 sm:h-44 p-2.5 rounded-2xl bg-white border border-stone-200 dark:border-stone-700 shadow-inner flex items-center justify-center overflow-hidden">
+                          {qrStatus === 'loading' && (
+                            <div className="flex flex-col items-center justify-center text-center p-4 space-y-3">
+                              <RefreshCw className="w-8 h-8 text-emerald-600 animate-spin" />
+                              <span className="text-xs text-stone-600 font-medium">
+                                正在建立官方认证通道...
+                              </span>
+                            </div>
+                          )}
+
+                          {qrImg && (qrStatus === 'waiting_scan' || qrStatus === 'waiting_confirm' || qrStatus === 'expired') && (
+                            <img
+                              src={qrImg}
+                              alt={`${currentPlatformOpt.shortName}登录二维码`}
+                              className={`w-full h-full object-contain transition-all duration-300 ${
+                                qrStatus === 'expired' ? 'blur-xs opacity-20' : qrStatus === 'waiting_confirm' ? 'opacity-25' : 'opacity-100'
+                              }`}
+                            />
+                          )}
+
+                          {qrStatus === 'waiting_confirm' && (
+                            <div className="absolute inset-0 bg-white/92 dark:bg-stone-900/92 flex flex-col items-center justify-center p-4 text-center space-y-2 animate-in fade-in">
+                              <div className="w-12 h-12 rounded-full bg-emerald-500/20 text-emerald-600 dark:text-emerald-400 flex items-center justify-center animate-bounce">
+                                <Smartphone className="w-6 h-6" />
+                              </div>
+                              <h4 className="text-xs font-bold text-stone-900 dark:text-stone-100">
+                                扫描成功！
+                              </h4>
+                              <p className="text-[11px] text-stone-600 dark:text-stone-400">
+                                请在{currentPlatformOpt.shortName} App 上轻触「确认登录」
+                              </p>
+                            </div>
+                          )}
+
+                          {qrStatus === 'expired' && (
+                            <div className="absolute inset-0 bg-white/90 dark:bg-stone-900/90 flex flex-col items-center justify-center p-4 text-center space-y-2.5 animate-in fade-in">
+                              <AlertCircle className="w-8 h-8 text-amber-500" />
+                              <span className="text-xs font-semibold text-stone-800 dark:text-stone-200">
+                                二维码已失效
+                              </span>
                               <button
                                 type="button"
-                                onClick={handleSendPhoneCaptcha}
-                                disabled={isSendingCaptcha || captchaCountdown > 0 || phoneInput.trim().length !== 11}
-                                className="px-3 py-2 rounded-xl bg-stone-900/[0.06] hover:bg-stone-900/[0.12] dark:bg-white/[0.08] dark:hover:bg-white/[0.14] text-stone-700 dark:text-stone-200 text-xs font-medium shrink-0 transition-all cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed whitespace-nowrap"
+                                onClick={() => startQrLogin(true)}
+                                className="px-3.5 py-1.5 rounded-xl bg-stone-900 dark:bg-stone-100 text-white dark:text-stone-900 text-xs font-semibold flex items-center gap-1.5 shadow-xs cursor-pointer hover:opacity-90 active:scale-95 transition-all"
                               >
-                                {isSendingCaptcha ? '发送中...' : captchaCountdown > 0 ? `${captchaCountdown}s后重发` : '获取验证码'}
+                                <RefreshCw className="w-3.5 h-3.5" />
+                                <span>点击刷新</span>
                               </button>
                             </div>
-                          </div>
+                          )}
 
-                          <button
-                            type="button"
-                            onClick={handleLoginWithPhoneCaptcha}
-                            disabled={isLoggingInPhone || phoneInput.trim().length !== 11 || !captchaInput.trim()}
-                            className="w-full min-h-[44px] py-2.5 px-4 rounded-2xl bg-[#E60026] hover:opacity-92 text-white text-xs font-semibold flex items-center justify-center gap-2 shadow-sm transition-all cursor-pointer active:scale-[0.98] disabled:opacity-50 mt-1"
-                          >
-                            {isLoggingInPhone ? <RefreshCw className="w-4 h-4 animate-spin" /> : <CheckCircle2 className="w-4 h-4" />}
-                            <span>{isLoggingInPhone ? '正在验证登录...' : '立即登录'}</span>
-                          </button>
-                        </div>
-                      </motion.div>
-                    ) : (
-                      <motion.div
-                        key="ncm-tab-qr"
-                        initial={{ opacity: 0, y: 8 }}
-                        animate={{ opacity: 1, y: 0 }}
-                        exit={{ opacity: 0, y: -8 }}
-                        transition={{ duration: 0.18 }}
-                      >
-                        <div className="relative flex flex-col items-center justify-center my-1">
-                          <div className="relative w-40 h-40 sm:w-44 sm:h-44 p-2.5 rounded-2xl bg-white border border-stone-200 dark:border-stone-700 shadow-inner flex items-center justify-center overflow-hidden">
-                            {qrStatus === 'loading' && (
-                              <div className="flex flex-col items-center justify-center text-center p-4 space-y-3">
-                                <RefreshCw className="w-8 h-8 text-emerald-600 animate-spin" />
-                                <span className="text-xs text-stone-600 font-medium">
-                                  正在建立官方认证通道...
-                                </span>
+                          {qrStatus === 'success' && (
+                            <div className="absolute inset-0 bg-white dark:bg-stone-900 flex flex-col items-center justify-center p-4 text-center space-y-2 animate-in zoom-in-95">
+                              <div className="w-12 h-12 rounded-full bg-emerald-500/20 text-emerald-600 dark:text-emerald-400 flex items-center justify-center">
+                                <CheckCircle2 className="w-7 h-7" />
                               </div>
-                            )}
-
-                            {qrImg && (qrStatus === 'waiting_scan' || qrStatus === 'waiting_confirm' || qrStatus === 'expired') && (
-                              <img
-                                src={qrImg}
-                                alt="网易云登录二维码"
-                                className={`w-full h-full object-contain transition-all duration-300 ${
-                                  qrStatus === 'expired' ? 'blur-xs opacity-20' : qrStatus === 'waiting_confirm' ? 'opacity-25' : 'opacity-100'
-                                }`}
-                              />
-                            )}
-
-                            {qrStatus === 'waiting_confirm' && (
-                              <div className="absolute inset-0 bg-white/92 dark:bg-stone-900/92 flex flex-col items-center justify-center p-4 text-center space-y-2 animate-in fade-in">
-                                <div className="w-12 h-12 rounded-full bg-emerald-500/20 text-emerald-600 dark:text-emerald-400 flex items-center justify-center animate-bounce">
-                                  <Smartphone className="w-6 h-6" />
-                                </div>
-                                <h4 className="text-xs font-bold text-stone-900 dark:text-stone-100">
-                                  扫描成功！
-                                </h4>
-                                <p className="text-[11px] text-stone-600 dark:text-stone-400">
-                                  请在网易云 App 上轻触「确认登录」
-                                </p>
-                              </div>
-                            )}
-
-                            {qrStatus === 'expired' && (
-                              <div className="absolute inset-0 bg-white/90 dark:bg-stone-900/90 flex flex-col items-center justify-center p-4 text-center space-y-2.5 animate-in fade-in">
-                                <AlertCircle className="w-8 h-8 text-amber-500" />
-                                <span className="text-xs font-semibold text-stone-800 dark:text-stone-200">
-                                  二维码已失效
-                                </span>
-                                <button
-                                  type="button"
-                                  onClick={() => startQrLogin(true)}
-                                  className="px-3.5 py-1.5 rounded-xl bg-stone-900 dark:bg-stone-100 text-white dark:text-stone-900 text-xs font-semibold flex items-center gap-1.5 shadow-xs cursor-pointer hover:opacity-90 active:scale-95 transition-all"
-                                >
-                                  <RefreshCw className="w-3.5 h-3.5" />
-                                  <span>点击刷新</span>
-                                </button>
-                              </div>
-                            )}
-
-                            {qrStatus === 'success' && (
-                              <div className="absolute inset-0 bg-white dark:bg-stone-900 flex flex-col items-center justify-center p-4 text-center space-y-2 animate-in zoom-in-95">
-                                <div className="w-12 h-12 rounded-full bg-emerald-500/20 text-emerald-600 dark:text-emerald-400 flex items-center justify-center">
-                                  <CheckCircle2 className="w-7 h-7" />
-                                </div>
-                                <h4 className="text-xs font-bold text-stone-900 dark:text-stone-100">
-                                  登录授权成功！
-                                </h4>
-                                <p className="text-[10px] text-emerald-600 dark:text-emerald-400">
-                                  已同步您的专属歌单与原声音源
-                                </p>
-                              </div>
-                            )}
-
-                            {qrStatus === 'error' && (
-                              <div className="flex flex-col items-center justify-center p-4 text-center space-y-2">
-                                <AlertCircle className="w-8 h-8 text-rose-500" />
-                                <span className="text-xs text-rose-600 font-medium">{qrStatusText}</span>
-                                <button
-                                  type="button"
-                                  onClick={() => startQrLogin(true)}
-                                  className="mt-1 px-3 py-1 rounded-lg bg-stone-200 dark:bg-stone-700 text-xs font-medium cursor-pointer"
-                                >
-                                  重试
-                                </button>
-                              </div>
-                            )}
-                          </div>
-
-                          <div className="mt-1.5 text-center">
-                            <span className="text-xs text-stone-600 dark:text-stone-400 font-medium block">
-                              {qrStatusText}
-                            </span>
-                          </div>
-                        </div>
-
-                        {/* QR Actions */}
-                        <div className="mt-2.5">
-                          <button
-                            type="button"
-                            onClick={handleSaveQrAndLaunchApp}
-                            disabled={!qrImg || qrStatus === 'loading' || qrStatus === 'success'}
-                            className="w-full min-h-[46px] py-2.5 px-4 rounded-2xl bg-[#E60026] hover:opacity-92 text-white text-xs font-semibold flex items-center justify-center gap-2 shadow-sm transition-all cursor-pointer active:scale-[0.98] disabled:opacity-50"
-                          >
-                            <Download className="w-4 h-4 shrink-0 text-white" />
-                            <span>保存二维码并打开网易云</span>
-                          </button>
-                        </div>
-
-                        <div className="mt-3 flex items-center justify-between">
-                          <button
-                            type="button"
-                            onClick={() => startQrLogin(true)}
-                            disabled={qrStatus === 'loading' || qrStatus === 'success'}
-                            className="text-xs text-stone-500 hover:text-stone-800 dark:hover:text-stone-200 flex items-center gap-1.5 cursor-pointer py-1.5 px-2.5 rounded-lg hover:bg-stone-100 dark:hover:bg-stone-800 transition-colors disabled:opacity-40"
-                          >
-                            <RefreshCw className={`w-3.5 h-3.5 ${qrStatus === 'loading' ? 'animate-spin' : ''}`} />
-                            <span>刷新二维码</span>
-                          </button>
-
-                          <button
-                            type="button"
-                            onClick={() => setIsQrModalOpen(false)}
-                            className="px-4 py-1.5 rounded-xl bg-stone-200 hover:bg-stone-300 dark:bg-stone-800 dark:hover:bg-stone-700 text-stone-800 dark:text-stone-200 text-xs font-medium transition-colors cursor-pointer"
-                          >
-                            关闭
-                          </button>
-                        </div>
-                      </motion.div>
-                    )
-                  ) : (
-                    /* Branch B: Other Music Platforms (QQ, KuGou, KuWo, MiGu, Spotify) */
-                    otherPlatformSubTab === 'web_login' ? (
-                      <motion.div
-                        key="other-tab-web"
-                        initial={{ opacity: 0, y: 8 }}
-                        animate={{ opacity: 1, y: 0 }}
-                        exit={{ opacity: 0, y: -8 }}
-                        transition={{ duration: 0.18 }}
-                        className="space-y-3"
-                      >
-                        <div className="p-3 rounded-2xl bg-blue-500/10 border border-blue-500/20 text-blue-950 dark:text-blue-200 text-xs flex items-start gap-2.5">
-                          <Globe className="w-4 h-4 shrink-0 text-blue-500 mt-0.5" />
-                          <div className="space-y-0.5 text-[11px] leading-relaxed">
-                            <span className="font-semibold block">{currentPlatformOpt.name} 官方网页极速登录</span>
-                            <span className="text-blue-800/80 dark:text-blue-300/80 block">
-                              无需电脑即可在手机浏览器打开官方安全登录页面，登录后支持直接导入自建歌单与同步账号凭据。
-                            </span>
-                          </div>
-                        </div>
-
-                        <div className="flex flex-col gap-2">
-                          <button
-                            type="button"
-                            onClick={() => {
-                              const webUrl = currentPlatformOpt.buildAuthUrl ? currentPlatformOpt.buildAuthUrl('') : 'https://y.qq.com/';
-                              window.open(webUrl, '_blank');
-                              showToast(`已在浏览器中打开 ${currentPlatformOpt.name} 官方登录页面`);
-                            }}
-                            style={{ backgroundColor: brandHex }}
-                            className="w-full min-h-[44px] py-2.5 px-4 rounded-2xl text-white text-xs font-semibold flex items-center justify-center gap-2 shadow-sm transition-all cursor-pointer active:scale-[0.98]"
-                          >
-                            <ExternalLink className="w-4 h-4 shrink-0" />
-                            <span>在浏览器中打开 {currentPlatformOpt.name} 官网登录</span>
-                          </button>
-
-                          <button
-                            type="button"
-                            onClick={() => setOtherPlatformSubTab('auth')}
-                            className="w-full min-h-[40px] py-2 px-3 rounded-xl bg-stone-900/[0.06] hover:bg-stone-900/[0.11] dark:bg-white/[0.08] dark:hover:bg-white/[0.14] text-stone-700 dark:text-stone-200 text-xs font-medium flex items-center justify-center gap-1.5 transition-all cursor-pointer active:scale-[0.98]"
-                          >
-                            <CheckCircle2 className="w-3.5 h-3.5 shrink-0 text-emerald-500" />
-                            <span>已在网页端登录，去绑定账号/凭据</span>
-                          </button>
-                        </div>
-
-                        <div className="p-3 rounded-2xl bg-stone-100/70 dark:bg-stone-800/50 border border-stone-200/60 dark:border-stone-700/60 space-y-1.5 text-[11px] text-stone-600 dark:text-stone-400">
-                          <div className="flex items-center gap-2">
-                            <span className="w-4 h-4 rounded-full bg-stone-900/10 dark:bg-white/10 text-stone-700 dark:text-stone-200 font-bold text-[10px] flex items-center justify-center shrink-0">1</span>
-                            <span>点击上方主按钮，在系统浏览器打开官方网页端登录</span>
-                          </div>
-                          <div className="flex items-center gap-2">
-                            <span className="w-4 h-4 rounded-full bg-stone-900/10 dark:bg-white/10 text-stone-700 dark:text-stone-200 font-bold text-[10px] flex items-center justify-center shrink-0">2</span>
-                            <span>登录成功后，在「账号绑定」填入您的账号标识或凭据</span>
-                          </div>
-                          <div className="flex items-center gap-2">
-                            <span className="w-4 h-4 rounded-full bg-stone-900/10 dark:bg-white/10 text-stone-700 dark:text-stone-200 font-bold text-[10px] flex items-center justify-center shrink-0">3</span>
-                            <span>完成关联，即可永久打通原声与专属歌单通道</span>
-                          </div>
-                        </div>
-
-                        <div className="mt-2 text-center">
-                          <button
-                            type="button"
-                            onClick={() => setIsQrModalOpen(false)}
-                            className="px-4 py-1.5 rounded-xl bg-stone-200 hover:bg-stone-300 dark:bg-stone-800 dark:hover:bg-stone-700 text-stone-800 dark:text-stone-200 text-xs font-medium transition-colors cursor-pointer"
-                          >
-                            关闭
-                          </button>
-                        </div>
-                      </motion.div>
-                    ) : otherPlatformSubTab === 'direct' ? (
-                      <motion.div
-                        key="other-tab-direct"
-                        initial={{ opacity: 0, y: 8 }}
-                        animate={{ opacity: 1, y: 0 }}
-                        exit={{ opacity: 0, y: -8 }}
-                        transition={{ duration: 0.18 }}
-                        className="space-y-3"
-                      >
-                        <div className="w-full py-4 px-4 rounded-2xl bg-white dark:bg-stone-900/90 border border-stone-200/80 dark:border-stone-700/80 shadow-inner flex flex-col items-center justify-center text-center space-y-2">
-                          <div className="w-12 h-12 rounded-2xl shadow-md flex items-center justify-center overflow-hidden">
-                            <ModalPlatformIcon className="w-12 h-12" />
-                          </div>
-                          <div className="space-y-0.5">
-                            <div className="flex items-center justify-center gap-1.5">
-                              <span className="text-sm font-bold text-stone-800 dark:text-stone-100">
-                                {currentPlatformOpt.name}免登直连通道
-                              </span>
-                              <span className="px-1.5 py-0.5 rounded-md bg-emerald-500/15 text-emerald-600 dark:text-emerald-400 text-[10px] font-bold">
-                                {currentPlatformOpt.badge || '直连解析'}
-                              </span>
+                              <h4 className="text-xs font-bold text-stone-900 dark:text-stone-100">
+                                登录授权成功！
+                              </h4>
+                              <p className="text-[10px] text-emerald-600 dark:text-emerald-400">
+                                已同步您的专属歌单与原声音源
+                              </p>
                             </div>
-                            <p className="text-[11px] text-stone-500 dark:text-stone-400 px-2 leading-relaxed">
-                              无需繁琐账号密码，支持公开歌单、自建分享歌单与单曲链接一键直连入库
-                            </p>
-                          </div>
-                        </div>
+                          )}
 
-                        <div className="flex flex-col gap-2">
-                          <button
-                            type="button"
-                            onClick={() => {
-                              triggerPlatformDeepLink(activeMusicPlatform);
-                            }}
-                            style={{ backgroundColor: brandHex }}
-                            className="w-full min-h-[44px] py-2.5 px-4 rounded-2xl hover:opacity-90 text-white text-xs font-semibold flex items-center justify-center gap-2 shadow-sm transition-all cursor-pointer active:scale-[0.98]"
-                          >
-                            <ExternalLink className="w-4 h-4 shrink-0" />
-                            <span>打开 {currentPlatformOpt.shortName} App 复制歌单</span>
-                          </button>
-
-                          <button
-                            type="button"
-                            onClick={async () => {
-                              try {
-                                if (navigator.clipboard?.readText) {
-                                  const clip = await navigator.clipboard.readText();
-                                  if (clip && clip.trim()) {
-                                    setPlaylistUrl(clip.trim());
-                                    setIsQrModalOpen(false);
-                                    handleSyncPlaylist(clip.trim());
-                                    return;
-                                  }
-                                }
-                              } catch {}
-                              setIsQrModalOpen(false);
-                              setIsPlaylistInputOpen(true);
-                              showToast('请直接在输入框中粘贴歌单链接');
-                            }}
-                            className="w-full min-h-[42px] py-2.5 px-4 rounded-2xl bg-stone-900 hover:bg-stone-800 dark:bg-stone-100 dark:hover:bg-white text-white dark:text-stone-900 text-xs font-semibold flex items-center justify-center gap-2 transition-all cursor-pointer active:scale-[0.98]"
-                          >
-                            <CheckCircle2 className="w-4 h-4 shrink-0 text-emerald-400 dark:text-emerald-600" />
-                            <span>已复制链接，立即导入</span>
-                          </button>
-
-                          <button
-                            type="button"
-                            onClick={() => {
-                              setIsQrModalOpen(false);
-                              const defaultUrl = currentPlatformOpt.defaultPlaylistUrl;
-                              setPlaylistUrl(defaultUrl);
-                              handleSyncPlaylist(defaultUrl);
-                            }}
-                            className="w-full min-h-[40px] py-2 px-3 rounded-xl bg-stone-900/[0.06] hover:bg-stone-900/[0.11] dark:bg-white/[0.08] dark:hover:bg-white/[0.14] text-stone-700 dark:text-stone-200 text-xs font-medium flex items-center justify-center gap-1.5 transition-all cursor-pointer active:scale-[0.98]"
-                          >
-                            <Sparkles className="w-3.5 h-3.5 shrink-0 text-amber-500" />
-                            <span>一键载入 {currentPlatformOpt.shortName}精选英语歌单</span>
-                          </button>
-                        </div>
-
-                        <div className="p-3 rounded-2xl bg-stone-100/70 dark:bg-stone-800/50 border border-stone-200/60 dark:border-stone-700/60 space-y-1.5 text-[11px] text-stone-600 dark:text-stone-400">
-                          <div className="flex items-center gap-2">
-                            <span className="w-4 h-4 rounded-full bg-stone-900/10 dark:bg-white/10 text-stone-700 dark:text-stone-200 font-bold text-[10px] flex items-center justify-center shrink-0">1</span>
-                            <span>在 {currentPlatformOpt.shortName} App 中打开任意公开或自建歌单</span>
-                          </div>
-                          <div className="flex items-center gap-2">
-                            <span className="w-4 h-4 rounded-full bg-stone-900/10 dark:bg-white/10 text-stone-700 dark:text-stone-200 font-bold text-[10px] flex items-center justify-center shrink-0">2</span>
-                            <span>轻触右上角「分享」→「复制链接」</span>
-                          </div>
-                          <div className="flex items-center gap-2">
-                            <span className="w-4 h-4 rounded-full bg-stone-900/10 dark:bg-white/10 text-stone-700 dark:text-stone-200 font-bold text-[10px] flex items-center justify-center shrink-0">3</span>
-                            <span>回到 LyricaLens 点击「已复制链接，立即导入」</span>
-                          </div>
-                        </div>
-
-                        <div className="mt-2 text-center">
-                          <button
-                            type="button"
-                            onClick={() => setIsQrModalOpen(false)}
-                            className="px-4 py-1.5 rounded-xl bg-stone-200 hover:bg-stone-300 dark:bg-stone-800 dark:hover:bg-stone-700 text-stone-800 dark:text-stone-200 text-xs font-medium transition-colors cursor-pointer"
-                          >
-                            关闭
-                          </button>
-                        </div>
-                      </motion.div>
-                    ) : (
-                      <motion.div
-                        key="other-tab-auth"
-                        initial={{ opacity: 0, y: 8 }}
-                        animate={{ opacity: 1, y: 0 }}
-                        exit={{ opacity: 0, y: -8 }}
-                        transition={{ duration: 0.18 }}
-                        className="space-y-3"
-                      >
-                        <div className="p-3 rounded-2xl bg-emerald-500/10 border border-emerald-500/20 text-emerald-950 dark:text-emerald-200 text-xs flex items-start gap-2.5">
-                          <Key className="w-4 h-4 shrink-0 text-emerald-500 mt-0.5" />
-                          <div className="space-y-0.5 text-[11px] leading-relaxed">
-                            <span className="font-semibold block">{currentPlatformOpt.name} 凭据 / 账号绑定</span>
-                            <span className="text-emerald-800/80 dark:text-emerald-300/80 block">
-                              绑定您的 {currentPlatformOpt.shortName} VIP 凭据（如绿钻 Cookie / Token / 用户号），可永久解锁专属无损音源。
-                            </span>
-                          </div>
-                        </div>
-
-                        {platformProfiles[activeMusicPlatform] && (
-                          <div className="p-3 rounded-2xl bg-white dark:bg-stone-800/80 border border-stone-200 dark:border-stone-700 flex items-center justify-between gap-2">
-                            <div className="min-w-0">
-                              <span className="text-xs font-semibold text-stone-800 dark:text-stone-200 block truncate">
-                                当前已关联：{platformProfiles[activeMusicPlatform]!.nickname}
-                              </span>
-                              <span className="text-[10px] text-emerald-600 dark:text-emerald-400 block truncate mt-0.5">
-                                {platformProfiles[activeMusicPlatform]!.vipLabel || 'VIP 凭据已生效'}
-                              </span>
+                          {qrStatus === 'error' && (
+                            <div className="flex flex-col items-center justify-center p-4 text-center space-y-2">
+                              <AlertCircle className="w-8 h-8 text-rose-500" />
+                              <span className="text-xs text-rose-600 font-medium">{qrStatusText}</span>
+                              <button
+                                type="button"
+                                onClick={() => startQrLogin(true)}
+                                className="mt-1 px-3 py-1 rounded-lg bg-stone-200 dark:bg-stone-700 text-xs font-medium cursor-pointer"
+                              >
+                                重试
+                              </button>
                             </div>
-                            <button
-                              type="button"
-                              onClick={() => handleLogoutOtherPlatform(activeMusicPlatform)}
-                              className="px-2.5 py-1 rounded-lg text-rose-500 hover:bg-rose-500/10 text-xs font-medium cursor-pointer transition-colors"
-                            >
-                              解除关联
-                            </button>
-                          </div>
-                        )}
+                          )}
+                        </div>
 
-                        <div className="space-y-2">
-                          <label className="text-[11px] font-medium text-stone-600 dark:text-stone-400">
+                        <div className="mt-1.5 text-center">
+                          <span className="text-xs text-stone-600 dark:text-stone-400 font-medium block">
+                            {qrStatusText}
+                          </span>
+                        </div>
+                      </div>
+
+                      {/* QR Actions */}
+                      <div className="mt-2.5">
+                        <button
+                          type="button"
+                          onClick={handleSaveQrAndLaunchApp}
+                          disabled={!qrImg || qrStatus === 'loading' || qrStatus === 'success'}
+                          style={{ backgroundColor: brandHex }}
+                          className="w-full min-h-[46px] py-2.5 px-4 rounded-2xl hover:opacity-92 text-white text-xs font-semibold flex items-center justify-center gap-2 shadow-sm transition-all cursor-pointer active:scale-[0.98] disabled:opacity-50"
+                        >
+                          <Download className="w-4 h-4 shrink-0 text-white" />
+                          <span>
                             {activeMusicPlatform === 'qq'
-                              ? 'QQ 号 / 绿钻 Cookie (uin + qm_keyst)'
-                              : activeMusicPlatform === 'kugou'
-                              ? '酷狗 Token / 用户 ID'
-                              : activeMusicPlatform === 'kuwo'
-                              ? '酷我 kw_token / 用户 ID'
-                              : activeMusicPlatform === 'migu'
-                              ? '咪咕手机号 / Token'
-                              : 'Spotify 用户名 / Access Token'}
-                          </label>
+                              ? '保存二维码并打开 QQ'
+                              : `保存二维码并打开${currentPlatformOpt.shortName}`}
+                          </span>
+                        </button>
+                      </div>
 
-                          <div className="flex gap-1.5">
-                            <div className="relative flex-1">
-                              <input
-                                type="text"
-                                value={otherPlatformCredentialInput}
-                                onChange={e => setOtherPlatformCredentialInput(e.target.value)}
-                                placeholder={
-                                  activeMusicPlatform === 'qq'
-                                    ? '粘贴 QQ 号或绿钻 Cookie...'
-                                    : activeMusicPlatform === 'kugou'
-                                    ? '粘贴酷狗 Token 或 ID...'
-                                    : activeMusicPlatform === 'kuwo'
-                                    ? '粘贴酷我 kw_token 或 ID...'
-                                    : activeMusicPlatform === 'migu'
-                                    ? '粘贴咪咕手机号或凭据...'
-                                    : '粘贴 Spotify 用户名或凭据...'
-                                }
-                                className="w-full px-3 py-2 rounded-xl bg-white dark:bg-stone-800/80 border border-stone-200 dark:border-stone-700 text-xs font-mono text-stone-800 dark:text-stone-200 placeholder-stone-400 focus:outline-none focus:ring-2 focus:ring-stone-400/30"
-                              />
-                            </div>
-                            <button
-                              type="button"
-                              onClick={async () => {
-                                try {
-                                  if (navigator.clipboard?.readText) {
-                                    const clip = await navigator.clipboard.readText();
-                                    if (clip && clip.trim()) {
-                                      setOtherPlatformCredentialInput(clip.trim());
-                                      showToast('已从剪贴板粘贴');
-                                    }
-                                  }
-                                } catch {
-                                  showToast('请直接长按输入框粘贴');
-                                }
-                              }}
-                              className="px-3 py-2 rounded-xl bg-stone-900/[0.06] hover:bg-stone-900/[0.12] dark:bg-white/[0.08] dark:hover:bg-white/[0.14] text-stone-700 dark:text-stone-200 text-xs font-medium shrink-0 cursor-pointer"
-                            >
-                              粘贴
-                            </button>
-                          </div>
+                      <div className="mt-3 flex items-center justify-between">
+                        <button
+                          type="button"
+                          onClick={() => startQrLogin(true)}
+                          disabled={qrStatus === 'loading' || qrStatus === 'success'}
+                          className="text-xs text-stone-500 hover:text-stone-800 dark:hover:text-stone-200 flex items-center gap-1.5 cursor-pointer py-1.5 px-2.5 rounded-lg hover:bg-stone-100 dark:hover:bg-stone-800 transition-colors disabled:opacity-40"
+                        >
+                          <RefreshCw className={`w-3.5 h-3.5 ${qrStatus === 'loading' ? 'animate-spin' : ''}`} />
+                          <span>刷新二维码</span>
+                        </button>
 
-                          <button
-                            type="button"
-                            onClick={() => handleBindOtherPlatform(activeMusicPlatform)}
-                            disabled={!otherPlatformCredentialInput.trim()}
-                            className="w-full min-h-[44px] py-2.5 px-4 rounded-2xl bg-stone-900 dark:bg-stone-100 text-white dark:text-stone-900 text-xs font-semibold flex items-center justify-center gap-1.5 cursor-pointer disabled:opacity-50 mt-1"
-                          >
-                            <CheckCircle2 className="w-4 h-4" />
-                            <span>保存并关联 {currentPlatformOpt.shortName} 账号</span>
-                          </button>
-                        </div>
-
-                        <div className="mt-2 text-center">
-                          <button
-                            type="button"
-                            onClick={() => setIsQrModalOpen(false)}
-                            className="px-4 py-1.5 rounded-xl bg-stone-200 hover:bg-stone-300 dark:bg-stone-800 dark:hover:bg-stone-700 text-stone-800 dark:text-stone-200 text-xs font-medium transition-colors cursor-pointer"
-                          >
-                            关闭
-                          </button>
-                        </div>
-                      </motion.div>
-                    )
+                        <button
+                          type="button"
+                          onClick={() => setIsQrModalOpen(false)}
+                          className="px-4 py-1.5 rounded-xl bg-stone-200 hover:bg-stone-300 dark:bg-stone-800 dark:hover:bg-stone-700 text-stone-800 dark:text-stone-200 text-xs font-medium transition-colors cursor-pointer"
+                        >
+                          关闭
+                        </button>
+                      </div>
+                    </div>
                   )}
-                </AnimatePresence>
               </motion.div>
             </motion.div>
             );

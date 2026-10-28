@@ -31,95 +31,108 @@ export class LyricalensDatabase extends Dexie {
 
 export const db = new LyricalensDatabase();
 
+let dbInitPromise: Promise<void> | null = null;
+
 // Populate initial seeds if tables are empty or migrate missing mastery levels
-export async function initializeDatabase(): Promise<void> {
-  try {
-    // 1. Seed or sync initial vocabulary words safely without throwing uniqueness constraint errors
-    for (const seed of SEED_WORDS) {
-      try {
-        const lower = seed.word.toLowerCase().trim();
-        const existing = await db.words.where('word').equalsIgnoreCase(lower).first();
-        if (!existing) {
-          await db.words.add({ ...seed, word: lower } as WordItem);
-        } else if (existing.id && typeof existing.masteryLevel === 'undefined') {
-          await db.words.update(existing.id, { masteryLevel: seed.masteryLevel ?? 1 });
-        }
-      } catch (itemErr) {
-        // Silently skip if key uniqueness was satisfied concurrently
-      }
-    }
-
-    // 2. Backfill missing mastery levels on existing data if needed
+export function initializeDatabase(): Promise<void> {
+  if (dbInitPromise) return dbInitPromise;
+  dbInitPromise = (async () => {
     try {
-      const existingWords = await db.words.toArray();
-      const STOP_WORDS = new Set([
-        'the', 'a', 'an', 'in', 'on', 'at', 'by', 'for', 'with', 'about', 'against', 'between', 'into',
-        'through', 'during', 'before', 'after', 'above', 'below', 'to', 'from', 'up', 'down',
-        'and', 'but', 'or', 'nor', 'so', 'yet', 'of', 'off', 'over', 'under',
-        'is', 'am', 'are', 'was', 'were', 'be', 'been', 'being',
-        'have', 'has', 'had', 'do', 'does', 'did',
-        'it', 'its', 'this', 'that', 'these', 'those',
-        'i', 'you', 'he', 'she', 'we', 'they', 'me', 'him', 'her', 'us', 'them', 'my', 'your', 'his', 'their', 'our',
-        'room', 'light', 'gentle', 'morning', 'filters', 'quiet', 'breathing', 'soft', 'notes', 'like', 'blooming', 'flower', 'every', 'whisper', 'holds', 'stillness', 'warm', 'silent', 'space', 'beneath', 'concrete'
-      ]);
-
-      const seedWordsSet = new Set(SEED_WORDS.map(s => s.word.toLowerCase()));
-      const idsToDelete: number[] = [];
-
-      for (const w of existingWords) {
-        if (!w || !w.word) continue;
-        const lower = w.word.toLowerCase();
-        // Remove common words that were accidentally auto-collected on tap if they are not in seed words and not explicitly starred
-        if (!seedWordsSet.has(lower) && STOP_WORDS.has(lower) && w.sourceContext === 'Daily Collect' && w.id) {
-          idsToDelete.push(w.id);
-          continue;
+      const existingCount = await db.words.count();
+      if (existingCount === 0) {
+        for (const seed of SEED_WORDS) {
+          try {
+            const lower = seed.word.toLowerCase().trim();
+            await db.words.put({ ...seed, word: lower } as WordItem);
+          } catch {}
+        }
+      } else {
+        // 1. Seed or sync initial vocabulary words safely without throwing uniqueness constraint errors
+        const existingWords = await db.words.toArray();
+        const existingMap = new Map(existingWords.filter(w => w && w.word).map(w => [w.word.toLowerCase().trim(), w]));
+        for (const seed of SEED_WORDS) {
+          try {
+            const lower = seed.word.toLowerCase().trim();
+            const existing = existingMap.get(lower);
+            if (!existing) {
+              await db.words.put({ ...seed, word: lower } as WordItem);
+            } else if (existing.id && typeof existing.masteryLevel === 'undefined') {
+              await db.words.update(existing.id, { masteryLevel: seed.masteryLevel ?? 1 });
+            }
+          } catch {}
         }
 
-        if (w.id && typeof w.masteryLevel === 'undefined') {
-          // Find seed match or assign default based on isStarred
-          const seedMatch = SEED_WORDS.find(s => s.word.toLowerCase() === lower);
-          const level: MasteryLevel = seedMatch?.masteryLevel ?? (w.isStarred ? 1 : 0);
-          await db.words.update(w.id, { masteryLevel: level });
-        }
-      }
+        // 2. Backfill missing mastery levels on existing data if needed
+        try {
+          const STOP_WORDS = new Set([
+            'the', 'a', 'an', 'in', 'on', 'at', 'by', 'for', 'with', 'about', 'against', 'between', 'into',
+            'through', 'during', 'before', 'after', 'above', 'below', 'to', 'from', 'up', 'down',
+            'and', 'but', 'or', 'nor', 'so', 'yet', 'of', 'off', 'over', 'under',
+            'is', 'am', 'are', 'was', 'were', 'be', 'been', 'being',
+            'have', 'has', 'had', 'do', 'does', 'did',
+            'it', 'its', 'this', 'that', 'these', 'those',
+            'i', 'you', 'he', 'she', 'we', 'they', 'me', 'him', 'her', 'us', 'them', 'my', 'your', 'his', 'their', 'our',
+            'room', 'light', 'gentle', 'morning', 'filters', 'quiet', 'breathing', 'soft', 'notes', 'like', 'blooming', 'flower', 'every', 'whisper', 'holds', 'stillness', 'warm', 'silent', 'space', 'beneath', 'concrete'
+          ]);
 
-      if (idsToDelete.length > 0) {
-        await db.words.bulkDelete(idsToDelete);
-      }
-    } catch {}
+          const seedWordsSet = new Set(SEED_WORDS.map(s => s.word.toLowerCase()));
+          const idsToDelete: number[] = [];
 
-    // 3. Clean up demo songs from database if they exist and seed defaults
-    try {
-      await db.songs.bulkDelete(['song-jasmine-breeze', 'song-urban-solitude', '1', '2']);
-      const allDbSongs = await db.songs.toArray();
-      const demoIds = allDbSongs
-        .filter(s => s && (s.title === 'Jasmine Breeze' || s.title === 'Urban Solitude'))
-        .map(s => s.id);
-      if (demoIds.length > 0) {
-        await db.songs.bulkDelete(demoIds);
-      }
-      const songCount = await db.songs.count();
-      if (songCount === 0 && SEED_SONGS.length > 0) {
-        await db.songs.bulkPut(SEED_SONGS);
-      }
-    } catch {}
+          for (const w of existingWords) {
+            if (!w || !w.word) continue;
+            const lower = w.word.toLowerCase();
+            if (!seedWordsSet.has(lower) && STOP_WORDS.has(lower) && w.sourceContext === 'Daily Collect' && w.id) {
+              idsToDelete.push(w.id);
+              continue;
+            }
 
-    // 4. Clean up any fake seed IELTS tests and start fresh from 0
-    try {
-      if (localStorage.getItem('lyricalens_db_clean_tests_v2') !== 'true') {
-        const seedTitles = new Set(SEED_IELTS_TESTS.map(t => t.passageTitle));
-        const allTests = await db.ieltsTests.toArray();
-        for (const t of allTests) {
-          if (t.id && seedTitles.has(t.passageTitle)) {
-            await db.ieltsTests.delete(t.id);
+            if (w.id && typeof w.masteryLevel === 'undefined') {
+              const seedMatch = SEED_WORDS.find(s => s.word.toLowerCase() === lower);
+              const level: MasteryLevel = seedMatch?.masteryLevel ?? (w.isStarred ? 1 : 0);
+              await db.words.update(w.id, { masteryLevel: level });
+            }
           }
-        }
-        localStorage.setItem('lyricalens_db_clean_tests_v2', 'true');
+
+          if (idsToDelete.length > 0) {
+            await db.words.bulkDelete(idsToDelete);
+          }
+        } catch {}
       }
-    } catch {}
-  } catch (error) {
-    console.warn('Handled initial Dexie synchronization notice:', error);
-  }
+
+      // 3. Clean up demo songs from database if they exist and seed defaults
+      try {
+        const allDbSongs = await db.songs.toArray();
+        const legacyIds = new Set(['song-jasmine-breeze', 'song-urban-solitude', '1', '2']);
+        const demoIds = allDbSongs
+          .filter(s => s && (legacyIds.has(s.id) || s.title === 'Jasmine Breeze' || s.title === 'Urban Solitude'))
+          .map(s => s.id);
+        if (demoIds.length > 0) {
+          await db.songs.bulkDelete(demoIds);
+        }
+        const songCount = await db.songs.count();
+        if (songCount === 0 && SEED_SONGS.length > 0) {
+          await db.songs.bulkPut(SEED_SONGS);
+        }
+      } catch {}
+
+      // 4. Clean up any fake seed IELTS tests and start fresh from 0
+      try {
+        if (localStorage.getItem('lyricalens_db_clean_tests_v2') !== 'true') {
+          const seedTitles = new Set(SEED_IELTS_TESTS.map(t => t.passageTitle));
+          const allTests = await db.ieltsTests.toArray();
+          for (const t of allTests) {
+            if (t.id && seedTitles.has(t.passageTitle)) {
+              await db.ieltsTests.delete(t.id);
+            }
+          }
+          localStorage.setItem('lyricalens_db_clean_tests_v2', 'true');
+        }
+      } catch {}
+    } catch (error) {
+      console.warn('Handled initial Dexie synchronization notice:', error);
+    }
+  })();
+  return dbInitPromise;
 }
 
 // Helper: Toggle star status with fast execution

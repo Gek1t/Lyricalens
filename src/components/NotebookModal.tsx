@@ -86,9 +86,13 @@ export const NotebookModal: React.FC<NotebookModalProps> = ({ isOpen, onClose })
   const showToast = useAppStore(s => s.showToast);
 
   // Live Dexie database query
-  const allWords = useLiveQuery(
-    () => db.words.orderBy('addedTimestamp').reverse().toArray(),
+  const rawAllWords = useLiveQuery(
+    () => db.words.toArray(),
     []
+  );
+  const allWords = useMemo(
+    () => (rawAllWords ? [...rawAllWords].sort((a, b) => (b.addedTimestamp || 0) - (a.addedTimestamp || 0)) : undefined),
+    [rawAllWords]
   );
 
   // Spaced Repetition Due Words Calculation
