@@ -1,0 +1,6 @@
+{
+  "summary":  "Implementation plan for shortening the playlist toggle subtitle to '浏览歌单 / 收起歌单', aligning QQ Music's logged-in UI and cloud playlist loading with NetEase Cloud Music (real QQ avatar, refresh button, and automatic QQ playlist fetching), and updating the QQ Music QR tab to explicitly guide scanning with Mobile QQ and launch Mobile QQ.",
+  "updatedAt":  "2026-10-28T13:21:38.140750195Z",
+  "requestFeedback":  true,
+  "userFacing":  true
+}

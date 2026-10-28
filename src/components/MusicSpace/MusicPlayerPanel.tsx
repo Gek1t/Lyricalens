@@ -740,8 +740,10 @@ export const MusicPlayerPanel: React.FC<MusicPlayerPanelProps> = ({ onOpenNotebo
         onLoadedData={(e) => tryRestorePlaybackPosition(e.currentTarget)}
         onCanPlay={handleAudioCanPlay}
         onError={() => {
-          console.warn('Audio tag playback error on stream, attempting multi-platform auto-heal fallback...');
           const rawId = currentSong.id || '';
+          if (!rawId || rawId.startsWith('song-') || rawId.startsWith('local-')) {
+            return;
+          }
           let platformServer = 'netease';
           let cleanId = rawId;
 
@@ -764,8 +766,6 @@ export const MusicPlayerPanel: React.FC<MusicPlayerPanelProps> = ({ onOpenNotebo
           if (cleanId && !fallbackStreamUrl) {
             const fallbackUrl = `https://api.injahow.cn/meting/?type=url&id=${encodeURIComponent(cleanId)}&server=${platformServer}`;
             setFallbackStreamUrl(fallbackUrl);
-          } else if (cleanId && fallbackStreamUrl && !fallbackStreamUrl.includes('meting.iqiq.io')) {
-            setFallbackStreamUrl(`https://meting.iqiq.io/api?type=url&id=${encodeURIComponent(cleanId)}&server=${platformServer}`);
           }
         }}
         onEnded={handleSongEnded}

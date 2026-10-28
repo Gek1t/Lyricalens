@@ -743,6 +743,7 @@ export async function fetchPlaylistClient(
 
 export interface PlatformAuthProfile {
   platform: SupportedMusicPlatform;
+  userId?: string | number;
   nickname: string;
   avatarUrl?: string;
   isVip?: boolean;
@@ -754,7 +755,19 @@ export interface PlatformAuthProfile {
 export function getStoredPlatformAuth(platform: SupportedMusicPlatform): PlatformAuthProfile | null {
   try {
     const raw = localStorage.getItem(`lyricalens_${platform}_profile`);
-    return raw ? JSON.parse(raw) : null;
+    if (!raw) return null;
+    const parsed: PlatformAuthProfile = JSON.parse(raw);
+    if (platform === 'qq' && parsed) {
+      const qqCookie = localStorage.getItem('lyricalens_qq_cookie') || '';
+      const cookieUinMatch = qqCookie.match(/(?:pt2gguin|p_uin|uin|ptui_loginuin)=o?0*([1-9][0-9]{4,12})/);
+      const existingUinMatch = String(parsed.userId || '').match(/^o?0*([1-9][0-9]{4,12})$/);
+      const cleanUin = cookieUinMatch?.[1] || existingUinMatch?.[1] || '';
+      if (cleanUin) {
+        parsed.userId = cleanUin;
+        parsed.avatarUrl = `https://q1.qlogo.cn/g?b=qq&nk=${cleanUin}&s=100`;
+      }
+    }
+    return parsed;
   } catch {
     return null;
   }

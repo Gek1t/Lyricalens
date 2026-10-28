@@ -24,7 +24,11 @@ interface IELTSArchivesTabProps {
 }
 
 export const IELTSArchivesTab: React.FC<IELTSArchivesTabProps> = ({ onOpenReview }) => {
-  const tests = useLiveQuery(() => db.ieltsTests.orderBy('timestamp').reverse().toArray(), []) || [];
+  const rawTests = useLiveQuery(() => db.ieltsTests.toArray(), []);
+  const tests = useMemo(
+    () => (rawTests ? [...rawTests].sort((a, b) => (b.timestamp || 0) - (a.timestamp || 0)) : []),
+    [rawTests]
+  );
   const words = useLiveQuery(() => db.words.toArray(), []) || [];
   const [searchQuery, setSearchQuery] = useState('');
   const [activeFilter, setActiveFilter] = useState<ArchiveFilter>('ALL');
