@@ -1,17 +1,31 @@
 import { create } from 'zustand';
 import { WordItem, SongItem, IELTSTestRecord, AudioQuality, AUDIO_QUALITY_OPTIONS } from '../types';
 import { CambridgePassage, CAMBRIDGE_IELTS_PASSAGES } from '../data/ieltsPassages';
+import {
+  ListeningCompletionRecord,
+  getCompleteWorkbookPassages,
+  normalizeVolumeKey,
+} from '../utils/ieltsWorkbookEngine';
 import { SEED_SONGS } from '../db/seedData';
 import { toggleWordStar, collectWord } from '../db';
+import { isAutoPronounceEnabled, setAutoPronounceEnabled } from '../utils/audioEngine';
+
+interface WorkbookBookmarkState {
+  readingPassageId: string | null;
+  listeningSectionId: string | null;
+}
 
 interface AppState {
   // Navigation
   activeSpace: number; // 0: AR, 1: Music, 2: IELTS
   setActiveSpace: (space: number) => void;
 
-  // Theme
+  // Theme & Global Word Pronunciation Preference
   isDark: boolean;
   toggleTheme: () => void;
+  autoPronounce: boolean;
+  setAutoPronounce: (enabled: boolean) => void;
+  toggleAutoPronounce: () => void;
 
   // Music Player
   songs: SongItem[];
@@ -63,6 +77,13 @@ interface AppState {
   userAnswers: Record<number, string>;
   setUserAnswer: (questionId: number, answer: string) => void;
   resetUserAnswers: () => void;
+  passageDrafts: Record<string, Record<number, string>>;
+  saveItemDraft: (itemId: string, answers: Record<number, string>) => void;
+  clearItemDraft: (itemId: string) => void;
+  listeningRecords: Record<string, ListeningCompletionRecord>;
+  saveListeningCompletionRecord: (record: ListeningCompletionRecord) => void;
+  workbookBookmark: WorkbookBookmarkState;
+  setWorkbookBookmark: (partial: Partial<WorkbookBookmarkState>) => void;
   assessmentResult: IELTSTestRecord | null;
   isAssessmentModalOpen: boolean;
   setAssessmentModalOpen: (open: boolean) => void;
@@ -102,6 +123,10 @@ interface AppState {
   setIsIeltsTimeoutModalOpen: (open: boolean) => void;
   isIeltsAdjustMenuOpen: boolean;
   setIsIeltsAdjustMenuOpen: (open: boolean | ((prev: boolean) => boolean)) => void;
+  isIeltsHubScrolled: boolean;
+  setIsIeltsHubScrolled: (scrolled: boolean) => void;
+  pendingEvidenceJumpPara: number | null;
+  setPendingEvidenceJumpPara: (paraIdx: number | null) => void;
 
   // AR Scanner
   isScannerActive: boolean;
@@ -113,8 +138,9 @@ interface AppState {
 
   // Personal Hub & Archive Panel
   isPersonalHubOpen: boolean;
+  personalHubInitialTab: 'compass' | 'archives' | 'settings';
   setIsPersonalHubOpen: (open: boolean) => void;
-  openPersonalHub: () => void;
+  openPersonalHub: (initialTab?: 'compass' | 'archives' | 'settings') => void;
   closePersonalHub: () => void;
   activeArchiveReviewRecord: IELTSTestRecord | null;
   setActiveArchiveReviewRecord: (record: IELTSTestRecord | null) => void;
@@ -149,7 +175,7 @@ export const useAppStore = create<AppState>((set, get) => ({
   activeSpace: 1, // Start on Music Hub as primary anchor
   setActiveSpace: (space) => set({ activeSpace: Math.max(0, Math.min(2, space)) }),
 
-  // Theme
+  // Theme & Global Word Pronunciation Preference
   isDark: false,
   toggleTheme: () => {
     const next = !get().isDark;
@@ -159,6 +185,16 @@ export const useAppStore = create<AppState>((set, get) => ({
       document.documentElement.classList.remove('dark');
     }
     set({ isDark: next });
+  },
+  autoPronounce: isAutoPronounceEnabled(),
+  setAutoPronounce: (enabled: boolean) => {
+    setAutoPronounceEnabled(enabled);
+    set({ autoPronounce: enabled });
+  },
+  toggleAutoPronounce: () => {
+    const next = !get().autoPronounce;
+    setAutoPronounceEnabled(next);
+    set({ autoPronounce: next });
   },
 
   // Music Player
@@ -285,12 +321,101 @@ export const useAppStore = create<AppState>((set, get) => ({
   currentQuizQuestionIndex: 0,
   setCurrentQuizQuestionIndex: (currentQuizQuestionIndex) => set({ currentQuizQuestionIndex }),
   userAnswers: {},
-  setUserAnswer: (questionId, answer) => {
-    set((state) => ({
-      userAnswers: { ...state.userAnswers, [questionId]: answer }
-    }));
+  passageDrafts: (() => {
+    try {
+      const raw = localStorage.getItem('lyricalens_ielts_drafts_v1');
+      return raw ? JSON.parse(raw) : {};
+    } catch {
+      return {};
+    }
+  })(),
+  saveItemDraft: (itemId, answers) => {
+    if (!itemId) return;
+    const nextDrafts = { ...get().passageDrafts, [itemId]: answers };
+    try {
+      localStorage.setItem('lyricalens_ielts_drafts_v1', JSON.stringify(nextDrafts));
+    } catch (e) {
+      console.warn('Failed to persist draft answers:', e);
+    }
+    set({ passageDrafts: nextDrafts });
   },
-  resetUserAnswers: () => set({ userAnswers: {} }),
+  clearItemDraft: (itemId) => {
+    if (!itemId) return;
+    const nextDrafts = { ...get().passageDrafts };
+    delete nextDrafts[itemId];
+    try {
+      localStorage.setItem('lyricalens_ielts_drafts_v1', JSON.stringify(nextDrafts));
+    } catch (e) {
+      console.warn('Failed to clear draft answers:', e);
+    }
+    set({ passageDrafts: nextDrafts });
+  },
+  listeningRecords: (() => {
+    try {
+      const raw = localStorage.getItem('lyricalens_listening_records_v1');
+      return raw ? JSON.parse(raw) : {};
+    } catch {
+      return {};
+    }
+  })(),
+  saveListeningCompletionRecord: (record) => {
+    const nextRecords = { ...get().listeningRecords, [record.sectionId]: record };
+    const nextDrafts = { ...get().passageDrafts };
+    delete nextDrafts[record.sectionId];
+    try {
+      localStorage.setItem('lyricalens_listening_records_v1', JSON.stringify(nextRecords));
+      localStorage.setItem('lyricalens_ielts_drafts_v1', JSON.stringify(nextDrafts));
+    } catch (e) {
+      console.warn('Failed to persist listening completion:', e);
+    }
+    set({ listeningRecords: nextRecords, passageDrafts: nextDrafts });
+  },
+  workbookBookmark: (() => {
+    try {
+      const raw = localStorage.getItem('lyricalens_workbook_bookmark_v1');
+      return raw ? JSON.parse(raw) : { readingPassageId: null, listeningSectionId: null };
+    } catch {
+      return { readingPassageId: null, listeningSectionId: null };
+    }
+  })(),
+  setWorkbookBookmark: (partial) => {
+    const next = { ...get().workbookBookmark, ...partial };
+    try {
+      localStorage.setItem('lyricalens_workbook_bookmark_v1', JSON.stringify(next));
+    } catch (e) {
+      console.warn('Failed to save workbook bookmark:', e);
+    }
+    set({ workbookBookmark: next });
+  },
+  setUserAnswer: (questionId, answer) => {
+    const currentId = get().currentPassageId;
+    const nextAnswers = { ...get().userAnswers, [questionId]: answer };
+    const nextDrafts = currentId
+      ? { ...get().passageDrafts, [currentId]: nextAnswers }
+      : get().passageDrafts;
+    try {
+      localStorage.setItem('lyricalens_ielts_drafts_v1', JSON.stringify(nextDrafts));
+    } catch {
+      // ignore storage quota errors
+    }
+    set({
+      userAnswers: nextAnswers,
+      passageDrafts: nextDrafts
+    });
+  },
+  resetUserAnswers: () => {
+    const currentId = get().currentPassageId;
+    const nextDrafts = { ...get().passageDrafts };
+    if (currentId) {
+      delete nextDrafts[currentId];
+      try {
+        localStorage.setItem('lyricalens_ielts_drafts_v1', JSON.stringify(nextDrafts));
+      } catch {
+        // ignore
+      }
+    }
+    set({ userAnswers: {}, passageDrafts: nextDrafts });
+  },
   assessmentResult: null,
   isAssessmentModalOpen: false,
   setAssessmentModalOpen: (isAssessmentModalOpen) => set({ isAssessmentModalOpen }),
@@ -316,25 +441,34 @@ export const useAppStore = create<AppState>((set, get) => ({
       onlineSearchInitialQuery: query
     }),
   closeOnlineSearch: () => set({ isOnlineSearchOpen: false, onlineSearchInitialQuery: '' }),
-  currentPassageId: 'c18-t1-p2',
+  currentPassageId: 'recall26-t1-p1',
   setCurrentPassageId: (currentPassageId) => set({ currentPassageId }),
   activePassageData: null,
   setActivePassageData: (activePassageData) => set({ activePassageData }),
   loadCambridgePassage: (passage: any, matchedWords?: string[]) => {
     if (typeof passage === 'string') {
-      const found = CAMBRIDGE_IELTS_PASSAGES.find(p => p.id === passage);
+      const allPassages = getCompleteWorkbookPassages();
+      const found = allPassages.find(p => p.id === passage) || CAMBRIDGE_IELTS_PASSAGES.find(p => p.id === passage);
       if (found) {
+        const restoredDraft = get().passageDrafts[found.id] || {};
+        get().setWorkbookBookmark({ readingPassageId: found.id });
         set({
           currentPassageId: found.id,
           activePassageData: {
             id: found.id,
+            cambridgeBook: normalizeVolumeKey(found.cambridgeBook),
+            testNum: found.testNum,
+            passageNum: found.passageNum,
+            category: found.category,
+            bandDifficulty: found.bandDifficulty,
+            keyVocab: found.keyVocab,
             title: found.title,
             subtitle: found.subtitle,
             timeAllowedMins: found.timeAllowedMins,
             text: found.text,
             questions: found.questions
           },
-          userAnswers: {},
+          userAnswers: restoredDraft,
           currentQuizQuestionIndex: 0,
           isCambridgeSelectorOpen: false,
           isOnlineSearchOpen: false,
@@ -343,9 +477,11 @@ export const useAppStore = create<AppState>((set, get) => ({
         });
         return;
       }
+      const restoredDraft = get().passageDrafts[passage] || {};
+      get().setWorkbookBookmark({ readingPassageId: passage });
       set({
         currentPassageId: passage,
-        userAnswers: {},
+        userAnswers: restoredDraft,
         currentQuizQuestionIndex: 0,
         isCambridgeSelectorOpen: false,
         isOnlineSearchOpen: false,
@@ -355,17 +491,25 @@ export const useAppStore = create<AppState>((set, get) => ({
       return;
     }
 
+    const restoredDraft = get().passageDrafts[passage.id] || {};
+    get().setWorkbookBookmark({ readingPassageId: passage.id });
     set({
       currentPassageId: passage.id,
       activePassageData: {
         id: passage.id,
+        cambridgeBook: normalizeVolumeKey(passage.cambridgeBook),
+        testNum: passage.testNum || 1,
+        passageNum: passage.passageNum || 1,
+        category: passage.category,
+        bandDifficulty: passage.bandDifficulty,
+        keyVocab: passage.keyVocab,
         title: passage.title,
         subtitle: passage.subtitle,
         timeAllowedMins: passage.timeAllowedMins,
         text: passage.text,
         questions: passage.questions
       },
-      userAnswers: {},
+      userAnswers: restoredDraft,
       currentQuizQuestionIndex: 0,
       isCambridgeSelectorOpen: false,
       isOnlineSearchOpen: false,
@@ -376,6 +520,9 @@ export const useAppStore = create<AppState>((set, get) => ({
   activeListeningSectionData: null,
   setActiveListeningSectionData: (section) => set({ activeListeningSectionData: section }),
   loadCambridgeListening: (section: any) => {
+    if (section?.id) {
+      get().setWorkbookBookmark({ listeningSectionId: section.id });
+    }
     set({
       activeListeningSectionData: section,
       isCambridgeSelectorOpen: false,
@@ -402,6 +549,10 @@ export const useAppStore = create<AppState>((set, get) => ({
     set(state => ({
       isIeltsAdjustMenuOpen: typeof val === 'function' ? val(state.isIeltsAdjustMenuOpen) : val
     })),
+  isIeltsHubScrolled: false,
+  setIsIeltsHubScrolled: (isIeltsHubScrolled) => set({ isIeltsHubScrolled }),
+  pendingEvidenceJumpPara: null,
+  setPendingEvidenceJumpPara: (pendingEvidenceJumpPara) => set({ pendingEvidenceJumpPara }),
 
   // AR Scanner
   isScannerActive: true,
@@ -413,8 +564,10 @@ export const useAppStore = create<AppState>((set, get) => ({
 
   // Personal Hub & Archive Panel
   isPersonalHubOpen: false,
+  personalHubInitialTab: 'compass',
   setIsPersonalHubOpen: (isPersonalHubOpen) => set({ isPersonalHubOpen }),
-  openPersonalHub: () => set({ isPersonalHubOpen: true }),
+  openPersonalHub: (initialTab = 'compass') =>
+    set({ isPersonalHubOpen: true, personalHubInitialTab: initialTab }),
   closePersonalHub: () => set({ isPersonalHubOpen: false, activeArchiveReviewRecord: null }),
   activeArchiveReviewRecord: null,
   setActiveArchiveReviewRecord: (activeArchiveReviewRecord) => set({ activeArchiveReviewRecord }),

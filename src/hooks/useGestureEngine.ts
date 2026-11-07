@@ -96,29 +96,53 @@ export function useGestureEngine(options: GestureEngineOptions = {}) {
       el.style.transform = `translate3d(${finalPercent}%, 0, 0)`;
       (el.style as any).webkitTransform = `translate3d(${finalPercent}%, 0, 0)`;
 
-      // Real-time spatial scale & opacity interpolation across panels so transition feels organic
-      const panels = [
-        document.getElementById('panel-ar-space'),
-        document.getElementById('panel-music-space'),
-        document.getElementById('panel-ielts-space')
+      // Real-time wide S-curve dark camera atmosphere interpolation between AR Space (0) and Music Space (1)
+      const arBackdrop = document.getElementById('ar-ambient-backdrop');
+      const arSolidCore = document.getElementById('ar-solid-core');
+      if (arBackdrop) {
+        arBackdrop.style.transition = 'none';
+        (arBackdrop.style as any).webkitTransition = 'none';
+        let arOpacity = activeSpace === 0 ? 1 : 0;
+        if (activeSpace === 0 && diffX < 0) {
+          // Smooth ease-out keep-alive so AR stays rich dark while visible and melts away as it leaves
+          arOpacity = Math.max(0, 1 - Math.pow(dragRatio, 1.35) * 0.65);
+        } else if (activeSpace === 1 && diffX > 0) {
+          // Quickly bring in the wide S-curve dark backdrop under the incoming AR panel
+          arOpacity = Math.min(1, 0.35 + Math.pow(dragRatio, 0.75) * 0.65);
+        }
+        arBackdrop.style.opacity = arOpacity.toFixed(3);
+      }
+      if (arSolidCore) {
+        arSolidCore.style.transition = 'none';
+        (arSolidCore.style as any).webkitTransition = 'none';
+        let coreOpacity = activeSpace === 0 ? 1 : 0;
+        if (activeSpace === 0 && diffX < 0) {
+          coreOpacity = Math.max(0, 1 - Math.min(1, dragRatio * 2.4));
+        } else if (activeSpace === 1 && diffX > 0) {
+          coreOpacity = Math.max(0, (dragRatio - 0.65) / 0.35);
+        }
+        arSolidCore.style.opacity = coreOpacity.toFixed(3);
+      }
+
+      // Real-time opacity interpolation across inner stages without pushing buttons into panel clip edges
+      const stages = [
+        document.getElementById('stage-ar-space'),
+        document.getElementById('stage-music-space'),
+        document.getElementById('stage-ielts-space')
       ];
       const targetIdx = diffX < 0 ? Math.min(2, activeSpace + 1) : Math.max(0, activeSpace - 1);
-      panels.forEach((p, idx) => {
-        if (!p) return;
-        p.style.transition = 'none';
-        (p.style as any).webkitTransition = 'none';
+      stages.forEach((st, idx) => {
+        if (!st) return;
+        st.style.transition = 'none';
+        (st.style as any).webkitTransition = 'none';
+        st.style.transform = 'translate3d(0, 0, 0)';
+        (st.style as any).webkitTransform = 'translate3d(0, 0, 0)';
         if (idx === activeSpace) {
-          const s = 1 - dragRatio * 0.035;
-          const o = 1 - dragRatio * 0.25;
-          p.style.transform = `translate3d(0, 0, 0) scale(${s.toFixed(4)})`;
-          (p.style as any).webkitTransform = `translate3d(0, 0, 0) scale(${s.toFixed(4)})`;
-          p.style.opacity = o.toFixed(3);
+          const o = 1 - dragRatio * 0.18;
+          st.style.opacity = o.toFixed(3);
         } else if (idx === targetIdx) {
-          const s = 0.965 + dragRatio * 0.035;
-          const o = 0.72 + dragRatio * 0.28;
-          p.style.transform = `translate3d(0, 0, 0) scale(${s.toFixed(4)})`;
-          (p.style as any).webkitTransform = `translate3d(0, 0, 0) scale(${s.toFixed(4)})`;
-          p.style.opacity = o.toFixed(3);
+          const o = 0.82 + dragRatio * 0.18;
+          st.style.opacity = o.toFixed(3);
         }
       });
     });
@@ -136,19 +160,32 @@ export function useGestureEngine(options: GestureEngineOptions = {}) {
     el.style.transform = `translate3d(-${(targetSpace * 100) / 3}%, 0, 0)`;
     (el.style as any).webkitTransform = `translate3d(-${(targetSpace * 100) / 3}%, 0, 0)`;
 
-    const panels = [
-      document.getElementById('panel-ar-space'),
-      document.getElementById('panel-music-space'),
-      document.getElementById('panel-ielts-space')
+    const arBackdrop = document.getElementById('ar-ambient-backdrop');
+    if (arBackdrop) {
+      arBackdrop.style.transition = 'opacity 420ms cubic-bezier(0.22, 1, 0.36, 1)';
+      (arBackdrop.style as any).webkitTransition = 'opacity 420ms cubic-bezier(0.22, 1, 0.36, 1)';
+      arBackdrop.style.opacity = targetSpace === 0 ? '1' : '0';
+    }
+    const arSolidCore = document.getElementById('ar-solid-core');
+    if (arSolidCore) {
+      arSolidCore.style.transition = 'opacity 380ms cubic-bezier(0.22, 1, 0.36, 1)';
+      (arSolidCore.style as any).webkitTransition = 'opacity 380ms cubic-bezier(0.22, 1, 0.36, 1)';
+      arSolidCore.style.opacity = targetSpace === 0 ? '1' : '0';
+    }
+
+    const stages = [
+      document.getElementById('stage-ar-space'),
+      document.getElementById('stage-music-space'),
+      document.getElementById('stage-ielts-space')
     ];
-    panels.forEach((p, idx) => {
-      if (!p) return;
-      p.style.transition = 'transform 420ms cubic-bezier(0.22, 1, 0.36, 1), opacity 380ms cubic-bezier(0.22, 1, 0.36, 1)';
-      (p.style as any).webkitTransition = '-webkit-transform 420ms cubic-bezier(0.22, 1, 0.36, 1), opacity 380ms cubic-bezier(0.22, 1, 0.36, 1)';
+    stages.forEach((st, idx) => {
+      if (!st) return;
+      st.style.transition = 'transform 420ms cubic-bezier(0.22, 1, 0.36, 1), opacity 380ms cubic-bezier(0.22, 1, 0.36, 1)';
+      (st.style as any).webkitTransition = '-webkit-transform 420ms cubic-bezier(0.22, 1, 0.36, 1), opacity 380ms cubic-bezier(0.22, 1, 0.36, 1)';
       const isTarget = idx === targetSpace;
-      p.style.transform = isTarget ? 'translate3d(0, 0, 0) scale(1)' : 'translate3d(0, 0, 0) scale(0.965)';
-      (p.style as any).webkitTransform = isTarget ? 'translate3d(0, 0, 0) scale(1)' : 'translate3d(0, 0, 0) scale(0.965)';
-      p.style.opacity = isTarget ? '1' : '0.72';
+      st.style.transform = 'translate3d(0, 0, 0)';
+      (st.style as any).webkitTransform = 'translate3d(0, 0, 0)';
+      st.style.opacity = isTarget ? '1' : '0.82';
     });
   }, []);
 

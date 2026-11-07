@@ -1,4 +1,5 @@
 import type { IELTSQuestion } from '../types.ts';
+export type { IELTSQuestion };
 import { SEASONAL_2025_RECALL_PASSAGES } from './seasonalIeltsRecallArchive.ts';
 
 export interface CambridgePassage {

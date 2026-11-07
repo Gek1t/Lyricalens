@@ -8,12 +8,11 @@ import {
   Globe,
   ChevronDown,
   Check,
-  Clock,
-  Sparkles
+  Bookmark
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
-import { CAMBRIDGE_IELTS_PASSAGES, CambridgePassage, getPassagesWithHitStats } from '../../data/ieltsPassages';
-import { CAMBRIDGE_IELTS_LISTENING, IELTSListeningSection, getListeningSectionsWithHits } from '../../data/ieltsListening';
+import { CambridgePassage } from '../../data/ieltsPassages';
+import { IELTSListeningSection } from '../../data/ieltsListening';
 import {
   expandSearchTokens,
   calculateRelevanceScore,
@@ -22,7 +21,18 @@ import {
   getListeningBilingualMeta,
   formatBookNameZh
 } from '../../data/ieltsTopicSynonyms';
-import { db } from '../../db';
+import {
+  getCompleteWorkbookPassages,
+  getCompleteWorkbookListening,
+  computeWordHitMapForPassages,
+  computeWordHitMapForListening,
+  buildReadingWorkbookCatalog,
+  buildListeningWorkbookCatalog,
+  resolveReadingBookmarkTarget,
+  resolveListeningBookmarkTarget,
+  getVolumeShortBadge
+} from '../../utils/ieltsWorkbookEngine';
+import { db, IeltsTestRecord } from '../../db';
 import { useAppStore } from '../../store/useAppStore';
 
 interface IELTSHubViewProps {
@@ -218,6 +228,7 @@ export const DisciplineArtworkSvg: React.FC<{ discipline: DisciplineKey; classNa
 let cachedHubDbWords: any[] = [];
 let cachedHubCustomPassages: CambridgePassage[] = [];
 let cachedHubCustomListening: IELTSListeningSection[] = [];
+let cachedHubTestRecords: IeltsTestRecord[] = [];
 
 export const IELTSHubView: React.FC<IELTSHubViewProps> = ({
   onStartReading,
@@ -226,12 +237,15 @@ export const IELTSHubView: React.FC<IELTSHubViewProps> = ({
   resetSignal
 }) => {
   const openOnlineSearch = useAppStore(s => s.openOnlineSearch);
+  const passageDrafts = useAppStore(s => s.passageDrafts);
+  const listeningRecords = useAppStore(s => s.listeningRecords);
+  const workbookBookmark = useAppStore(s => s.workbookBookmark);
+
   const [skillMode, setSkillMode] = useState<'reading' | 'listening'>('reading');
   const [selectedBook, setSelectedBook] = useState<string>('ALL');
   const [isBookMenuOpen, setIsBookMenuOpen] = useState<boolean>(false);
   const [isSearchExpanded, setIsSearchExpanded] = useState<boolean>(false);
   const [searchQuery, setSearchQuery] = useState<string>('');
-  const [spotlightId, setSpotlightId] = useState<string | null>(null);
   const searchInputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
@@ -279,192 +293,216 @@ export const IELTSHubView: React.FC<IELTSHubViewProps> = ({
     cachedHubCustomListening = res;
     return res;
   }, [], cachedHubCustomListening);
+  const liveTestRecords = useLiveQuery(async () => {
+    const res = await db.ieltsTests.toArray();
+    cachedHubTestRecords = res;
+    return res;
+  }, [], cachedHubTestRecords);
 
   const allDbWords = liveDbWords ?? cachedHubDbWords;
   const customPassages = liveCustomPassages ?? cachedHubCustomPassages;
   const customListening = liveCustomListening ?? cachedHubCustomListening;
+  const testRecords = liveTestRecords ?? cachedHubTestRecords;
   const userWordStrings = useMemo(() => allDbWords.map(w => w.word), [allDbWords]);
-
-  // Real-time hit calculations
-  const passagesWithHits = useMemo(() => {
-    return getPassagesWithHitStats(userWordStrings, customPassages);
-  }, [userWordStrings, customPassages]);
-
-  const listeningWithHits = useMemo(() => {
-    return getListeningSectionsWithHits(userWordStrings, customListening);
-  }, [userWordStrings, customListening]);
 
   const savedPassageIds = useMemo(() => new Set(customPassages.map(p => p.id)), [customPassages]);
   const savedListeningIds = useMemo(() => new Set(customListening.map(s => s.id)), [customListening]);
 
-  // Unique Cambridge volumes + MY_LIBRARY
+  // Complete workbook passages & listening across all primary volumes + custom library
+  const allWorkbookPassages = useMemo(
+    () => getCompleteWorkbookPassages(customPassages),
+    [customPassages]
+  );
+  const allWorkbookListening = useMemo(
+    () => getCompleteWorkbookListening(customListening),
+    [customListening]
+  );
+
+  // Word resonance hit maps
+  const readingHitMap = useMemo(
+    () => computeWordHitMapForPassages(allWorkbookPassages, userWordStrings),
+    [allWorkbookPassages, userWordStrings]
+  );
+  const listeningHitMap = useMemo(
+    () => computeWordHitMapForListening(allWorkbookListening, userWordStrings),
+    [allWorkbookListening, userWordStrings]
+  );
+
+  // Full structured Workbook Catalogs (Volume -> Test 1..4 -> P1..P3 / S1..S4)
+  const fullReadingCatalog = useMemo(
+    () => buildReadingWorkbookCatalog(allWorkbookPassages, readingHitMap, testRecords, passageDrafts),
+    [allWorkbookPassages, readingHitMap, testRecords, passageDrafts]
+  );
+  const fullListeningCatalog = useMemo(
+    () => buildListeningWorkbookCatalog(allWorkbookListening, listeningHitMap, listeningRecords, passageDrafts),
+    [allWorkbookListening, listeningHitMap, listeningRecords, passageDrafts]
+  );
+
+  // Available volume filter keys
   const availableBooks = useMemo(() => {
-    const rBooks = [...customPassages, ...CAMBRIDGE_IELTS_PASSAGES].map(p => p.cambridgeBook);
-    const lBooks = [...customListening, ...CAMBRIDGE_IELTS_LISTENING].map(s => s.cambridgeBook);
-    const unique = Array.from(new Set([...rBooks, ...lBooks])).sort((a, b) => {
-      const numA = parseInt(a.replace(/\D/g, ''), 10) || 0;
-      const numB = parseInt(b.replace(/\D/g, ''), 10) || 0;
-      return numB - numA;
-    });
+    const activeCatalog = skillMode === 'reading' ? fullReadingCatalog : fullListeningCatalog;
+    const volumeKeys = activeCatalog.map(v => v.volumeKey);
     const hasCustom = customPassages.length + customListening.length > 0;
-    return hasCustom ? ['ALL', 'MY_LIBRARY', ...unique] : ['ALL', ...unique];
-  }, [customPassages, customListening]);
+    return hasCustom ? ['ALL', 'MY_LIBRARY', ...volumeKeys] : ['ALL', ...volumeKeys];
+  }, [skillMode, fullReadingCatalog, fullListeningCatalog, customPassages.length, customListening.length]);
 
-  // Filtered reading list
-  const filteredReading = useMemo(() => {
-    let list = [...passagesWithHits];
-    if (selectedBook === 'MY_LIBRARY') {
-      list = list.filter(item => savedPassageIds.has(item.passage.id));
-    } else if (selectedBook !== 'ALL') {
-      list = list.filter(item => item.passage.cambridgeBook === selectedBook);
-    }
-    if (searchQuery.trim()) {
-      const tokens = expandSearchTokens(searchQuery);
-      list = list
-        .map(item => {
-          const meta = getPassageBilingualMeta(item.passage);
-          const score = calculateRelevanceScore(
-            {
-              title: `${meta.titleZh} ${item.passage.title}`,
-              category: `${meta.categoryZh} ${item.passage.category}`,
-              keyVocab: item.passage.keyVocab,
-              text: `${meta.gistZh} ${item.passage.text || ''}`
-            },
-            tokens
-          );
-          const hasMatch =
-            score > 0 ||
-            matchesSearchTokens(
-              `${meta.titleZh} ${meta.categoryZh} ${meta.gistZh} ${item.passage.title} ${item.passage.subtitle || ''} ${item.passage.category} ${item.passage.cambridgeBook} ${(item.passage.keyVocab || []).join(' ')} ${item.passage.text || ''}`,
-              tokens
-            );
-          return { item, searchScore: hasMatch ? Math.max(score, 10) : 0 };
-        })
-        .filter(entry => entry.searchScore > 0)
-        .sort((a, b) => b.searchScore - a.searchScore)
-        .map(entry => entry.item);
-      return list;
-    }
-    return list.sort((a, b) => {
-      if (b.hitCount !== a.hitCount) return b.hitCount - a.hitCount;
-      const bNumA = parseInt(a.passage.cambridgeBook.replace(/\D/g, ''), 10) || 0;
-      const bNumB = parseInt(b.passage.cambridgeBook.replace(/\D/g, ''), 10) || 0;
-      if (bNumB !== bNumA) return bNumB - bNumA;
-      return a.passage.passageNum - b.passage.passageNum;
-    });
-  }, [passagesWithHits, selectedBook, searchQuery]);
+  // Filtered Reading Workbook Catalog (by Volume / My Library / Search query)
+  const filteredReadingCatalog = useMemo(() => {
+    const tokens = searchQuery.trim() ? expandSearchTokens(searchQuery) : [];
 
-  // Filtered listening list
-  const filteredListening = useMemo(() => {
-    let list = [...listeningWithHits];
-    if (selectedBook === 'MY_LIBRARY') {
-      list = list.filter(item => savedListeningIds.has(item.section.id));
-    } else if (selectedBook !== 'ALL') {
-      list = list.filter(item => item.section.cambridgeBook === selectedBook);
-    }
-    if (searchQuery.trim()) {
-      const tokens = expandSearchTokens(searchQuery);
-      list = list
-        .map(item => {
-          const meta = getListeningBilingualMeta(item.section);
-          const score = calculateRelevanceScore(
-            {
-              title: `${meta.titleZh} ${item.section.title}`,
-              category: `${meta.categoryZh} ${item.section.scenario}`,
-              keyVocab: item.section.keyVocab,
-              text: `${meta.gistZh} ${item.section.scriptParagraphs ? item.section.scriptParagraphs.map(sp => sp.text).join(' ') : ''}`
-            },
-            tokens
-          );
-          const hasMatch =
-            score > 0 ||
-            matchesSearchTokens(
-              `${meta.titleZh} ${meta.categoryZh} ${meta.gistZh} ${item.section.title} ${item.section.scenario} ${item.section.cambridgeBook} ${(item.section.keyVocab || []).join(' ')}`,
-              tokens
-            );
-          return { item, searchScore: hasMatch ? Math.max(score, 10) : 0 };
-        })
-        .filter(entry => entry.searchScore > 0)
-        .sort((a, b) => b.searchScore - a.searchScore)
-        .map(entry => entry.item);
-      return list;
-    }
-    return list.sort((a, b) => {
-      if (b.hitCount !== a.hitCount) return b.hitCount - a.hitCount;
-      const bNumA = parseInt(a.section.cambridgeBook.replace(/\D/g, ''), 10) || 0;
-      const bNumB = parseInt(b.section.cambridgeBook.replace(/\D/g, ''), 10) || 0;
-      if (bNumB !== bNumA) return bNumB - bNumA;
-      return a.section.sectionNum - b.section.sectionNum;
-    });
-  }, [listeningWithHits, selectedBook, searchQuery]);
+    return fullReadingCatalog
+      .filter(vol => {
+        if (selectedBook === 'ALL' || selectedBook === 'MY_LIBRARY') return true;
+        return vol.volumeKey === selectedBook;
+      })
+      .map(vol => {
+        const filteredTests = vol.tests
+          .map(test => {
+            const filteredItems = test.items.filter(item => {
+              if (selectedBook === 'MY_LIBRARY' && !savedPassageIds.has(item.passage.id)) {
+                return false;
+              }
+              if (tokens.length > 0) {
+                const meta = getPassageBilingualMeta(item.passage);
+                const score = calculateRelevanceScore(
+                  {
+                    title: `${meta.titleZh} ${item.passage.title}`,
+                    category: `${meta.categoryZh} ${item.passage.category}`,
+                    keyVocab: item.passage.keyVocab,
+                    text: `${meta.gistZh} ${item.passage.text || ''}`
+                  },
+                  tokens
+                );
+                const hasMatch =
+                  score > 0 ||
+                  matchesSearchTokens(
+                    `${meta.titleZh} ${meta.categoryZh} ${meta.gistZh} ${item.passage.title} ${item.passage.subtitle || ''} ${item.passage.category} ${item.volumeLabel} Test ${item.testNum} Passage ${item.passageNum} ${(item.passage.keyVocab || []).join(' ')}`,
+                    tokens
+                  );
+                return hasMatch;
+              }
+              return true;
+            });
+            return {
+              ...test,
+              items: filteredItems
+            };
+          })
+          .filter(test => test.items.length > 0);
 
-  // Featured Item
-  const featuredReading = useMemo(() => {
-    if (filteredReading.length === 0) return null;
-    if (spotlightId) {
-      const found = filteredReading.find(r => r.passage.id === spotlightId);
-      if (found) return found;
-    }
-    return filteredReading[0];
-  }, [filteredReading, spotlightId]);
+        return {
+          ...vol,
+          tests: filteredTests
+        };
+      })
+      .filter(vol => vol.tests.length > 0);
+  }, [fullReadingCatalog, selectedBook, searchQuery, savedPassageIds]);
 
-  const featuredListening = useMemo(() => {
-    if (filteredListening.length === 0) return null;
-    if (spotlightId) {
-      const found = filteredListening.find(l => l.section.id === spotlightId);
-      if (found) return found;
-    }
-    return filteredListening[0];
-  }, [filteredListening, spotlightId]);
+  // Filtered Listening Workbook Catalog
+  const filteredListeningCatalog = useMemo(() => {
+    const tokens = searchQuery.trim() ? expandSearchTokens(searchQuery) : [];
 
-  // Grouped Catalog
-  const groupedReading = useMemo(() => {
-    const map = new Map<string, typeof filteredReading>();
-    filteredReading.forEach(item => {
-      const key = item.passage.cambridgeBook;
-      if (!map.has(key)) map.set(key, []);
-      map.get(key)!.push(item);
-    });
-    return Array.from(map.entries()).map(([book, items]) => ({ book, items }));
-  }, [filteredReading]);
+    return fullListeningCatalog
+      .filter(vol => {
+        if (selectedBook === 'ALL' || selectedBook === 'MY_LIBRARY') return true;
+        return vol.volumeKey === selectedBook;
+      })
+      .map(vol => {
+        const filteredTests = vol.tests
+          .map(test => {
+            const filteredItems = test.items.filter(item => {
+              if (selectedBook === 'MY_LIBRARY' && !savedListeningIds.has(item.section.id)) {
+                return false;
+              }
+              if (tokens.length > 0) {
+                const meta = getListeningBilingualMeta(item.section);
+                const score = calculateRelevanceScore(
+                  {
+                    title: `${meta.titleZh} ${item.section.title}`,
+                    category: `${meta.categoryZh} ${item.section.scenario}`,
+                    keyVocab: item.section.keyVocab,
+                    text: `${meta.gistZh} ${item.section.scriptParagraphs ? item.section.scriptParagraphs.map(sp => sp.text).join(' ') : ''}`
+                  },
+                  tokens
+                );
+                const hasMatch =
+                  score > 0 ||
+                  matchesSearchTokens(
+                    `${meta.titleZh} ${meta.categoryZh} ${meta.gistZh} ${item.section.title} ${item.section.scenario} ${item.volumeLabel} Test ${item.testNum} Section ${item.sectionNum} ${(item.section.keyVocab || []).join(' ')}`,
+                    tokens
+                  );
+                return hasMatch;
+              }
+              return true;
+            });
+            return {
+              ...test,
+              items: filteredItems
+            };
+          })
+          .filter(test => test.items.length > 0);
 
-  const groupedListening = useMemo(() => {
-    const map = new Map<string, typeof filteredListening>();
-    filteredListening.forEach(item => {
-      const key = item.section.cambridgeBook;
-      if (!map.has(key)) map.set(key, []);
-      map.get(key)!.push(item);
-    });
-    return Array.from(map.entries()).map(([book, items]) => ({ book, items }));
-  }, [filteredListening]);
+        return {
+          ...vol,
+          tests: filteredTests
+        };
+      })
+      .filter(vol => vol.tests.length > 0);
+  }, [fullListeningCatalog, selectedBook, searchQuery, savedListeningIds]);
+
+  // Resolve Bookmark / Continue Workbook target for the Top Hero Card
+  const readingBookmark = useMemo(() => {
+    const targetCatalog = filteredReadingCatalog.length > 0 ? filteredReadingCatalog : fullReadingCatalog;
+    return resolveReadingBookmarkTarget(targetCatalog, workbookBookmark.readingPassageId);
+  }, [filteredReadingCatalog, fullReadingCatalog, workbookBookmark.readingPassageId]);
+
+  const listeningBookmark = useMemo(() => {
+    const targetCatalog = filteredListeningCatalog.length > 0 ? filteredListeningCatalog : fullListeningCatalog;
+    return resolveListeningBookmarkTarget(targetCatalog, workbookBookmark.listeningSectionId);
+  }, [filteredListeningCatalog, fullListeningCatalog, workbookBookmark.listeningSectionId]);
 
   const featuredReadingMeta = useMemo(
-    () => (featuredReading ? getPassageBilingualMeta(featuredReading.passage) : null),
-    [featuredReading]
+    () => (readingBookmark ? getPassageBilingualMeta(readingBookmark.targetItem.passage) : null),
+    [readingBookmark]
   );
 
   const featuredListeningMeta = useMemo(
-    () => (featuredListening ? getListeningBilingualMeta(featuredListening.section) : null),
-    [featuredListening]
+    () => (listeningBookmark ? getListeningBilingualMeta(listeningBookmark.targetItem.section) : null),
+    [listeningBookmark]
   );
 
   const featuredReadingDiscipline = useMemo(() => {
-    if (!featuredReading || !featuredReadingMeta) return DISCIPLINE_THEMES.engineering;
+    if (!readingBookmark || !featuredReadingMeta) return DISCIPLINE_THEMES.engineering;
     return resolveDiscipline(
-      `${featuredReading.passage.category} ${featuredReadingMeta.categoryZh}`,
-      `${featuredReading.passage.title} ${featuredReadingMeta.titleZh}`
+      `${readingBookmark.targetItem.passage.category} ${featuredReadingMeta.categoryZh}`,
+      `${readingBookmark.targetItem.passage.title} ${featuredReadingMeta.titleZh}`
     );
-  }, [featuredReading, featuredReadingMeta]);
+  }, [readingBookmark, featuredReadingMeta]);
 
   const featuredListeningDiscipline = useMemo(() => {
-    if (!featuredListening || !featuredListeningMeta) return DISCIPLINE_THEMES.humanities;
+    if (!listeningBookmark || !featuredListeningMeta) return DISCIPLINE_THEMES.humanities;
     return resolveDiscipline(
-      `${featuredListening.section.scenario} ${featuredListeningMeta.categoryZh}`,
-      `${featuredListening.section.title} ${featuredListeningMeta.titleZh}`
+      `${listeningBookmark.targetItem.section.scenario} ${featuredListeningMeta.categoryZh}`,
+      `${listeningBookmark.targetItem.section.title} ${featuredListeningMeta.titleZh}`
     );
-  }, [featuredListening, featuredListeningMeta]);
+  }, [listeningBookmark, featuredListeningMeta]);
 
   const [isScrolled, setIsScrolled] = useState(false);
+  const setIsIeltsHubScrolled = useAppStore(s => s.setIsIeltsHubScrolled);
+  const [collapsedTestKeys, setCollapsedTestKeys] = useState<Record<string, boolean>>({});
+
+  useEffect(() => {
+    return () => {
+      setIsIeltsHubScrolled(false);
+    };
+  }, [setIsIeltsHubScrolled]);
+
+  const toggleTestCollapse = (testKey: string) => {
+    setCollapsedTestKeys(prev => ({
+      ...prev,
+      [testKey]: !prev[testKey]
+    }));
+  };
 
   return (
     <div className="relative flex-1 min-h-0 w-full flex flex-col overflow-hidden select-none">
@@ -482,24 +520,26 @@ export const IELTSHubView: React.FC<IELTSHubViewProps> = ({
 
       <div
         onScroll={(e) => {
-          const next = e.currentTarget.scrollTop > 8;
+          const st = e.currentTarget.scrollTop;
+          const next = st > 8;
           if (next !== isScrolled) setIsScrolled(next);
+          const nextBottomHide = st > 18;
+          if (nextBottomHide !== useAppStore.getState().isIeltsHubScrolled) {
+            setIsIeltsHubScrolled(nextBottomHide);
+          }
         }}
-        className="relative flex-1 min-h-0 w-full flex flex-col overflow-y-auto no-scrollbar px-4 sm:px-6 pt-3 pb-28 z-10"
+        className="relative flex-1 min-h-0 w-full flex flex-col overflow-y-auto no-scrollbar px-4 sm:px-6 pt-3 pb-24 z-10"
       >
         <div className="max-w-2xl mx-auto w-full space-y-4">
 
-          {/* 1. Ultra-Clean Top Masthead: 左侧仅「学术阅读 / 官方听力」，右侧仅一枚「放大镜搜索图标」 */}
+          {/* 1. Ultra-Clean Top Masthead: 左侧「学术阅读 / 官方听力」，右侧「淘题入库 + 搜索」 */}
           <div className="space-y-2.5">
             <div className="flex items-center justify-between gap-4 pb-2 border-b border-stone-900/[0.08] dark:border-white/[0.08]">
               {/* Left: Pure Editorial Tabs */}
               <div className="flex items-center gap-6">
                 <button
                   type="button"
-                  onClick={() => {
-                    setSkillMode('reading');
-                    setSpotlightId(null);
-                  }}
+                  onClick={() => setSkillMode('reading')}
                   className={`relative py-1 text-sm transition-colors cursor-pointer whitespace-nowrap ${
                     skillMode === 'reading'
                       ? 'text-stone-900 dark:text-white font-bold'
@@ -517,10 +557,7 @@ export const IELTSHubView: React.FC<IELTSHubViewProps> = ({
 
                 <button
                   type="button"
-                  onClick={() => {
-                    setSkillMode('listening');
-                    setSpotlightId(null);
-                  }}
+                  onClick={() => setSkillMode('listening')}
                   className={`relative py-1 text-sm transition-colors cursor-pointer whitespace-nowrap ${
                     skillMode === 'listening'
                       ? 'text-stone-900 dark:text-white font-bold'
@@ -537,13 +574,13 @@ export const IELTSHubView: React.FC<IELTSHubViewProps> = ({
                 </button>
               </div>
 
-              {/* Right: Direct Question Bank Entry + Magnifying Glass Button */}
+              {/* Right: Question Bank Entry + Magnifying Glass Button */}
               <div className="flex items-center gap-1.5">
                 <button
                   type="button"
                   onClick={() => openOnlineSearch(skillMode, searchQuery.trim())}
                   className="h-7 px-2.5 rounded-xl text-xs font-medium text-[#516050] dark:text-[#8FB996] bg-[#516050]/[0.09] hover:bg-[#516050]/[0.15] dark:bg-[#8FB996]/[0.12] dark:hover:bg-[#8FB996]/[0.2] flex items-center gap-1 transition-colors cursor-pointer whitespace-nowrap"
-                  title="打开考季机经与全网题库"
+                  title="全网题库"
                 >
                   <Globe className="w-3 h-3 shrink-0" />
                   <span>淘题入库</span>
@@ -567,7 +604,7 @@ export const IELTSHubView: React.FC<IELTSHubViewProps> = ({
                       ? 'bg-stone-900 text-white dark:bg-stone-100 dark:text-stone-900 shadow-xs'
                       : 'text-stone-500 dark:text-stone-400 hover:bg-stone-900/[0.05] dark:hover:bg-white/[0.06] hover:text-stone-900 dark:hover:text-white'
                   }`}
-                  title="搜索本地话题或打开全网题库"
+                  title="搜索"
                 >
                   <Search className="w-4 h-4" />
                 </button>
@@ -592,16 +629,11 @@ export const IELTSHubView: React.FC<IELTSHubViewProps> = ({
                       value={searchQuery}
                       onChange={e => setSearchQuery(e.target.value)}
                       onKeyDown={e => {
-                        if (
-                          e.key === 'Enter' &&
-                          searchQuery.trim() &&
-                          filteredReading.length === 0 &&
-                          filteredListening.length === 0
-                        ) {
+                        if (e.key === 'Enter' && searchQuery.trim()) {
                           openOnlineSearch(skillMode, searchQuery.trim());
                         }
                       }}
-                      placeholder="搜中文话题或英文标题（如：植物 / 网球拍）..."
+                      placeholder="搜索篇目、学科或关键词..."
                       className="w-full pl-9 pr-28 py-2.5 text-xs rounded-2xl bg-white/85 dark:bg-white/[0.06] border border-stone-900/[0.08] dark:border-white/[0.08] focus:outline-none focus:border-stone-900/25 dark:focus:border-white/25 text-stone-800 dark:text-stone-200 placeholder:text-stone-400"
                     />
 
@@ -632,44 +664,49 @@ export const IELTSHubView: React.FC<IELTSHubViewProps> = ({
             </AnimatePresence>
           </div>
 
-          {/* 2. Archival Editorial Hero Card (温润典藏纸张质感：深墨大字 + 学科微染底纹，带有丝滑过渡动画) */}
+          {/* 2. Workbook Bookmark Hero Card */}
           <AnimatePresence mode="wait" initial={false}>
-            {skillMode === 'reading' && featuredReading && featuredReadingMeta && (
+            {skillMode === 'reading' && readingBookmark && featuredReadingMeta && (
               <motion.div
-                key={`hero-reading-${selectedBook}`}
+                id="workbook-bookmark-hero-card"
+                key={`hero-reading-${selectedBook}-${readingBookmark.targetItem.passage.id}`}
                 initial={{ opacity: 0, y: 8 }}
                 animate={{ opacity: 1, y: 0 }}
                 exit={{ opacity: 0, y: -6 }}
                 transition={{ duration: 0.22, ease: [0.16, 1, 0.3, 1] }}
-                onClick={() => onStartReading(featuredReading.passage, false, featuredReading.matchedWords)}
-                className={`group relative overflow-hidden rounded-[26px] bg-gradient-to-br ${featuredReadingDiscipline.heroBgClass} p-6 sm:p-7 border ${featuredReadingDiscipline.heroBorderClass} shadow-[0_10px_30px_-10px_rgba(28,25,23,0.07)] cursor-pointer transition-transform duration-200 active:scale-[0.995] transform-gpu`}
+                onClick={() =>
+                  onStartReading(
+                    readingBookmark.targetItem.passage,
+                    false,
+                    readingBookmark.targetItem.progress.hitWords
+                  )
+                }
+                className={`group relative overflow-hidden rounded-[26px] bg-gradient-to-br ${featuredReadingDiscipline.heroBgClass} p-5 sm:p-6 border ${featuredReadingDiscipline.heroBorderClass} shadow-[0_10px_30px_-10px_rgba(28,25,23,0.07)] cursor-pointer transition-transform duration-200 active:scale-[0.995] transform-gpu`}
               >
-                {/* Custom Scientific / Architectural Wireframe Backdrop */}
                 <div className={`absolute -right-10 -top-10 w-60 h-60 pointer-events-none select-none transition-transform duration-500 group-hover:scale-105 group-hover:rotate-3 ${featuredReadingDiscipline.accentTextClass}`}>
                   <DisciplineArtworkSvg discipline={featuredReadingDiscipline.key} />
                 </div>
 
-                <div className="relative z-10 space-y-4">
-                  {/* Top Magazine Masthead Row */}
-                  <div className="flex items-center justify-between gap-2 text-xs">
-                    <div className="flex items-center gap-2 font-mono tabular-nums text-stone-600 dark:text-stone-300 min-w-0">
-                      <span className={`font-serif-luxury italic text-[15px] font-bold tracking-normal whitespace-nowrap shrink-0 ${featuredReadingDiscipline.accentTextClass}`}>
-                        {featuredReading.passage.cambridgeBook
-                          .replace(/^Cambridge\s+(\d+)$/i, 'Vol. $1')
-                          .replace(/^(\d{4})\s*考场真题$/, 'Vol. $1')
-                          .replace(/^(\d{4})\s*Recall$/i, 'Vol. $1')
-                          .replace(/^(Cambridge\s+IELTS\s+Academic\s+Special|IELTS\s+Academic\s+Reading\s+Special)$/i, 'Vol. Special')}
+                <div className="relative z-10 space-y-3.5">
+                  {/* Top Workbook Bookmark Row */}
+                  <div className="flex items-center justify-between gap-2 text-[11px]">
+                    <div className="flex items-center gap-1 font-mono tabular-nums text-stone-600 dark:text-stone-300 min-w-0 flex-1 overflow-hidden">
+                      <Bookmark className={`w-3.5 h-3.5 shrink-0 ${featuredReadingDiscipline.accentTextClass}`} />
+                      <span className={`font-sans-ui font-semibold whitespace-nowrap shrink-0 ${featuredReadingDiscipline.accentTextClass}`}>
+                        {readingBookmark.isResume ? '书签续刷' : '整卷起点'}
                       </span>
                       <span aria-hidden="true" className="opacity-40 shrink-0">·</span>
-                      <span className="whitespace-nowrap shrink-0">T{featuredReading.passage.testNum} P{featuredReading.passage.passageNum}</span>
+                      <span className="font-serif-luxury italic text-[13px] font-bold tracking-normal truncate">
+                        {getVolumeShortBadge(readingBookmark.volumeGroup.volumeKey)}
+                      </span>
                       <span aria-hidden="true" className="opacity-40 shrink-0">·</span>
-                      <span className={`font-sans-ui font-medium whitespace-nowrap truncate ${featuredReadingDiscipline.accentTextClass}`}>
-                        {featuredReadingDiscipline.shortZh}
+                      <span className="whitespace-nowrap shrink-0 font-semibold">
+                        T{readingBookmark.targetItem.testNum}·P{readingBookmark.targetItem.passageNum}
                       </span>
                     </div>
 
                     <span className="font-mono tabular-nums text-[11px] text-stone-500 dark:text-stone-400 font-medium whitespace-nowrap shrink-0">
-                      {featuredReading.passage.bandDifficulty}
+                      本套 {readingBookmark.testGroup.completedCount}/{readingBookmark.testGroup.totalItems} 篇
                     </span>
                   </div>
 
@@ -691,16 +728,24 @@ export const IELTSHubView: React.FC<IELTSHubViewProps> = ({
                     </p>
                   </div>
 
-                  {/* Clean Single-Row Footer: Concise Status + Primary Action */}
+                  {/* Clean Single-Row Footer: Sibling Progress + Primary Sequential Action */}
                   <div className="pt-3.5 border-t border-stone-900/[0.08] dark:border-white/10 flex items-center justify-between gap-3">
-                    <div className="flex items-center gap-1.5 text-xs text-stone-600 dark:text-stone-300">
-                      {featuredReading.hitCount > 0 ? (
-                        <span className={`font-medium ${featuredReadingDiscipline.accentTextClass}`}>
-                          生词本共鸣 {featuredReading.hitCount} 词
+                    <div className="flex items-center gap-2 text-xs text-stone-600 dark:text-stone-300 min-w-0 flex-1 overflow-hidden">
+                      {readingBookmark.targetItem.progress.status === 'in_progress' ? (
+                        <span className="text-amber-700 dark:text-amber-400 font-mono font-medium truncate">
+                          进行中 · 已答 {readingBookmark.targetItem.progress.answeredCount}/{readingBookmark.targetItem.progress.totalQuestions} 题
+                        </span>
+                      ) : readingBookmark.testGroup.earnedTotalQuestions > 0 ? (
+                        <span className={`font-mono font-medium truncate ${featuredReadingDiscipline.accentTextClass}`}>
+                          本套已得 {readingBookmark.testGroup.earnedCorrect}/{readingBookmark.testGroup.earnedTotalQuestions} 分 · P{readingBookmark.targetItem.passageNum}
+                        </span>
+                      ) : readingBookmark.targetItem.progress.hitCount > 0 ? (
+                        <span className={`font-medium truncate ${featuredReadingDiscipline.accentTextClass}`}>
+                          生词共鸣 +{readingBookmark.targetItem.progress.hitCount} · {readingBookmark.targetItem.progress.totalQuestions} 题
                         </span>
                       ) : (
-                        <span className="text-stone-500 dark:text-stone-400">
-                          {featuredReading.passage.questions.length} 道真题 · 建议 {featuredReading.passage.timeAllowedMins || 20} 分钟
+                        <span className="text-stone-500 dark:text-stone-400 font-mono tabular-nums truncate">
+                          {readingBookmark.targetItem.passage.bandDifficulty} · {readingBookmark.targetItem.progress.totalQuestions} 题
                         </span>
                       )}
                     </div>
@@ -709,11 +754,19 @@ export const IELTSHubView: React.FC<IELTSHubViewProps> = ({
                       type="button"
                       onClick={e => {
                         e.stopPropagation();
-                        onStartReading(featuredReading.passage, false, featuredReading.matchedWords);
+                        onStartReading(
+                          readingBookmark.targetItem.passage,
+                          false,
+                          readingBookmark.targetItem.progress.hitWords
+                        );
                       }}
                       className={`px-4 py-2 rounded-xl text-xs font-semibold flex items-center gap-1.5 shadow-xs transition-all group-hover:translate-x-0.5 cursor-pointer whitespace-nowrap shrink-0 ${featuredReadingDiscipline.ctaBtnClass}`}
                     >
-                      <span>展卷研读</span>
+                      <span>
+                        {readingBookmark.isResume
+                          ? `继续 P${readingBookmark.targetItem.passageNum}`
+                          : `开启 T${readingBookmark.targetItem.testNum}·P${readingBookmark.targetItem.passageNum}`}
+                      </span>
                       <ArrowRight className="w-3.5 h-3.5" />
                     </button>
                   </div>
@@ -721,41 +774,41 @@ export const IELTSHubView: React.FC<IELTSHubViewProps> = ({
               </motion.div>
             )}
 
-            {skillMode === 'listening' && featuredListening && featuredListeningMeta && (
+            {skillMode === 'listening' && listeningBookmark && featuredListeningMeta && (
               <motion.div
-                key={`hero-listening-${selectedBook}`}
+                id="workbook-bookmark-hero-card"
+                key={`hero-listening-${selectedBook}-${listeningBookmark.targetItem.section.id}`}
                 initial={{ opacity: 0, y: 8 }}
                 animate={{ opacity: 1, y: 0 }}
                 exit={{ opacity: 0, y: -6 }}
                 transition={{ duration: 0.22, ease: [0.16, 1, 0.3, 1] }}
-                onClick={() => onStartListening(featuredListening.section)}
-                className={`group relative overflow-hidden rounded-[26px] bg-gradient-to-br ${featuredListeningDiscipline.heroBgClass} p-6 sm:p-7 border ${featuredListeningDiscipline.heroBorderClass} shadow-[0_10px_30px_-10px_rgba(28,25,23,0.07)] cursor-pointer transition-transform duration-200 active:scale-[0.995] transform-gpu`}
+                onClick={() => onStartListening(listeningBookmark.targetItem.section)}
+                className={`group relative overflow-hidden rounded-[26px] bg-gradient-to-br ${featuredListeningDiscipline.heroBgClass} p-5 sm:p-6 border ${featuredListeningDiscipline.heroBorderClass} shadow-[0_10px_30px_-10px_rgba(28,25,23,0.07)] cursor-pointer transition-transform duration-200 active:scale-[0.995] transform-gpu`}
               >
                 <div className={`absolute -right-10 -top-10 w-60 h-60 pointer-events-none select-none transition-transform duration-500 group-hover:scale-105 group-hover:rotate-3 ${featuredListeningDiscipline.accentTextClass}`}>
                   <DisciplineArtworkSvg discipline={featuredListeningDiscipline.key} />
                 </div>
 
-                <div className="relative z-10 space-y-4">
-                  {/* Top Masthead */}
-                  <div className="flex items-center justify-between gap-2 text-xs">
-                    <div className="flex items-center gap-2 font-mono tabular-nums text-stone-600 dark:text-stone-300 min-w-0">
-                      <span className={`font-serif-luxury italic text-[15px] font-bold tracking-normal whitespace-nowrap shrink-0 ${featuredListeningDiscipline.accentTextClass}`}>
-                        {featuredListening.section.cambridgeBook
-                          .replace(/^Cambridge\s+(\d+)$/i, 'Vol. $1')
-                          .replace(/^(\d{4})\s*考场真题$/, 'Vol. $1')
-                          .replace(/^(\d{4})\s*Recall$/i, 'Vol. $1')
-                          .replace(/^(Cambridge\s+IELTS\s+Academic\s+Special|IELTS\s+Academic\s+Reading\s+Special)$/i, 'Vol. Special')}
+                <div className="relative z-10 space-y-3.5">
+                  {/* Top Workbook Bookmark Masthead */}
+                  <div className="flex items-center justify-between gap-2 text-[11px]">
+                    <div className="flex items-center gap-1 font-mono tabular-nums text-stone-600 dark:text-stone-300 min-w-0 flex-1 overflow-hidden">
+                      <Bookmark className={`w-3.5 h-3.5 shrink-0 ${featuredListeningDiscipline.accentTextClass}`} />
+                      <span className={`font-sans-ui font-semibold whitespace-nowrap shrink-0 ${featuredListeningDiscipline.accentTextClass}`}>
+                        {listeningBookmark.isResume ? '书签续刷' : '整卷起点'}
                       </span>
                       <span aria-hidden="true" className="opacity-40 shrink-0">·</span>
-                      <span className="whitespace-nowrap shrink-0">T{featuredListening.section.testNum} S{featuredListening.section.sectionNum}</span>
+                      <span className="font-serif-luxury italic text-[13px] font-bold tracking-normal truncate">
+                        {getVolumeShortBadge(listeningBookmark.volumeGroup.volumeKey)}
+                      </span>
                       <span aria-hidden="true" className="opacity-40 shrink-0">·</span>
-                      <span className={`font-sans-ui font-medium whitespace-nowrap truncate ${featuredListeningDiscipline.accentTextClass}`}>
-                        {featuredListeningDiscipline.shortZh}
+                      <span className="whitespace-nowrap shrink-0 font-semibold">
+                        T{listeningBookmark.targetItem.testNum}·S{listeningBookmark.targetItem.sectionNum}
                       </span>
                     </div>
 
                     <span className="font-mono tabular-nums text-[11px] text-stone-500 dark:text-stone-400 font-medium whitespace-nowrap shrink-0">
-                      {featuredListening.section.bandDifficulty}
+                      本套 {listeningBookmark.testGroup.completedCount}/{listeningBookmark.testGroup.totalItems} 节
                     </span>
                   </div>
 
@@ -777,16 +830,20 @@ export const IELTSHubView: React.FC<IELTSHubViewProps> = ({
                     </p>
                   </div>
 
-                  {/* Clean Single-Row Footer: Concise Status + Primary Action */}
+                  {/* Clean Single-Row Footer */}
                   <div className="pt-3.5 border-t border-stone-900/[0.08] dark:border-white/10 flex items-center justify-between gap-3">
-                    <div className="flex items-center gap-1.5 text-xs text-stone-600 dark:text-stone-300">
-                      {featuredListening.hitCount > 0 ? (
-                        <span className={`font-medium ${featuredListeningDiscipline.accentTextClass}`}>
-                          生词本共鸣 {featuredListening.hitCount} 词
+                    <div className="flex items-center gap-1.5 text-xs text-stone-600 dark:text-stone-300 min-w-0 flex-1 overflow-hidden">
+                      {listeningBookmark.targetItem.progress.status === 'in_progress' ? (
+                        <span className="text-amber-700 dark:text-amber-400 font-mono font-medium truncate">
+                          进行中 · 已答 {listeningBookmark.targetItem.progress.answeredCount}/{listeningBookmark.targetItem.progress.totalQuestions} 题
+                        </span>
+                      ) : listeningBookmark.testGroup.earnedTotalQuestions > 0 ? (
+                        <span className={`font-mono font-medium truncate ${featuredListeningDiscipline.accentTextClass}`}>
+                          本套已得 {listeningBookmark.testGroup.earnedCorrect}/{listeningBookmark.testGroup.earnedTotalQuestions} 分 · S{listeningBookmark.targetItem.sectionNum}
                         </span>
                       ) : (
-                        <span className="text-stone-500 dark:text-stone-400">
-                          {featuredListening.section.questions.length} 道听力真题 · 精听实训
+                        <span className="text-stone-500 dark:text-stone-400 font-mono tabular-nums truncate">
+                          {listeningBookmark.targetItem.section.bandDifficulty} · {listeningBookmark.targetItem.progress.totalQuestions} 题
                         </span>
                       )}
                     </div>
@@ -795,11 +852,15 @@ export const IELTSHubView: React.FC<IELTSHubViewProps> = ({
                       type="button"
                       onClick={e => {
                         e.stopPropagation();
-                        onStartListening(featuredListening.section);
+                        onStartListening(listeningBookmark.targetItem.section);
                       }}
                       className={`px-4 py-2 rounded-xl text-xs font-semibold flex items-center gap-1.5 shadow-xs transition-all group-hover:translate-x-0.5 cursor-pointer whitespace-nowrap shrink-0 ${featuredListeningDiscipline.ctaBtnClass}`}
                     >
-                      <span>开始精听</span>
+                      <span>
+                        {listeningBookmark.isResume
+                          ? `继续 S${listeningBookmark.targetItem.sectionNum}`
+                          : `开启 T${listeningBookmark.targetItem.testNum}·S${listeningBookmark.targetItem.sectionNum}`}
+                      </span>
                       <ArrowRight className="w-3.5 h-3.5" />
                     </button>
                   </div>
@@ -808,16 +869,38 @@ export const IELTSHubView: React.FC<IELTSHubViewProps> = ({
             )}
           </AnimatePresence>
 
-          {/* 3. Open Editorial Issue Index (无框杂志章节目录) */}
-          <div className="space-y-5 pt-2">
-            {/* Archive Section Header + Volume Filter Picker */}
-            <div className="flex items-center justify-between gap-2">
-              <span className="text-xs font-semibold tracking-wider text-stone-400 dark:text-stone-500 uppercase">
-                剑桥真题目录 · Archive
-              </span>
+          {/* 3. Paper-Workbook Catalog: 分册 -> Test 1~4 -> P1/P2/P3 */}
+          <div id="workbook-directory-section" className="space-y-4 pt-1">
+            {/* Quick Volume Switcher Strip + Volume Dropdown */}
+            <div className="flex items-center justify-between gap-3 border-b border-stone-900/[0.07] dark:border-white/[0.07] pb-2">
+              <div className="flex items-center gap-4 overflow-x-auto no-scrollbar min-w-0 flex-1">
+                {availableBooks.map(book => {
+                  const active = selectedBook === book;
+                  const shortLabel =
+                    book === 'ALL'
+                      ? '全部卷册'
+                      : book === 'MY_LIBRARY'
+                        ? '个人馆藏'
+                        : getVolumeShortBadge(book);
+                  return (
+                    <button
+                      key={`spine-tab-${book}`}
+                      type="button"
+                      onClick={() => setSelectedBook(book)}
+                      className={`text-xs whitespace-nowrap transition-colors cursor-pointer pb-1 ${
+                        active
+                          ? 'text-stone-900 dark:text-white font-bold border-b-2 border-stone-900 dark:border-white'
+                          : 'text-stone-400 dark:text-stone-500 hover:text-stone-700 dark:hover:text-stone-300 font-medium'
+                      }`}
+                    >
+                      {shortLabel}
+                    </button>
+                  );
+                })}
+              </div>
 
-              {/* Volume Picker */}
-              <div className="relative">
+              {/* Volume Picker Dropdown */}
+              <div className="relative shrink-0">
                 <button
                   type="button"
                   onClick={() => setIsBookMenuOpen(prev => !prev)}
@@ -828,9 +911,11 @@ export const IELTSHubView: React.FC<IELTSHubViewProps> = ({
                   }`}
                 >
                   <span>
-                    {selectedBook === 'MY_LIBRARY'
-                      ? `个人馆藏 (${skillMode === 'reading' ? customPassages.length : customListening.length})`
-                      : formatBookNameZh(selectedBook)}
+                    {selectedBook === 'ALL'
+                      ? '卷册筛选'
+                      : selectedBook === 'MY_LIBRARY'
+                        ? `个人馆藏 (${skillMode === 'reading' ? customPassages.length : customListening.length})`
+                        : getVolumeShortBadge(selectedBook)}
                   </span>
                   <ChevronDown className={`w-3.5 h-3.5 opacity-60 transition-transform duration-200 ${isBookMenuOpen ? 'rotate-180' : ''}`} />
                 </button>
@@ -847,14 +932,16 @@ export const IELTSHubView: React.FC<IELTSHubViewProps> = ({
                         animate={{ opacity: 1, y: 0, scale: 1 }}
                         exit={{ opacity: 0, y: 4, scale: 0.96 }}
                         transition={{ duration: 0.18, ease: [0.16, 1, 0.3, 1] }}
-                        className="absolute right-0 mt-1.5 w-44 max-h-64 overflow-y-auto no-scrollbar rounded-2xl p-1.5 bg-[#FDFBF7]/95 dark:bg-[#141B29]/95 backdrop-blur-2xl border border-stone-900/[0.08] dark:border-white/[0.1] shadow-xl z-40 space-y-0.5"
+                        className="absolute right-0 mt-1.5 w-48 max-h-64 overflow-y-auto no-scrollbar rounded-2xl p-1.5 bg-[#FDFBF7]/95 dark:bg-[#141B29]/95 backdrop-blur-2xl border border-stone-900/[0.08] dark:border-white/[0.1] shadow-xl z-40 space-y-0.5"
                       >
                         {availableBooks.map(book => {
                           const active = selectedBook === book;
                           const label =
-                            book === 'MY_LIBRARY'
-                              ? `★ 个人馆藏 (${skillMode === 'reading' ? customPassages.length : customListening.length})`
-                              : formatBookNameZh(book);
+                            book === 'ALL'
+                              ? '全部真题册'
+                              : book === 'MY_LIBRARY'
+                                ? `个人馆藏 (${skillMode === 'reading' ? customPassages.length : customListening.length})`
+                                : getVolumeShortBadge(book);
                           return (
                             <button
                               key={`book-opt-${book}`}
@@ -888,242 +975,460 @@ export const IELTSHubView: React.FC<IELTSHubViewProps> = ({
                 animate={{ opacity: 1, y: 0 }}
                 exit={{ opacity: 0, y: -6 }}
                 transition={{ duration: 0.22, ease: [0.16, 1, 0.3, 1] }}
-                className="space-y-5"
+                className="space-y-6"
               >
                 {skillMode === 'reading' ? (
-                  groupedReading.length > 0 ? (
-                    groupedReading.map(({ book, items }) => (
-                      <section key={`editorial-vol-r-${book}`} className="space-y-1">
-                    {/* Editorial Issue Header */}
-                    <div className="flex items-baseline justify-between gap-3 pt-1 pb-2 border-b border-stone-900/15 dark:border-white/15">
-                      <div className="flex items-baseline gap-2.5 min-w-0">
-                        <h3 className="font-serif-luxury text-lg font-bold tracking-tight text-stone-900 dark:text-stone-100">
-                          {formatBookNameZh(book)}
-                        </h3>
-                        {formatBookNameZh(book) !== book && (
-                          <span className="text-[11px] font-mono uppercase tracking-widest text-stone-400 dark:text-stone-500 truncate">
-                            {book}
+                  filteredReadingCatalog.length > 0 ? (
+                    filteredReadingCatalog.map(volume => (
+                      <section key={`editorial-vol-r-${volume.volumeKey}`} className="space-y-3">
+                        {/* Volume Masthead */}
+                        <div className="flex items-baseline justify-between gap-3 pt-1 pb-2 border-b border-stone-900/15 dark:border-white/15">
+                          <h3 className="font-serif-luxury text-lg font-bold tracking-tight text-stone-900 dark:text-stone-100 truncate">
+                            {volume.volumeLabel}
+                          </h3>
+                          <span className="text-[11px] font-mono tabular-nums text-stone-500 dark:text-stone-400 shrink-0">
+                            {volume.completedItemsCount}/{volume.totalItemsCount} 篇
                           </span>
+                        </div>
+
+                        {/* Complete Test 1 ~ Test 4 Sheets with Smooth Accordion */}
+                        <div className="space-y-3">
+                          {volume.tests.map(test => {
+                            const testKey = `r-${volume.volumeKey}-t${test.testNum}`;
+                            const isCollapsed = Boolean(collapsedTestKeys[testKey]);
+                            const completionRatio = test.totalItems > 0 ? (test.completedCount / test.totalItems) * 100 : 0;
+
+                            return (
+                              <div
+                                key={`vol-${volume.volumeKey}-test-${test.testNum}`}
+                                className="rounded-2xl border border-stone-900/[0.08] dark:border-white/[0.08] bg-white/55 dark:bg-white/[0.02] overflow-hidden"
+                              >
+                                {/* Clickable Paper Test Sheet Header */}
+                                <button
+                                  type="button"
+                                  onClick={() => toggleTestCollapse(testKey)}
+                                  aria-expanded={!isCollapsed}
+                                  className="w-full px-4 py-2.5 bg-stone-900/[0.025] dark:bg-white/[0.03] hover:bg-stone-900/[0.045] dark:hover:bg-white/[0.05] transition-colors flex flex-col gap-1.5 cursor-pointer text-left focus:outline-none"
+                                >
+                                  <div className="w-full flex items-center justify-between gap-2">
+                                    <div className="flex items-center gap-2 min-w-0">
+                                      <span className="font-serif-luxury text-base font-bold text-stone-900 dark:text-stone-100 whitespace-nowrap">
+                                        Test {test.testNum}
+                                      </span>
+                                      <span aria-hidden="true" className="text-stone-300 dark:text-stone-600">·</span>
+                                      <span className="text-xs font-mono tabular-nums text-stone-500 dark:text-stone-400 truncate">
+                                        P1–P{test.items.length}
+                                      </span>
+                                    </div>
+
+                                    <div className="flex items-center gap-2 shrink-0 text-xs font-mono tabular-nums">
+                                      {test.isTestCompleted ? (
+                                        <span className="text-[#2D5A40] dark:text-[#78B894] font-semibold flex items-center gap-1">
+                                          <Check className="w-3.5 h-3.5 shrink-0" />
+                                          <span>{test.earnedCorrect}/{test.earnedTotalQuestions}</span>
+                                        </span>
+                                      ) : test.completedCount > 0 || test.inProgressCount > 0 ? (
+                                        <span className="text-stone-700 dark:text-stone-300 font-medium">
+                                          {test.completedCount}/{test.totalItems} 篇
+                                          {test.earnedTotalQuestions > 0 ? ` · ${test.earnedCorrect}/${test.earnedTotalQuestions}` : ''}
+                                        </span>
+                                      ) : (
+                                        <span className="text-stone-400 dark:text-stone-500">
+                                          0/{test.totalItems} 篇 · {test.totalQuestionsInTest} 题
+                                        </span>
+                                      )}
+                                      <ChevronDown
+                                        className={`w-3.5 h-3.5 text-stone-400 transition-transform duration-200 ${
+                                          isCollapsed ? '-rotate-90' : 'rotate-0'
+                                        }`}
+                                      />
+                                    </div>
+                                  </div>
+
+                                  {completionRatio > 0 && (
+                                    <div className="w-full h-[2px] rounded-full bg-stone-900/[0.06] dark:bg-white/[0.06] overflow-hidden">
+                                      <div
+                                        className="h-full bg-[#2D5A40] dark:bg-[#78B894] transition-all duration-300"
+                                        style={{ width: `${completionRatio}%` }}
+                                      />
+                                    </div>
+                                  )}
+                                </button>
+
+                                {/* Smooth Accordion Body: Ordered P1 -> P2 -> P3 Rows */}
+                                <AnimatePresence initial={false}>
+                                  {!isCollapsed && (
+                                    <motion.div
+                                      key={`test-body-${testKey}`}
+                                      initial={{ height: 0, opacity: 0 }}
+                                      animate={{ height: 'auto', opacity: 1 }}
+                                      exit={{ height: 0, opacity: 0 }}
+                                      transition={{ duration: 0.2, ease: [0.16, 1, 0.3, 1] }}
+                                      className="overflow-hidden border-t border-stone-900/[0.06] dark:border-white/[0.06]"
+                                    >
+                                      <div className="divide-y divide-stone-900/[0.06] dark:divide-white/[0.06]">
+                                        {test.items.map(item => {
+                                          const { passage, progress } = item;
+                                          const meta = getPassageBilingualMeta(passage);
+                                          const disc = resolveDiscipline(
+                                            `${passage.category} ${meta.categoryZh}`,
+                                            `${passage.title} ${meta.titleZh}`
+                                          );
+                                          const isBookmarked = readingBookmark?.targetItem.passage.id === passage.id;
+
+                                          return (
+                                            <article
+                                              key={`passage-workbook-row-${volume.volumeKey}-t${test.testNum}-p${passage.passageNum}-${passage.id}`}
+                                              onClick={() => onStartReading(passage, false, progress.hitWords)}
+                                              className={`group py-3.5 px-4 transition-colors cursor-pointer flex items-start gap-3.5 ${
+                                                isBookmarked
+                                                  ? 'bg-[#516050]/[0.05] dark:bg-[#8FB996]/[0.06]'
+                                                  : 'hover:bg-stone-900/[0.025] dark:hover:bg-white/[0.025]'
+                                              }`}
+                                            >
+                                              {/* Left: Passage Index */}
+                                              <div className="w-12 shrink-0 pt-0.5 flex flex-col items-start">
+                                                <div className="flex items-center gap-1.5">
+                                                  {progress.status === 'completed' ? (
+                                                    <span className="w-2 h-2 rounded-full bg-[#2D5A40] dark:bg-[#78B894]" title="已完成" />
+                                                  ) : progress.status === 'in_progress' ? (
+                                                    <span className="w-2 h-2 rounded-full bg-amber-500" title="进行中" />
+                                                  ) : (
+                                                    <span className={`w-1.5 h-1.5 rounded-full ${disc.badgeDotClass}`} />
+                                                  )}
+                                                  <span className="font-serif-luxury text-xl font-bold leading-none text-stone-800 dark:text-stone-200 group-hover:text-[#516050] dark:group-hover:text-[#8FB996] transition-colors tabular-nums">
+                                                    P{passage.passageNum}
+                                                  </span>
+                                                </div>
+                                                <span className="mt-1 text-[10px] font-mono tabular-nums text-stone-400 dark:text-stone-500">
+                                                  {isBookmarked ? '当前书签' : `第 ${passage.passageNum} 篇`}
+                                                </span>
+                                              </div>
+
+                                              {/* Center: Title + Subtitle + Discipline Metadata */}
+                                              <div className="min-w-0 flex-1 space-y-1">
+                                                <h4 className="text-[15px] font-bold text-stone-900 dark:text-stone-100 group-hover:text-[#516050] dark:group-hover:text-[#8FB996] transition-colors leading-snug">
+                                                  {meta.titleZh}
+                                                </h4>
+
+                                                <p className="font-serif-luxury italic text-xs text-stone-500 dark:text-stone-400 truncate">
+                                                  {meta.titleEn}
+                                                </p>
+
+                                                <div className="flex items-center gap-1.5 text-[11px] text-stone-400 dark:text-stone-500 flex-wrap pt-0.5">
+                                                  <span className={`font-medium ${disc.accentTextClass}`}>
+                                                    {disc.shortZh}
+                                                  </span>
+                                                  <span aria-hidden="true">·</span>
+                                                  <span className="font-mono tabular-nums">{passage.bandDifficulty}</span>
+                                                  {progress.hitCount > 0 && (
+                                                    <>
+                                                      <span aria-hidden="true">·</span>
+                                                      <span className="text-amber-700 dark:text-amber-400 font-medium font-mono tabular-nums">
+                                                        生词共鸣 +{progress.hitCount}
+                                                      </span>
+                                                    </>
+                                                  )}
+                                                </div>
+                                              </div>
+
+                                              {/* Right: Paper Score / Progress Mark + Arrow */}
+                                              <div className="shrink-0 self-center pl-1 flex items-center gap-2">
+                                                <div className="text-right font-mono tabular-nums">
+                                                  {progress.status === 'completed' ? (
+                                                    <div className="flex flex-col items-end">
+                                                      <span className="text-xs font-bold text-[#2D5A40] dark:text-[#78B894] flex items-center gap-1">
+                                                        <Check className="w-3 h-3 shrink-0" />
+                                                        <span>{progress.correctCount}/{progress.totalQuestions}</span>
+                                                      </span>
+                                                      {progress.bandScore && (
+                                                        <span className="text-[10px] text-stone-400 dark:text-stone-500">
+                                                          Band {progress.bandScore}
+                                                        </span>
+                                                      )}
+                                                    </div>
+                                                  ) : progress.status === 'in_progress' ? (
+                                                    <div className="flex flex-col items-end">
+                                                      <span className="text-xs font-semibold text-amber-700 dark:text-amber-400">
+                                                        {progress.answeredCount}/{progress.totalQuestions}
+                                                      </span>
+                                                      <span className="text-[10px] text-amber-600/80 dark:text-amber-400/80">
+                                                        进行中
+                                                      </span>
+                                                    </div>
+                                                  ) : (
+                                                    <span className="text-xs text-stone-400 dark:text-stone-500">
+                                                      {progress.totalQuestions} 题
+                                                    </span>
+                                                  )}
+                                                </div>
+                                                <ArrowRight className="w-4 h-4 text-stone-300 dark:text-stone-600 group-hover:text-[#516050] dark:group-hover:text-[#8FB996] group-hover:translate-x-0.5 transition-all" />
+                                              </div>
+                                            </article>
+                                          );
+                                        })}
+                                      </div>
+                                    </motion.div>
+                                  )}
+                                </AnimatePresence>
+                              </div>
+                            );
+                          })}
+                        </div>
+                      </section>
+                    ))
+                  ) : (
+                    <div className="py-12 px-4 rounded-3xl bg-white/50 dark:bg-white/[0.03] border border-stone-900/[0.06] dark:border-white/[0.06] text-center space-y-3.5">
+                      <p className="text-xs text-stone-500 dark:text-stone-400">
+                        本地未找到与「{searchQuery}」匹配的阅读篇目
+                      </p>
+                      <div className="flex items-center justify-center gap-2.5 flex-wrap">
+                        <button
+                          type="button"
+                          onClick={handleResetToMainHub}
+                          className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-xl bg-stone-900/[0.06] hover:bg-stone-900/[0.1] dark:bg-white/[0.08] dark:hover:bg-white/[0.14] text-stone-700 dark:text-stone-200 text-xs font-medium transition-colors cursor-pointer"
+                        >
+                          <ArrowLeft className="w-3.5 h-3.5" />
+                          <span>返回目录</span>
+                        </button>
+
+                        {searchQuery.trim() && (
+                          <button
+                            type="button"
+                            onClick={() => openOnlineSearch('reading', searchQuery.trim())}
+                            className="inline-flex items-center gap-1.5 px-4 py-2 rounded-xl bg-[#516050] text-white text-xs font-semibold shadow-xs cursor-pointer hover:bg-[#3F4C3E] transition-colors"
+                          >
+                            <Globe className="w-3.5 h-3.5" />
+                            <span>全网检索「{searchQuery}」</span>
+                          </button>
                         )}
                       </div>
-                      <span className="text-[11px] font-mono tabular-nums text-stone-400 dark:text-stone-500 shrink-0">
-                        {items.length} 篇
-                      </span>
                     </div>
+                  )
+                ) : filteredListeningCatalog.length > 0 ? (
+                  filteredListeningCatalog.map(volume => (
+                    <section key={`editorial-vol-l-${volume.volumeKey}`} className="space-y-3">
+                      {/* Volume Masthead */}
+                      <div className="flex items-baseline justify-between gap-3 pt-1 pb-2 border-b border-stone-900/15 dark:border-white/15">
+                        <h3 className="font-serif-luxury text-lg font-bold tracking-tight text-stone-900 dark:text-stone-100 truncate">
+                          {volume.volumeLabel}
+                        </h3>
+                        <span className="text-[11px] font-mono tabular-nums text-stone-500 dark:text-stone-400 shrink-0">
+                          {volume.completedItemsCount}/{volume.totalItemsCount} 节
+                        </span>
+                      </div>
 
-                    {/* Clean Editorial Rows */}
-                    <div className="divide-y divide-stone-900/[0.06] dark:divide-white/[0.06]">
-                      {items.map(({ passage, hitCount, matchedWords }, pIdx) => {
-                        const meta = getPassageBilingualMeta(passage);
-                        const disc = resolveDiscipline(
-                          `${passage.category} ${meta.categoryZh}`,
-                          `${passage.title} ${meta.titleZh}`
-                        );
-                        const isCurrentSpotlight = featuredReading?.passage.id === passage.id;
+                      {/* Complete Test 1 ~ Test 4 Listening Sheets with Smooth Accordion */}
+                      <div className="space-y-3">
+                        {volume.tests.map(test => {
+                          const testKey = `l-${volume.volumeKey}-t${test.testNum}`;
+                          const isCollapsed = Boolean(collapsedTestKeys[testKey]);
+                          const completionRatio = test.totalItems > 0 ? (test.completedCount / test.totalItems) * 100 : 0;
 
-                        return (
-                          <article
-                            key={`passage-editorial-row-${passage.id}-${pIdx}`}
-                            onClick={() => onStartReading(passage, false, matchedWords)}
-                            className={`group py-3.5 px-2 -mx-2 rounded-2xl transition-colors cursor-pointer flex items-start gap-3.5 ${
-                              isCurrentSpotlight
-                                ? 'bg-stone-900/[0.03] dark:bg-white/[0.03]'
-                                : 'hover:bg-stone-900/[0.025] dark:hover:bg-white/[0.025]'
-                            }`}
-                          >
-                            {/* Left: Large Editorial Serif Numeral */}
-                            <div className="w-10 shrink-0 pt-0.5 flex flex-col items-start">
-                              <div className="flex items-center gap-1.5">
-                                <span className={`w-1.5 h-1.5 rounded-full ${disc.badgeDotClass}`} />
-                                <span className="font-serif-luxury text-xl font-bold leading-none text-stone-800 dark:text-stone-200 group-hover:text-[#516050] dark:group-hover:text-[#8FB996] transition-colors tabular-nums">
-                                  0{passage.passageNum}
-                                </span>
-                              </div>
-                              <span className="mt-1 text-[10px] font-mono tabular-nums text-stone-400 dark:text-stone-500">
-                                T{passage.testNum}·P{passage.passageNum}
-                              </span>
-                            </div>
-
-                            {/* Center: Title + Subtitle + Discipline Metadata */}
-                            <div className="min-w-0 flex-1 space-y-1">
-                              <h4 className="text-[15px] font-bold text-stone-900 dark:text-stone-100 group-hover:text-[#516050] dark:group-hover:text-[#8FB996] transition-colors leading-snug">
-                                {meta.titleZh}
-                              </h4>
-
-                              <p className="font-serif-luxury italic text-xs text-stone-500 dark:text-stone-400 truncate">
-                                {meta.titleEn}
-                              </p>
-
-                              <div className="flex items-center gap-1.5 text-[11px] text-stone-400 dark:text-stone-500 flex-wrap pt-0.5">
-                                <span className={`font-medium ${disc.accentTextClass}`}>
-                                  {disc.shortZh}
-                                </span>
-                                <span aria-hidden="true">·</span>
-                                <span className="font-mono tabular-nums">{passage.bandDifficulty}</span>
-                                {hitCount > 0 && (
-                                  <>
-                                    <span aria-hidden="true">·</span>
-                                    <span className="text-amber-700 dark:text-amber-400 font-medium font-mono tabular-nums">
-                                      命中 +{hitCount} 词
+                          return (
+                            <div
+                              key={`vol-l-${volume.volumeKey}-test-${test.testNum}`}
+                              className="rounded-2xl border border-stone-900/[0.08] dark:border-white/[0.08] bg-white/55 dark:bg-white/[0.02] overflow-hidden"
+                            >
+                              {/* Clickable Paper Test Sheet Header */}
+                              <button
+                                type="button"
+                                onClick={() => toggleTestCollapse(testKey)}
+                                aria-expanded={!isCollapsed}
+                                className="w-full px-4 py-2.5 bg-stone-900/[0.025] dark:bg-white/[0.03] hover:bg-stone-900/[0.045] dark:hover:bg-white/[0.05] transition-colors flex flex-col gap-1.5 cursor-pointer text-left focus:outline-none"
+                              >
+                                <div className="w-full flex items-center justify-between gap-2">
+                                  <div className="flex items-center gap-2 min-w-0">
+                                    <span className="font-serif-luxury text-base font-bold text-stone-900 dark:text-stone-100 whitespace-nowrap">
+                                      Test {test.testNum}
                                     </span>
-                                  </>
+                                    <span aria-hidden="true" className="text-stone-300 dark:text-stone-600">·</span>
+                                    <span className="text-xs font-mono tabular-nums text-stone-500 dark:text-stone-400 truncate">
+                                      S1–S{test.items.length}
+                                    </span>
+                                  </div>
+
+                                  <div className="flex items-center gap-2 shrink-0 text-xs font-mono tabular-nums">
+                                    {test.isTestCompleted ? (
+                                      <span className="text-[#2D5A40] dark:text-[#78B894] font-semibold flex items-center gap-1">
+                                        <Check className="w-3.5 h-3.5 shrink-0" />
+                                        <span>{test.earnedCorrect}/{test.earnedTotalQuestions}</span>
+                                      </span>
+                                    ) : test.completedCount > 0 || test.inProgressCount > 0 ? (
+                                      <span className="text-stone-700 dark:text-stone-300 font-medium">
+                                        {test.completedCount}/{test.totalItems} 节
+                                        {test.earnedTotalQuestions > 0 ? ` · ${test.earnedCorrect}/${test.earnedTotalQuestions}` : ''}
+                                      </span>
+                                    ) : (
+                                      <span className="text-stone-400 dark:text-stone-500">
+                                        0/{test.totalItems} 节 · {test.totalQuestionsInTest} 题
+                                      </span>
+                                    )}
+                                    <ChevronDown
+                                      className={`w-3.5 h-3.5 text-stone-400 transition-transform duration-200 ${
+                                        isCollapsed ? '-rotate-90' : 'rotate-0'
+                                      }`}
+                                    />
+                                  </div>
+                                </div>
+
+                                {completionRatio > 0 && (
+                                  <div className="w-full h-[2px] rounded-full bg-stone-900/[0.06] dark:bg-white/[0.06] overflow-hidden">
+                                    <div
+                                      className="h-full bg-[#2D5A40] dark:bg-[#78B894] transition-all duration-300"
+                                      style={{ width: `${completionRatio}%` }}
+                                    />
+                                  </div>
                                 )}
-                              </div>
-                            </div>
+                              </button>
 
-                            {/* Right: Clean Arrow */}
-                            <div className="shrink-0 self-center pl-1">
-                              <ArrowRight className="w-4 h-4 text-stone-300 dark:text-stone-600 group-hover:text-[#516050] dark:group-hover:text-[#8FB996] group-hover:translate-x-0.5 transition-all" />
-                            </div>
-                          </article>
-                        );
-                      })}
-                    </div>
-                  </section>
-                ))
-              ) : (
-                <div className="py-12 px-4 rounded-3xl bg-white/50 dark:bg-white/[0.03] border border-stone-900/[0.06] dark:border-white/[0.06] text-center space-y-3.5">
-                  <p className="text-xs text-stone-500 dark:text-stone-400">
-                    本地未找到与「{searchQuery}」匹配的阅读篇目
-                  </p>
-                  <div className="flex items-center justify-center gap-2.5 flex-wrap">
-                    <button
-                      type="button"
-                      onClick={handleResetToMainHub}
-                      className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-xl bg-stone-900/[0.06] hover:bg-stone-900/[0.1] dark:bg-white/[0.08] dark:hover:bg-white/[0.14] text-stone-700 dark:text-stone-200 text-xs font-medium transition-colors cursor-pointer"
-                    >
-                      <ArrowLeft className="w-3.5 h-3.5" />
-                      <span>返回雅思主界面</span>
-                    </button>
+                              {/* Smooth Accordion Body: Ordered S1 -> S2 -> S3 -> S4 Rows */}
+                              <AnimatePresence initial={false}>
+                                {!isCollapsed && (
+                                  <motion.div
+                                    key={`test-body-${testKey}`}
+                                    initial={{ height: 0, opacity: 0 }}
+                                    animate={{ height: 'auto', opacity: 1 }}
+                                    exit={{ height: 0, opacity: 0 }}
+                                    transition={{ duration: 0.2, ease: [0.16, 1, 0.3, 1] }}
+                                    className="overflow-hidden border-t border-stone-900/[0.06] dark:border-white/[0.06]"
+                                  >
+                                    <div className="divide-y divide-stone-900/[0.06] dark:divide-white/[0.06]">
+                                      {test.items.map(item => {
+                                        const { section, progress } = item;
+                                        const meta = getListeningBilingualMeta(section);
+                                        const disc = resolveDiscipline(
+                                          `${section.scenario} ${meta.categoryZh}`,
+                                          `${section.title} ${meta.titleZh}`
+                                        );
+                                        const isBookmarked = listeningBookmark?.targetItem.section.id === section.id;
 
-                    {searchQuery.trim() && (
+                                        return (
+                                          <article
+                                            key={`section-workbook-row-${volume.volumeKey}-t${test.testNum}-s${section.sectionNum}-${section.id}`}
+                                            onClick={() => onStartListening(section)}
+                                            className={`group py-3.5 px-4 transition-colors cursor-pointer flex items-start gap-3.5 ${
+                                              isBookmarked
+                                                ? 'bg-amber-700/[0.05] dark:bg-amber-400/[0.06]'
+                                                : 'hover:bg-stone-900/[0.025] dark:hover:bg-white/[0.025]'
+                                            }`}
+                                          >
+                                            <div className="w-12 shrink-0 pt-0.5 flex flex-col items-start">
+                                              <div className="flex items-center gap-1.5">
+                                                {progress.status === 'completed' ? (
+                                                  <span className="w-2 h-2 rounded-full bg-[#2D5A40] dark:bg-[#78B894]" title="已完成" />
+                                                ) : progress.status === 'in_progress' ? (
+                                                  <span className="w-2 h-2 rounded-full bg-amber-500" title="进行中" />
+                                                ) : (
+                                                  <span className={`w-1.5 h-1.5 rounded-full ${disc.badgeDotClass}`} />
+                                                )}
+                                                <span className="font-serif-luxury text-xl font-bold leading-none text-stone-800 dark:text-stone-200 group-hover:text-amber-700 dark:group-hover:text-amber-400 transition-colors tabular-nums">
+                                                  S{section.sectionNum}
+                                                </span>
+                                              </div>
+                                              <span className="mt-1 text-[10px] font-mono tabular-nums text-stone-400 dark:text-stone-500">
+                                                {isBookmarked ? '当前书签' : `第 ${section.sectionNum} 节`}
+                                              </span>
+                                            </div>
+
+                                            <div className="min-w-0 flex-1 space-y-1">
+                                              <h4 className="text-[15px] font-bold text-stone-900 dark:text-stone-100 group-hover:text-amber-700 dark:group-hover:text-amber-400 transition-colors leading-snug">
+                                                {meta.titleZh}
+                                              </h4>
+
+                                              <p className="font-serif-luxury italic text-xs text-stone-500 dark:text-stone-400 truncate">
+                                                {meta.titleEn}
+                                              </p>
+
+                                              <div className="flex items-center gap-1.5 text-[11px] text-stone-400 dark:text-stone-500 flex-wrap pt-0.5">
+                                                <span className={`font-medium ${disc.accentTextClass}`}>
+                                                  {meta.categoryZh}
+                                                </span>
+                                                <span aria-hidden="true">·</span>
+                                                <span className="font-mono tabular-nums">{section.bandDifficulty}</span>
+                                                {progress.hitCount > 0 && (
+                                                  <>
+                                                    <span aria-hidden="true">·</span>
+                                                    <span className="text-amber-700 dark:text-amber-400 font-medium font-mono tabular-nums">
+                                                      生词共鸣 +{progress.hitCount}
+                                                    </span>
+                                                  </>
+                                                )}
+                                              </div>
+                                            </div>
+
+                                            <div className="shrink-0 self-center pl-1 flex items-center gap-2">
+                                              <div className="text-right font-mono tabular-nums">
+                                                {progress.status === 'completed' ? (
+                                                  <div className="flex flex-col items-end">
+                                                    <span className="text-xs font-bold text-[#2D5A40] dark:text-[#78B894] flex items-center gap-1">
+                                                      <Check className="w-3 h-3 shrink-0" />
+                                                      <span>{progress.correctCount}/{progress.totalQuestions}</span>
+                                                    </span>
+                                                    {progress.bandScore && (
+                                                      <span className="text-[10px] text-stone-400 dark:text-stone-500">
+                                                        Band {progress.bandScore}
+                                                      </span>
+                                                    )}
+                                                  </div>
+                                                ) : progress.status === 'in_progress' ? (
+                                                  <div className="flex flex-col items-end">
+                                                    <span className="text-xs font-semibold text-amber-700 dark:text-amber-400">
+                                                      {progress.answeredCount}/{progress.totalQuestions}
+                                                    </span>
+                                                    <span className="text-[10px] text-amber-600/80 dark:text-amber-400/80">
+                                                      进行中
+                                                    </span>
+                                                  </div>
+                                                ) : (
+                                                  <span className="text-xs text-stone-400 dark:text-stone-500">
+                                                    {progress.totalQuestions} 题
+                                                  </span>
+                                                )}
+                                              </div>
+                                              <ArrowRight className="w-4 h-4 text-stone-300 dark:text-stone-600 group-hover:text-amber-700 dark:group-hover:text-amber-400 group-hover:translate-x-0.5 transition-all" />
+                                            </div>
+                                          </article>
+                                        );
+                                      })}
+                                    </div>
+                                  </motion.div>
+                                )}
+                              </AnimatePresence>
+                            </div>
+                          );
+                        })}
+                      </div>
+                    </section>
+                  ))
+                ) : (
+                  <div className="py-12 px-4 rounded-3xl bg-white/50 dark:bg-white/[0.03] border border-stone-900/[0.06] dark:border-white/[0.06] text-center space-y-3.5">
+                    <p className="text-xs text-stone-500 dark:text-stone-400">
+                      本地未找到与「{searchQuery}」匹配的听力篇目
+                    </p>
+                    <div className="flex items-center justify-center gap-2.5 flex-wrap">
                       <button
                         type="button"
-                        onClick={() => openOnlineSearch('reading', searchQuery.trim())}
-                        className="inline-flex items-center gap-1.5 px-4 py-2 rounded-xl bg-[#516050] text-white text-xs font-semibold shadow-xs cursor-pointer hover:bg-[#3F4C3E] transition-colors"
+                        onClick={handleResetToMainHub}
+                        className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-xl bg-stone-900/[0.06] hover:bg-stone-900/[0.1] dark:bg-white/[0.08] dark:hover:bg-white/[0.14] text-stone-700 dark:text-stone-200 text-xs font-medium transition-colors cursor-pointer"
                       >
-                        <Globe className="w-3.5 h-3.5" />
-                        <span>去全网题库检索「{searchQuery}」</span>
+                        <ArrowLeft className="w-3.5 h-3.5" />
+                        <span>返回目录</span>
                       </button>
-                    )}
-                  </div>
-                </div>
-              )
-            ) : groupedListening.length > 0 ? (
-              groupedListening.map(({ book, items }) => (
-                <section key={`editorial-vol-l-${book}`} className="space-y-1">
-                  {/* Editorial Issue Header */}
-                  <div className="flex items-baseline justify-between gap-3 pt-1 pb-2 border-b border-stone-900/15 dark:border-white/15">
-                    <div className="flex items-baseline gap-2.5 min-w-0">
-                      <h3 className="font-serif-luxury text-lg font-bold tracking-tight text-stone-900 dark:text-stone-100">
-                        {formatBookNameZh(book)}
-                      </h3>
-                      {formatBookNameZh(book) !== book && (
-                        <span className="text-[11px] font-mono uppercase tracking-widest text-stone-400 dark:text-stone-500 truncate">
-                          {book}
-                        </span>
+
+                      {searchQuery.trim() && (
+                        <button
+                          type="button"
+                          onClick={() => openOnlineSearch('listening', searchQuery.trim())}
+                          className="inline-flex items-center gap-1.5 px-4 py-2 rounded-xl bg-amber-600 text-white text-xs font-semibold shadow-xs cursor-pointer hover:bg-amber-700 transition-colors"
+                        >
+                          <Globe className="w-3.5 h-3.5" />
+                          <span>全网检索「{searchQuery}」</span>
+                        </button>
                       )}
                     </div>
-                    <span className="text-[11px] font-mono tabular-nums text-stone-400 dark:text-stone-500 shrink-0">
-                      {items.length} 篇
-                    </span>
                   </div>
-
-                  {/* Clean Editorial Rows */}
-                  <div className="divide-y divide-stone-900/[0.06] dark:divide-white/[0.06]">
-                    {items.map(({ section, hitCount }, sIdx) => {
-                      const meta = getListeningBilingualMeta(section);
-                      const disc = resolveDiscipline(
-                        `${section.scenario} ${meta.categoryZh}`,
-                        `${section.title} ${meta.titleZh}`
-                      );
-                      const isCurrentSpotlight = featuredListening?.section.id === section.id;
-
-                      return (
-                        <article
-                          key={`section-editorial-row-${section.id}-${sIdx}`}
-                          onClick={() => onStartListening(section)}
-                          className={`group py-3.5 px-2 -mx-2 rounded-2xl transition-colors cursor-pointer flex items-start gap-3.5 ${
-                            isCurrentSpotlight
-                              ? 'bg-stone-900/[0.03] dark:bg-white/[0.03]'
-                              : 'hover:bg-stone-900/[0.025] dark:hover:bg-white/[0.025]'
-                          }`}
-                        >
-                          <div className="w-10 shrink-0 pt-0.5 flex flex-col items-start">
-                            <div className="flex items-center gap-1.5">
-                              <span className={`w-1.5 h-1.5 rounded-full ${disc.badgeDotClass}`} />
-                              <span className="font-serif-luxury text-xl font-bold leading-none text-stone-800 dark:text-stone-200 group-hover:text-amber-700 dark:group-hover:text-amber-400 transition-colors tabular-nums">
-                                0{section.sectionNum}
-                              </span>
-                            </div>
-                            <span className="mt-1 text-[10px] font-mono tabular-nums text-stone-400 dark:text-stone-500">
-                              T{section.testNum}·S{section.sectionNum}
-                            </span>
-                          </div>
-
-                          <div className="min-w-0 flex-1 space-y-1">
-                            <h4 className="text-[15px] font-bold text-stone-900 dark:text-stone-100 group-hover:text-amber-700 dark:group-hover:text-amber-400 transition-colors leading-snug">
-                              {meta.titleZh}
-                            </h4>
-
-                            <p className="font-serif-luxury italic text-xs text-stone-500 dark:text-stone-400 truncate">
-                              {meta.titleEn}
-                            </p>
-
-                            <div className="flex items-center gap-1.5 text-[11px] text-stone-400 dark:text-stone-500 flex-wrap pt-0.5">
-                              <span className={`font-medium ${disc.accentTextClass}`}>
-                                {meta.categoryZh}
-                              </span>
-                              <span aria-hidden="true">·</span>
-                              <span className="font-mono tabular-nums">{section.bandDifficulty}</span>
-                              {hitCount > 0 && (
-                                <>
-                                  <span aria-hidden="true">·</span>
-                                  <span className="text-amber-700 dark:text-amber-400 font-medium font-mono tabular-nums">
-                                    命中 +{hitCount} 词
-                                  </span>
-                                </>
-                              )}
-                            </div>
-                          </div>
-
-                          <div className="shrink-0 self-center pl-1">
-                            <ArrowRight className="w-4 h-4 text-stone-300 dark:text-stone-600 group-hover:text-amber-700 dark:group-hover:text-amber-400 group-hover:translate-x-0.5 transition-all" />
-                          </div>
-                        </article>
-                      );
-                    })}
-                  </div>
-                </section>
-              ))
-            ) : (
-              <div className="py-12 px-4 rounded-3xl bg-white/50 dark:bg-white/[0.03] border border-stone-900/[0.06] dark:border-white/[0.06] text-center space-y-3.5">
-                <p className="text-xs text-stone-500 dark:text-stone-400">
-                  本地未找到与「{searchQuery}」匹配的听力篇目
-                </p>
-                <div className="flex items-center justify-center gap-2.5 flex-wrap">
-                  <button
-                    type="button"
-                    onClick={handleResetToMainHub}
-                    className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-xl bg-stone-900/[0.06] hover:bg-stone-900/[0.1] dark:bg-white/[0.08] dark:hover:bg-white/[0.14] text-stone-700 dark:text-stone-200 text-xs font-medium transition-colors cursor-pointer"
-                  >
-                    <ArrowLeft className="w-3.5 h-3.5" />
-                    <span>返回雅思主界面</span>
-                  </button>
-
-                  {searchQuery.trim() && (
-                    <button
-                      type="button"
-                      onClick={() => openOnlineSearch('listening', searchQuery.trim())}
-                      className="inline-flex items-center gap-1.5 px-4 py-2 rounded-xl bg-amber-600 text-white text-xs font-semibold shadow-xs cursor-pointer hover:bg-amber-700 transition-colors"
-                    >
-                      <Globe className="w-3.5 h-3.5" />
-                      <span>去全网题库检索「{searchQuery}」</span>
-                    </button>
-                  )}
-                </div>
-              </div>
-            )}
+                )}
               </motion.div>
             </AnimatePresence>
           </div>

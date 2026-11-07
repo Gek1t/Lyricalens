@@ -10,14 +10,20 @@ import {
   SkipForward,
   Check,
   FileCheck,
-  Repeat
+  Repeat,
+  ArrowRight
 } from 'lucide-react';
 import { IELTSListeningSection, IELTSListeningQuestion } from '../../data/ieltsListening';
 import { getListeningBilingualMeta } from '../../data/ieltsTopicSynonyms';
 import { useAppStore } from '../../store/useAppStore';
-import { speakWord } from '../../utils/audioEngine';
 import { lookupLyricTerm, cleanWordText } from '../../utils/lyricDictionary';
 import { db } from '../../db';
+import {
+  getCompleteWorkbookListening,
+  getSiblingListeningSections,
+  resolveNextSequentialListening,
+  normalizeVolumeKey
+} from '../../utils/ieltsWorkbookEngine';
 
 interface IELTSListeningViewProps {
   section: IELTSListeningSection;
@@ -37,11 +43,48 @@ export const IELTSListeningView: React.FC<IELTSListeningViewProps> = ({
   const [repeatSentence, setRepeatSentence] = useState<boolean>(false);
   const [isScrolledCompact, setIsScrolledCompact] = useState<boolean>(false);
 
-  // User answers keyed by question ID
-  const [userAnswers, setUserAnswers] = useState<Record<number, string>>({});
+  // User answers keyed by question ID (initialized from saved draft if present)
+  const [userAnswers, setUserAnswers] = useState<Record<number, string>>(
+    () => useAppStore.getState().passageDrafts[section.id] || {}
+  );
 
   const showToast = useAppStore(s => s.showToast);
   const openWordDetail = useAppStore(s => s.openWordDetail);
+  const passageDrafts = useAppStore(s => s.passageDrafts);
+  const saveItemDraft = useAppStore(s => s.saveItemDraft);
+  const clearItemDraft = useAppStore(s => s.clearItemDraft);
+  const listeningRecords = useAppStore(s => s.listeningRecords);
+  const saveListeningCompletionRecord = useAppStore(s => s.saveListeningCompletionRecord);
+  const loadCambridgeListening = useAppStore(s => s.loadCambridgeListening);
+
+  // Restore draft answers when section changes
+  useEffect(() => {
+    const savedDraft = useAppStore.getState().passageDrafts[section.id] || {};
+    setUserAnswers(savedDraft);
+    setIsExamSubmitted(false);
+    setElapsedSeconds(0);
+    setCurrentParagraphIdx(0);
+    stopPlayback();
+    if (scrollContainerRef.current) {
+      scrollContainerRef.current.scrollTop = 0;
+    }
+  }, [section.id]);
+
+  const customListening = useLiveQuery(() => db.customListening.toArray(), []) || [];
+  const allWorkbookListening = useMemo(
+    () => getCompleteWorkbookListening(customListening),
+    [customListening]
+  );
+
+  const siblingSections = useMemo(
+    () => getSiblingListeningSections(allWorkbookListening, section),
+    [allWorkbookListening, section]
+  );
+
+  const nextSequentialSection = useMemo(
+    () => resolveNextSequentialListening(allWorkbookListening, section),
+    [allWorkbookListening, section]
+  );
 
   const isPlayingRef = useRef<boolean>(false);
   const currentUtteranceRef = useRef<SpeechSynthesisUtterance | null>(null);
@@ -77,10 +120,6 @@ export const IELTSListeningView: React.FC<IELTSListeningViewProps> = ({
     if (targetEl) {
       const r = targetEl.getBoundingClientRect();
       heroRect = { x: r.left, y: r.top, width: r.width, height: r.height };
-    }
-
-    if (!isPlayingRef.current) {
-      speakWord(cleaned, 'en-GB');
     }
 
     const contextLine = sentenceText
@@ -249,20 +288,11 @@ export const IELTSListeningView: React.FC<IELTSListeningViewProps> = ({
 
   const handleAnswerChange = (qId: number, val: string) => {
     if (isExamSubmitted) return;
-    setUserAnswers(prev => ({ ...prev, [qId]: val }));
-  };
-
-  const handleSubmitExam = () => {
-    setIsExamSubmitted(true);
-    stopPlayback();
-  };
-
-  const handleResetExam = () => {
-    setUserAnswers({});
-    setIsExamSubmitted(false);
-    setElapsedSeconds(0);
-    setCurrentParagraphIdx(0);
-    stopPlayback();
+    setUserAnswers(prev => {
+      const next = { ...prev, [qId]: val };
+      saveItemDraft(section.id, next);
+      return next;
+    });
   };
 
   // Compute Score
@@ -278,16 +308,54 @@ export const IELTSListeningView: React.FC<IELTSListeningViewProps> = ({
     const total = section.questions.length;
     const ratio = total > 0 ? correct / total : 0;
     let band = 'Band 6.0';
-    if (ratio === 1) band = 'Band 9.0';
-    else if (ratio >= 0.8) band = 'Band 8.5';
-    else if (ratio >= 0.7) band = 'Band 8.0';
-    else if (ratio >= 0.6) band = 'Band 7.5';
-    else if (ratio >= 0.5) band = 'Band 7.0';
-    else if (ratio > 0) band = 'Band 6.0';
-    else band = 'Band 5.0';
+    let bandNum = 6.0;
+    if (ratio === 1) {
+      band = 'Band 9.0';
+      bandNum = 9.0;
+    } else if (ratio >= 0.8) {
+      band = 'Band 8.5';
+      bandNum = 8.5;
+    } else if (ratio >= 0.7) {
+      band = 'Band 8.0';
+      bandNum = 8.0;
+    } else if (ratio >= 0.6) {
+      band = 'Band 7.5';
+      bandNum = 7.5;
+    } else if (ratio >= 0.5) {
+      band = 'Band 7.0';
+      bandNum = 7.0;
+    } else if (ratio > 0) {
+      band = 'Band 6.0';
+      bandNum = 6.0;
+    } else {
+      band = 'Band 5.0';
+      bandNum = 5.0;
+    }
 
-    return { correct, total, ratio, band };
+    return { correct, total, ratio, band, bandNum };
   }, [section.questions, userAnswers]);
+
+  const handleSubmitExam = () => {
+    setIsExamSubmitted(true);
+    stopPlayback();
+    clearItemDraft(section.id);
+    saveListeningCompletionRecord({
+      sectionId: section.id,
+      correctCount: scoreStats.correct,
+      totalQuestions: scoreStats.total,
+      bandScore: String(scoreStats.bandNum),
+      timestamp: Date.now()
+    });
+  };
+
+  const handleResetExam = () => {
+    setUserAnswers({});
+    clearItemDraft(section.id);
+    setIsExamSubmitted(false);
+    setElapsedSeconds(0);
+    setCurrentParagraphIdx(0);
+    stopPlayback();
+  };
 
   const answeredCount = Object.keys(userAnswers).filter(k => (userAnswers[Number(k)] || '').trim()).length;
 
@@ -400,28 +468,79 @@ export const IELTSListeningView: React.FC<IELTSListeningViewProps> = ({
         className="flex-1 overflow-y-auto no-scrollbar px-5 sm:px-7 pb-24 pt-1"
       >
         <div className="max-w-lg mx-auto space-y-4">
-          {/* 1. Open Editorial Masthead & Academic Title (English Serif Primary + Single-Line Chinese Guide) */}
-          <div className="space-y-1.5 pt-1">
-            <div className="flex items-center justify-between gap-2 text-xs">
-              <div className="flex items-center gap-2 font-mono tabular-nums text-stone-600 dark:text-stone-300 min-w-0">
-                <span className="font-serif-luxury italic text-[15px] font-bold tracking-normal whitespace-nowrap shrink-0 text-[#516050] dark:text-[#8FB996]">
-                  {section.cambridgeBook
-                    .replace(/^Cambridge\s+(\d+)$/i, 'Vol. $1')
-                    .replace(/^(\d{4})\s*考场真题$/, 'Vol. $1')
-                    .replace(/^(\d{4})\s*Recall$/i, 'Vol. $1')
-                    .replace(/^(Cambridge\s+IELTS\s+Academic\s+Special|IELTS\s+Academic\s+Reading\s+Special)$/i, 'Vol. Special')}
+          {/* 1. Open Editorial Masthead, In-Test S1-S4 Switcher & Academic Title */}
+          <div className="space-y-2 pt-1">
+            <div className="flex flex-wrap items-center justify-between gap-x-2 gap-y-1 text-xs">
+              <div className="flex items-center gap-1.5 font-mono tabular-nums text-stone-600 dark:text-stone-300 min-w-0 overflow-hidden">
+                <span className="font-serif-luxury italic text-[14px] sm:text-[15px] font-bold tracking-normal truncate text-[#516050] dark:text-[#8FB996]">
+                  {normalizeVolumeKey(section.cambridgeBook) === '2026 考场真题'
+                    ? '2026 考季真题'
+                    : section.cambridgeBook
+                        .replace(/^Cambridge\s+(\d+)$/i, 'Vol. $1')
+                        .replace(/^(\d{4})\s*考场真题$/, 'Vol. $1')
+                        .replace(/^(\d{4})\s*Recall$/i, 'Vol. $1')
+                        .replace(/^(Cambridge\s+IELTS\s+Academic\s+Special|IELTS\s+Academic\s+Reading\s+Special)$/i, 'Vol. Special')}
                 </span>
                 <span aria-hidden="true" className="opacity-40 shrink-0">·</span>
-                <span className="whitespace-nowrap shrink-0">T{section.testNum} S{section.sectionNum}</span>
+                <span className="whitespace-nowrap shrink-0">Test {section.testNum}</span>
                 <span aria-hidden="true" className="opacity-40 shrink-0">·</span>
-                <span className="font-sans-ui font-medium text-[#516050] dark:text-[#8FB996] whitespace-nowrap truncate">
-                  Part {section.sectionNum} 听力
+                <span className="font-sans-ui font-medium text-[#516050] dark:text-[#8FB996] whitespace-nowrap shrink-0">
+                  Section {section.sectionNum} 听力
                 </span>
               </div>
-              <span className="font-mono tabular-nums text-[11px] text-stone-500 dark:text-stone-400 font-medium whitespace-nowrap shrink-0">
+              <span className="font-mono tabular-nums text-[11px] text-stone-500 dark:text-stone-400 font-medium whitespace-nowrap shrink-0 ml-auto">
                 {section.bandDifficulty}
               </span>
             </div>
+
+            {/* In-Test Sibling Switcher Bar (卷内 S1 · S2 · S3 · S4 顺刷切换条) */}
+            {siblingSections.length > 1 && (
+              <div
+                id="in-test-listening-switcher"
+                className="flex items-center gap-1 p-1 rounded-xl bg-stone-900/[0.035] dark:bg-white/[0.04] border border-stone-900/[0.06] dark:border-white/[0.06]"
+              >
+                {siblingSections.map(sib => {
+                  const isCurrentSib = sib.id === section.id;
+                  const doneRec = listeningRecords[sib.id];
+                  const draftAnsCount = Object.keys(passageDrafts[sib.id] || {}).filter(
+                    k => (passageDrafts[sib.id]?.[Number(k)] || '').trim().length > 0
+                  ).length;
+
+                  return (
+                    <button
+                      key={`listen-sib-${sib.id}`}
+                      type="button"
+                      onClick={() => {
+                        if (!isCurrentSib) {
+                          loadCambridgeListening(sib);
+                        }
+                      }}
+                      className={`flex-1 py-1.5 px-1.5 rounded-lg text-[11px] font-mono tabular-nums transition-all cursor-pointer flex items-center justify-center gap-1 min-w-0 whitespace-nowrap ${
+                        isCurrentSib
+                          ? 'bg-white dark:bg-[#192231] text-stone-900 dark:text-stone-100 font-bold shadow-2xs border border-stone-200/80 dark:border-white/[0.08]'
+                          : 'text-stone-500 dark:text-stone-400 hover:text-stone-900 dark:hover:text-stone-200 font-medium'
+                      }`}
+                      title={`Section ${sib.sectionNum}: ${sib.title}`}
+                    >
+                      <span className="whitespace-nowrap">S{sib.sectionNum}</span>
+                      {doneRec ? (
+                        <span className="text-[10px] text-[#516050] dark:text-[#8FB996] font-semibold whitespace-nowrap">
+                          ✓{doneRec.correctCount}/{doneRec.totalQuestions}
+                        </span>
+                      ) : draftAnsCount > 0 && !isCurrentSib ? (
+                        <span className="text-[10px] text-amber-700 dark:text-amber-300 whitespace-nowrap">
+                          {draftAnsCount}/{sib.questions.length}
+                        </span>
+                      ) : isCurrentSib && answeredCount > 0 ? (
+                        <span className="text-[10px] text-[#516050] dark:text-[#8FB996] whitespace-nowrap">
+                          {answeredCount}/{section.questions.length}
+                        </span>
+                      ) : null}
+                    </button>
+                  );
+                })}
+              </div>
+            )}
 
             <h1 className="font-serif-luxury text-[19px] sm:text-[21px] font-bold text-stone-900 dark:text-stone-100 leading-[1.3] tracking-tight pt-0.5 text-balance">
               {bilingualMeta.titleEn || section.title}
@@ -884,14 +1003,36 @@ export const IELTSListeningView: React.FC<IELTSListeningViewProps> = ({
                         </button>
                       </div>
 
-                      <button
-                        type="button"
-                        onClick={handleResetExam}
-                        className="w-full py-2.5 rounded-xl bg-stone-900/[0.05] dark:bg-white/[0.06] text-stone-700 dark:text-stone-300 font-medium text-xs flex items-center justify-center gap-1.5 hover:bg-stone-900/[0.09] dark:hover:bg-white/[0.1] cursor-pointer transition-colors"
-                      >
-                        <RotateCcw className="w-3.5 h-3.5" />
-                        <span>重新作答本篇</span>
-                      </button>
+                      <div className="flex items-center gap-2">
+                        <button
+                          type="button"
+                          onClick={handleResetExam}
+                          className="flex-1 py-2.5 rounded-xl bg-stone-900/[0.05] dark:bg-white/[0.06] text-stone-700 dark:text-stone-300 font-medium text-xs flex items-center justify-center gap-1.5 hover:bg-stone-900/[0.09] dark:hover:bg-white/[0.1] cursor-pointer transition-colors"
+                        >
+                          <RotateCcw className="w-3.5 h-3.5" />
+                          <span>重做本节</span>
+                        </button>
+
+                        {nextSequentialSection.next && (
+                          <button
+                            id="listening-next-section-btn"
+                            type="button"
+                            onClick={() => {
+                              if (nextSequentialSection.next) {
+                                loadCambridgeListening(nextSequentialSection.next);
+                              }
+                            }}
+                            className="flex-[1.45] py-2.5 px-3.5 rounded-xl bg-[#516050] hover:bg-[#3F4C3E] dark:bg-[#8FB996] text-white dark:text-stone-950 font-semibold text-xs flex items-center justify-center gap-1.5 cursor-pointer transition-all active:scale-98"
+                          >
+                            <span>
+                              {nextSequentialSection.isSameTest
+                                ? `顺刷下一节 · Section ${nextSequentialSection.next.sectionNum}`
+                                : `下一套 · Test ${nextSequentialSection.next.testNum} S1`}
+                            </span>
+                            <ArrowRight className="w-3.5 h-3.5 shrink-0" />
+                          </button>
+                        )}
+                      </div>
                     </div>
                   )}
                 </div>

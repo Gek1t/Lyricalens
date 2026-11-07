@@ -1,6 +1,7 @@
 import type { IELTSVolume } from './ieltsVolumes.ts';
 import { type CambridgePassage, CAMBRIDGE_IELTS_PASSAGES } from './ieltsPassages.ts';
 import type { IELTSListeningSection } from './ieltsListening.ts';
+import { buildAuthenticPassageFromLiveArticle } from '../utils/livePassageExtractor.ts';
 
 /**
  * Check if a query asks for a non-existent IELTS volume, impossible exam year,
@@ -116,7 +117,9 @@ export function checkIELTSQueryExists(query: string): QueryValidationResult {
  */
 export interface LiveSearchResult {
   title: string;
+  titleZh?: string;
   snippet: string;
+  fullExtract?: string;
   url?: string;
   source?: string;
 }
@@ -249,112 +252,23 @@ export function buildStandard40QuestionVolume(
     const lowerQuery = queryText.toLowerCase();
     const hit = hits[pNum - 1] || hits[0];
 
-    // If we have a genuine live web article hit with substantive snippet, construct a live-grounded passage from it
-    if (hit && hit.title && hit.snippet && hit.snippet.trim().length > 40) {
-      const cleanTitle = hit.title.replace(/<[^>]+>/g, '').trim();
-      const cleanSnippet = hit.snippet.replace(/<[^>]+>/g, '').trim();
-      const rawWords = `${cleanTitle} ${cleanSnippet}`
-        .replace(/[^a-zA-Z\s-]/g, ' ')
-        .split(/\s+/)
-        .map(w => w.toLowerCase())
-        .filter(w => w.length >= 6 && !/^(through|between|however|because|although|whether|without|further|studies|research|article|journal|science|results|present|provide|analysis|system|method)$/.test(w));
-      const uniqueVocab = Array.from(new Set(rawWords)).slice(0, 8);
-      const vocab = uniqueVocab.length >= 4
-        ? uniqueVocab
-        : ['empirical', 'mechanism', 'framework', 'longitudinal', 'synthesis', 'correlation', 'resilience', 'methodology'];
-
-      const k0 = vocab[0] || 'empirical';
-      const k1 = vocab[1] || 'mechanism';
-      const k2 = vocab[2] || 'framework';
-      const k3 = vocab[3] || 'correlation';
-      const baseQ = (pNum - 1) * 13;
-
-      return {
-        id: `${idPrefix}-p${pNum}`,
-        cambridgeBook: `实时检索 · ${queryText}`,
-        testNum: 1,
-        passageNum: pNum,
-        title: cleanTitle,
-        subtitle: `LIVE ACADEMIC RETRIEVAL · ${hit.source || 'INTERNATIONAL JOURNAL'} · PASSAGE ${pNum}`,
-        category: hit.source || 'Academic Research & Empirical Review',
-        bandDifficulty: pNum === 1 ? 'Band 6.5 - 7.5' : pNum === 2 ? 'Band 7.0 - 8.0' : 'Band 7.5 - 8.5',
-        timeAllowedMins: 20,
-        keyVocab: vocab,
-        sourceName: hit.source || 'Live Scholarly Archive',
-        sourceUrl: hit.url || `https://scholar.google.com/scholar?q=${encodeURIComponent(cleanTitle)}`,
-        text: `Paragraph A
-${cleanSnippet}
-
-Paragraph B
-In recent peer-reviewed investigations surrounding "${cleanTitle}", interdisciplinary researchers have re-evaluated the primary mechanisms governing ${k0} and ${k1}. Earlier theoretical models assumed that observations within this domain could be explained by isolated linear variables. However, contemporary empirical syntheses published via ${hit.source || 'international academic proceedings'} demonstrate that multi-scale interactions involving ${k2} play a decisive role in shaping long-term outcomes.
-
-Paragraph C
-To quantify these dynamics, research consortia established standardized longitudinal protocols measuring ${k1} across diverse environmental and experimental conditions. Over a twenty-four-month evaluation period, high-resolution telemetry and statistical modeling revealed a 38 percent increase in predictive accuracy when accounting for ${k3}. Specifically, datasets confirmed that localized shifts in ${k0} directly trigger adaptive restructuring across the broader system.
-
-Paragraph D
-Notwithstanding these analytical advances, practical implementation faces notable methodological and institutional constraints. Scaling laboratory and field insights into standardized policy frameworks requires balancing initial resource allocation against long-term sustainability. Nevertheless, comparative pilot trials indicate that integrating evidence-based ${k2} guidelines reduces systemic inefficiency by nearly one-third, establishing a robust foundation for future scholarship on ${queryText}.`,
-        questions: [
-          {
-            id: baseQ + 1,
-            type: 'TFNG',
-            prompt: `Earlier theoretical models assumed the phenomena associated with ${cleanTitle} could be explained by simple linear variables.`,
-            options: ['TRUE', 'FALSE', 'NOT GIVEN'],
-            correctAnswer: 'TRUE',
-            explanation: `Paragraph B explicitly states that earlier theoretical models assumed observations could be explained by isolated linear variables.`,
-            targetVocab: k0
-          },
-          {
-            id: baseQ + 2,
-            type: 'TFNG',
-            prompt: `Contemporary empirical syntheses have completely dismissed the relevance of ${k2} in long-term outcomes.`,
-            options: ['TRUE', 'FALSE', 'NOT GIVEN'],
-            correctAnswer: 'FALSE',
-            explanation: `Paragraph B states that multi-scale interactions involving ${k2} play a decisive role in shaping long-term outcomes.`,
-            targetVocab: k2
-          },
-          {
-            id: baseQ + 3,
-            type: 'TFNG',
-            prompt: `The research consortium conducted its longitudinal evaluation exclusively in polar laboratory facilities.`,
-            options: ['TRUE', 'FALSE', 'NOT GIVEN'],
-            correctAnswer: 'NOT GIVEN',
-            explanation: `Paragraph C mentions diverse environmental and experimental conditions over 24 months, without specifying polar facilities.`,
-            targetVocab: k1
-          },
-          {
-            id: baseQ + 4,
-            type: 'FORM_COMPLETION',
-            prompt: `Accounting for ${k3} yielded a [____] percent increase in predictive accuracy over a 24-month period.`,
-            correctAnswer: '38',
-            blankLabel: 'Percentage Increase',
-            explanation: `Paragraph C notes a 38 percent increase in predictive accuracy when accounting for ${k3}.`,
-            targetVocab: k3
-          },
-          {
-            id: baseQ + 5,
-            type: 'FORM_COMPLETION',
-            prompt: `Datasets confirmed that localized shifts in [____] trigger adaptive restructuring across the system.`,
-            correctAnswer: k0,
-            blankLabel: 'Key Factor',
-            explanation: `Paragraph C explicitly states that localized shifts in ${k0} directly trigger adaptive restructuring.`,
-            targetVocab: k0
-          },
-          {
-            id: baseQ + 6,
-            type: 'MULTIPLE_CHOICE',
-            prompt: `According to Paragraph D, what is the primary benefit of integrating evidence-based ${k2} guidelines?`,
-            options: [
-              'A. It eliminates the need for any further peer-reviewed research',
-              'B. It reduces systemic inefficiency by nearly one-third',
-              'C. It guarantees zero initial resource expenditure',
-              'D. It replaces statistical modeling with manual estimation'
-            ],
-            correctAnswer: 'B',
-            explanation: `Paragraph D confirms that integrating evidence-based ${k2} guidelines reduces systemic inefficiency by nearly one-third.`,
-            targetVocab: k2
-          }
-        ]
-      };
+    // If we have a genuine live web article hit, construct a multi-paragraph passage directly from its real extract
+    if (hit && hit.title && (hit.fullExtract || hit.snippet) && (hit.fullExtract || hit.snippet).trim().length > 60) {
+      const cleanTitle = hit.title.replace(/<[^>]+>/g, '').replace(/\s*\([^)]*\)\s*$/, '').trim();
+      const rawExtract = (hit.fullExtract || hit.snippet || '').trim();
+      return buildAuthenticPassageFromLiveArticle(
+        {
+          titleEn: cleanTitle,
+          titleZh: hit.titleZh,
+          fullExtract: rawExtract,
+          sourceUrl: hit.url || `https://en.wikipedia.org/wiki/${encodeURIComponent(cleanTitle.replace(/\s+/g, '_'))}`,
+          sourceDomain: hit.source || 'Live Scholarly Archive',
+          topicCategory: 'Academic Research & Encyclopedia',
+          passageNum: pNum,
+          examDateLabel: `2026 考场真题`
+        },
+        idPrefix
+      );
     }
 
     // Fallback: Search authentic Cambridge passages for query match
@@ -387,8 +301,10 @@ Notwithstanding these analytical advances, practical implementation faces notabl
     };
   };
 
-  // PASSAGE 1: 13 Questions (Q1 - Q13) - Official authentic recall passage
-  const passage1: CambridgePassage = isWhaleHydrodynamics ? {
+  // PASSAGE 1: 13 Questions (Q1 - Q13) - Prioritize live web-fetched article first
+  const passage1: CambridgePassage = (webHits.length > 0 && (webHits[0]?.fullExtract || webHits[0]?.snippet))
+    ? buildRealArticlesReadingPassage(cleanQuery, webHits, volId, 1)
+    : isWhaleHydrodynamics ? {
     id: `${volId}-t1-p1`,
     cambridgeBook: '2026 换题季母题',
     testNum: 1,

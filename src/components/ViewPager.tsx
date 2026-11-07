@@ -105,6 +105,10 @@ export const ViewPager: React.FC = () => {
         {/* Mobile Full-Bleed on real phones, Pixel-Perfect Scaled Device Preview on Desktop */}
         <div
           id="mobile-app-frame"
+          onScroll={(e) => {
+            if (e.currentTarget.scrollLeft !== 0) e.currentTarget.scrollLeft = 0;
+            if (e.currentTarget.scrollTop !== 0) e.currentTarget.scrollTop = 0;
+          }}
           style={
             isMobileDevice
               ? {}
@@ -115,22 +119,22 @@ export const ViewPager: React.FC = () => {
                   transformOrigin: 'center center',
                 }
           }
-          className={`relative overflow-hidden bg-[#FAF7F2] dark:bg-[#0B0F17] text-stone-900 dark:text-stone-100 font-sans-ui transition-colors duration-500 flex flex-col ${
+          className={`relative overflow-hidden overflow-clip bg-[#FAF7F2] dark:bg-[#0B0F17] text-stone-900 dark:text-stone-100 font-sans-ui transition-colors duration-500 flex flex-col ${
             isMobileDevice
               ? 'w-full h-full'
               : 'absolute rounded-[38px] shadow-[0_25px_60px_-15px_rgba(0,0,0,0.22),0_0_0_1px_rgba(0,0,0,0.08)] dark:shadow-[0_30px_70px_-15px_rgba(0,0,0,0.85),0_0_0_1px_rgba(255,255,255,0.08)] border border-stone-300/50 dark:border-stone-800/80'
           }`}
         >
-          {/* Shared Seamless Ambient Backdrop across spaces (prevents hard vertical color cut between Music and IELTS spaces) */}
+          {/* Shared Seamless Ambient Backdrop across all 3 spaces (prevents hard vertical color cut between AR, Music, and IELTS spaces) */}
           <AmbientBackground
-            intensity={activeSpace === 1 ? 1 : activeSpace === 2 ? 0.26 : 0.15}
+            intensity={activeSpace === 1 ? 1 : activeSpace === 2 ? 0.28 : 0.34}
             className="transition-opacity duration-700"
           />
 
           {/* 300% Horizontal Tri-Space ViewPager Container with 60/120fps GPU Composition */}
           <div
             id="viewpager-viewport"
-            className="w-[300%] h-full flex z-10 hardware-accelerated"
+            className="w-[300%] h-full flex relative z-10 hardware-accelerated"
             style={{
               transform: `translate3d(-${(activeSpace * 100) / 3}%, 0, 0)`,
               WebkitTransform: `translate3d(-${(activeSpace * 100) / 3}%, 0, 0)`,
@@ -143,55 +147,96 @@ export const ViewPager: React.FC = () => {
               perspective: 1000,
             }}
           >
-            {/* Panel 0 (Left - AR Space) */}
+            {/* Wide S-Curve Atmospheric Dark Backdrop spanning across the AR <-> Music boundary (0% to 56% of 300% track) so there is zero clip edge and zero Mach band */}
             <div
-              id="panel-ar-space"
-              className="w-1/3 h-full flex-shrink-0 relative overflow-hidden hardware-accelerated"
+              id="ar-ambient-backdrop"
+              className="absolute top-0 bottom-0 left-0 w-[56%] z-0 pointer-events-none hardware-accelerated"
               style={{
-                transform: activeSpace === 0 ? 'translate3d(0, 0, 0) scale(1)' : 'translate3d(0, 0, 0) scale(0.965)',
-                WebkitTransform: activeSpace === 0 ? 'translate3d(0, 0, 0) scale(1)' : 'translate3d(0, 0, 0) scale(0.965)',
-                opacity: activeSpace === 0 ? 1 : 0.72,
-                transition: 'transform 420ms cubic-bezier(0.22, 1, 0.36, 1), opacity 380ms cubic-bezier(0.22, 1, 0.36, 1)',
-                WebkitBackfaceVisibility: 'hidden',
-                backfaceVisibility: 'hidden',
-                willChange: 'transform, opacity',
+                opacity: activeSpace === 0 ? 1 : 0,
+                transition: 'opacity 420ms cubic-bezier(0.22, 1, 0.36, 1)',
+                WebkitTransition: 'opacity 420ms cubic-bezier(0.22, 1, 0.36, 1)',
+                willChange: 'opacity',
+                background:
+                  'linear-gradient(to right, #0D0F12 0%, #0E1116 44%, rgba(14,17,22,0.97) 50%, rgba(15,18,24,0.90) 56%, rgba(16,20,27,0.78) 62%, rgba(18,22,30,0.62) 68%, rgba(20,24,32,0.44) 74%, rgba(22,26,34,0.27) 80%, rgba(24,28,36,0.14) 86%, rgba(26,29,37,0.06) 91%, rgba(28,30,38,0.015) 96%, rgba(28,30,38,0) 100%)',
               }}
             >
-              <ARCameraPanel onOpenNotebook={() => openNotebook()} />
+              {/* Full-width solid viewfinder core for Panel 0 when settled on AR Space — fades out smoothly during swipe so right edge never has a hard seam */}
+              <div
+                id="ar-solid-core"
+                className="absolute top-0 bottom-0 left-0 w-[59.6%] bg-[#0D0F12] hardware-accelerated"
+                style={{
+                  opacity: activeSpace === 0 ? 1 : 0,
+                  transition: 'opacity 380ms cubic-bezier(0.22, 1, 0.36, 1)',
+                  WebkitTransition: 'opacity 380ms cubic-bezier(0.22, 1, 0.36, 1)',
+                  willChange: 'opacity',
+                }}
+              />
+            </div>
+
+            {/* Panel 0 (Left - AR Space): Completely transparent container over the wide S-curve AR backdrop */}
+            <div
+              id="panel-ar-space"
+              className="w-1/3 h-full flex-shrink-0 relative z-10 overflow-hidden bg-transparent"
+            >
+              <div
+                id="stage-ar-space"
+                className="w-full h-full relative hardware-accelerated"
+                style={{
+                  transform: 'translate3d(0, 0, 0)',
+                  WebkitTransform: 'translate3d(0, 0, 0)',
+                  opacity: activeSpace === 0 ? 1 : 0.82,
+                  transition: 'transform 420ms cubic-bezier(0.22, 1, 0.36, 1), opacity 380ms cubic-bezier(0.22, 1, 0.36, 1)',
+                  WebkitBackfaceVisibility: 'hidden',
+                  backfaceVisibility: 'hidden',
+                  willChange: 'transform, opacity',
+                }}
+              >
+                <ARCameraPanel onOpenNotebook={() => openNotebook()} />
+              </div>
             </div>
 
             {/* Panel 1 (Center - Music Hub) */}
             <div
               id="panel-music-space"
-              className="w-1/3 h-full flex-shrink-0 relative overflow-hidden hardware-accelerated"
-              style={{
-                transform: activeSpace === 1 ? 'translate3d(0, 0, 0) scale(1)' : 'translate3d(0, 0, 0) scale(0.965)',
-                WebkitTransform: activeSpace === 1 ? 'translate3d(0, 0, 0) scale(1)' : 'translate3d(0, 0, 0) scale(0.965)',
-                opacity: activeSpace === 1 ? 1 : 0.72,
-                transition: 'transform 420ms cubic-bezier(0.22, 1, 0.36, 1), opacity 380ms cubic-bezier(0.22, 1, 0.36, 1)',
-                WebkitBackfaceVisibility: 'hidden',
-                backfaceVisibility: 'hidden',
-                willChange: 'transform, opacity',
-              }}
+              className="w-1/3 h-full flex-shrink-0 relative z-10 overflow-hidden bg-transparent"
             >
-              <MusicPlayerPanel onOpenNotebook={() => openNotebook()} />
+              <div
+                id="stage-music-space"
+                className="w-full h-full relative hardware-accelerated"
+                style={{
+                  transform: 'translate3d(0, 0, 0)',
+                  WebkitTransform: 'translate3d(0, 0, 0)',
+                  opacity: activeSpace === 1 ? 1 : 0.82,
+                  transition: 'transform 420ms cubic-bezier(0.22, 1, 0.36, 1), opacity 380ms cubic-bezier(0.22, 1, 0.36, 1)',
+                  WebkitBackfaceVisibility: 'hidden',
+                  backfaceVisibility: 'hidden',
+                  willChange: 'transform, opacity',
+                }}
+              >
+                <MusicPlayerPanel onOpenNotebook={() => openNotebook()} />
+              </div>
             </div>
 
-            {/* Panel 2 (Right - IELTS Reading Space) */}
+            {/* Panel 2 (Right - IELTS Reading Space): Starts from-transparent at the left edge touching Music Space so there is 0% seam */}
             <div
               id="panel-ielts-space"
-              className="w-1/3 h-full flex-shrink-0 relative overflow-hidden hardware-accelerated"
-              style={{
-                transform: activeSpace === 2 ? 'translate3d(0, 0, 0) scale(1)' : 'translate3d(0, 0, 0) scale(0.965)',
-                WebkitTransform: activeSpace === 2 ? 'translate3d(0, 0, 0) scale(1)' : 'translate3d(0, 0, 0) scale(0.965)',
-                opacity: activeSpace === 2 ? 1 : 0.72,
-                transition: 'transform 420ms cubic-bezier(0.22, 1, 0.36, 1), opacity 380ms cubic-bezier(0.22, 1, 0.36, 1)',
-                WebkitBackfaceVisibility: 'hidden',
-                backfaceVisibility: 'hidden',
-                willChange: 'transform, opacity',
-              }}
+              className="w-1/3 h-full flex-shrink-0 relative z-10 overflow-hidden bg-gradient-to-r from-transparent via-[#FAF7F2]/68 to-[#FAF7F2]/95 dark:from-transparent dark:via-[#0B0F17]/72 dark:to-[#0C1017]/96"
             >
-              <IELTSPanel onOpenNotebook={() => openNotebook()} />
+              <div
+                id="stage-ielts-space"
+                className="w-full h-full relative hardware-accelerated"
+                style={{
+                  transform: 'translate3d(0, 0, 0)',
+                  WebkitTransform: 'translate3d(0, 0, 0)',
+                  opacity: activeSpace === 2 ? 1 : 0.82,
+                  transition: 'transform 420ms cubic-bezier(0.22, 1, 0.36, 1), opacity 380ms cubic-bezier(0.22, 1, 0.36, 1)',
+                  WebkitBackfaceVisibility: 'hidden',
+                  backfaceVisibility: 'hidden',
+                  willChange: 'transform, opacity',
+                }}
+              >
+                <IELTSPanel onOpenNotebook={() => openNotebook()} />
+              </div>
             </div>
           </div>
 

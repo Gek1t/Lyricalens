@@ -322,7 +322,7 @@ import {
   User,
   X
 } from 'lucide-react';
-import { getStoredAccentPreference, isAutoPronounceEnabled, speakWord } from '../../utils/audioEngine';
+import { getStoredAccentPreference, speakWord } from '../../utils/audioEngine';
 
 interface NcmProfile {
   userId: number;
@@ -1751,9 +1751,10 @@ export const SettingsSyncTab: React.FC = () => {
     return Boolean(saved && saved.apiKey && saved.apiKey.trim().length > 0);
   };
 
-  // 3. Pronunciation & Audio Voice Preferences
+  // 3. Pronunciation & Audio Voice Preferences (Reactive with Global App Store)
   const [accentPreference, setAccentPreference] = useState<'en-GB' | 'en-US'>(() => getStoredAccentPreference());
-  const [autoPronounce, setAutoPronounce] = useState<boolean>(() => isAutoPronounceEnabled());
+  const autoPronounce = useAppStore(s => s.autoPronounce);
+  const setAutoPronounce = useAppStore(s => s.setAutoPronounce);
 
   // 4. Local Database Storage Stats & Cache Diagnostics
   const [dbStats, setDbStats] = useState<{ wordsCount: number; masteredCount: number; testsCount: number; songsCount: number }>({
@@ -1800,12 +1801,11 @@ export const SettingsSyncTab: React.FC = () => {
   const handleAutoPronounceToggle = () => {
     const nextVal = !autoPronounce;
     setAutoPronounce(nextVal);
-    try {
-      localStorage.setItem('lyricalens_auto_pronounce', String(nextVal));
-    } catch (e) {
-      console.warn(e);
-    }
-    showToast(nextVal ? '已开启生词查看时自动发音' : '已关闭自动发音');
+    showToast(
+      nextVal
+        ? '已开启默认点按单词朗读'
+        : '已关闭默认点按单词朗读 · 仅点击喇叭图标时发音'
+    );
   };
 
   const handleClearAudioCache = () => {
@@ -2255,7 +2255,91 @@ export const SettingsSyncTab: React.FC = () => {
 
   return (
     <div className="space-y-4 pb-8 animate-in fade-in duration-300">
-      {/* 1. 音乐服务与音质 (多平台统一联动，无重复导入入口) */}
+      {/* 1. 查词与语音朗读偏好 (全局默认点词自动发音开关 + 英/美口音切换) */}
+      <div className="rounded-3xl bg-white/45 dark:bg-white/[0.04] backdrop-blur-xl border border-stone-900/[0.06] dark:border-white/[0.07] p-5 shadow-[0_4px_24px_-4px_rgba(0,0,0,0.03)] dark:shadow-[0_4px_24px_-4px_rgba(0,0,0,0.3)] space-y-4">
+        <div className="flex items-center justify-between">
+          <h3 className="text-base font-semibold text-stone-800 dark:text-stone-100">
+            查词与语音朗读偏好
+          </h3>
+          <span className="text-[11px] font-mono text-stone-400 dark:text-stone-500">
+            {autoPronounce ? '默认朗读已开启' : '仅手动点击发音'} · {accentPreference === 'en-GB' ? 'RP 英音' : 'GA 美音'}
+          </span>
+        </div>
+
+        {/* 默认点按单词自动朗读主开关 */}
+        <div className="p-3.5 rounded-2xl bg-white/65 dark:bg-white/[0.04] border border-stone-900/[0.05] dark:border-white/[0.06] flex items-center justify-between gap-3">
+          <div className="min-w-0">
+            <span className="text-xs font-semibold text-stone-800 dark:text-stone-100 block">
+              默认点按单词自动朗读
+            </span>
+            <span className="text-[10.5px] text-stone-500 dark:text-stone-400 block mt-0.5 leading-relaxed">
+              {autoPronounce
+                ? '已开启：在任何界面点按单词查词时将默认自动播放发音'
+                : '已关闭：点按单词查词保持静音，仅在点击喇叭图标时朗读'}
+            </span>
+          </div>
+          <button
+            id="settings-auto-pronounce-toggle"
+            type="button"
+            onClick={handleAutoPronounceToggle}
+            aria-pressed={autoPronounce}
+            className={`w-11 h-6 rounded-full transition-colors cursor-pointer relative p-0.5 shrink-0 ${
+              autoPronounce ? 'bg-emerald-500' : 'bg-stone-300 dark:bg-stone-700'
+            }`}
+          >
+            <div
+              className={`w-5 h-5 rounded-full bg-white transition-transform transform shadow-xs ${
+                autoPronounce ? 'translate-x-5' : 'translate-x-0'
+              }`}
+            />
+          </button>
+        </div>
+
+        {/* 口音选择 (点击实时试听) */}
+        <div className="pt-1">
+          <label className="block text-[11px] font-sans font-medium text-stone-500 dark:text-stone-400 mb-2.5">
+            标准词典发音口音 (点击即刻试听)
+          </label>
+          <div className="grid grid-cols-2 gap-2.5">
+            {[
+              { id: 'en-GB', label: '英式发音 (RP)', desc: '剑桥雅思听力官方标准音' },
+              { id: 'en-US', label: '美式发音 (GA)', desc: '北美通用自然标准发音' }
+            ].map(acc => {
+              const isSelected = accentPreference === acc.id;
+              return (
+                <button
+                  key={acc.id}
+                  type="button"
+                  onClick={() => handleAccentChange(acc.id as 'en-GB' | 'en-US')}
+                  className={`p-3 rounded-2xl border text-left transition-all cursor-pointer flex items-start justify-between gap-2 ${
+                    isSelected
+                      ? 'bg-stone-900 text-white dark:bg-white dark:text-stone-950 border-stone-900 dark:border-white shadow-xs'
+                      : 'bg-white/60 dark:bg-white/[0.04] border-stone-900/[0.06] dark:border-white/[0.06] text-stone-700 dark:text-stone-300 hover:bg-white/80'
+                  }`}
+                >
+                  <div className="min-w-0">
+                    <span className="text-xs font-semibold block">{acc.label}</span>
+                    <span
+                      className={`text-[10px] font-sans block mt-0.5 ${
+                        isSelected ? 'text-stone-300 dark:text-stone-600' : 'text-stone-400'
+                      }`}
+                    >
+                      {acc.desc}
+                    </span>
+                  </div>
+                  <Volume2
+                    className={`w-3.5 h-3.5 shrink-0 mt-0.5 ${
+                      isSelected ? 'text-emerald-400 dark:text-emerald-600' : 'text-stone-400'
+                    }`}
+                  />
+                </button>
+              );
+            })}
+          </div>
+        </div>
+      </div>
+
+      {/* 2. 音乐服务与音质 (多平台统一联动，无重复导入入口) */}
       <div className="rounded-3xl bg-white/45 dark:bg-white/[0.04] backdrop-blur-xl border border-stone-900/[0.06] dark:border-white/[0.07] p-5 space-y-4 shadow-[0_4px_24px_-4px_rgba(0,0,0,0.03)] dark:shadow-[0_4px_24px_-4px_rgba(0,0,0,0.3)]">
         {/* Card Header */}
         <div className="flex items-center justify-between">
@@ -2729,87 +2813,6 @@ export const SettingsSyncTab: React.FC = () => {
         </div>
 
         {showTrackListPreview && <TrackListWithFadingScrollbar songs={songs} />}
-      </div>
-
-      {/* 2. 语音朗读与发音偏好 (移除无效难度梯度，专注口音与自动朗读) */}
-      <div className="rounded-3xl bg-white/45 dark:bg-white/[0.04] backdrop-blur-xl border border-stone-900/[0.06] dark:border-white/[0.07] p-5 shadow-[0_4px_24px_-4px_rgba(0,0,0,0.03)] dark:shadow-[0_4px_24px_-4px_rgba(0,0,0,0.3)]">
-        <div className="flex items-center justify-between mb-2">
-          <h3 className="text-base font-semibold text-stone-800 dark:text-stone-100">
-            语音朗读与发音偏好
-          </h3>
-          <span className="text-[11px] font-mono text-stone-400 dark:text-stone-500">
-            {accentPreference === 'en-GB' ? 'RP 英音' : 'GA 美音'}
-          </span>
-        </div>
-
-        {/* 口音选择 (点击实时试听) */}
-        <div className="mb-4">
-          <label className="block text-[11px] font-sans font-medium text-stone-500 dark:text-stone-400 mb-3">
-            标准词典发音口音 (点击即刻试听)
-          </label>
-          <div className="grid grid-cols-2 gap-2.5">
-            {[
-              { id: 'en-GB', label: '英式发音 (RP)', desc: '剑桥雅思听力官方标准音' },
-              { id: 'en-US', label: '美式发音 (GA)', desc: '北美通用自然标准发音' }
-            ].map(acc => {
-              const isSelected = accentPreference === acc.id;
-              return (
-                <button
-                  key={acc.id}
-                  type="button"
-                  onClick={() => handleAccentChange(acc.id as 'en-GB' | 'en-US')}
-                  className={`p-3 rounded-2xl border text-left transition-all cursor-pointer flex items-start justify-between gap-2 ${
-                    isSelected
-                      ? 'bg-stone-900 text-white dark:bg-white dark:text-stone-950 border-stone-900 dark:border-white shadow-xs'
-                      : 'bg-white/60 dark:bg-white/[0.04] border-stone-900/[0.06] dark:border-white/[0.06] text-stone-700 dark:text-stone-300 hover:bg-white/80'
-                  }`}
-                >
-                  <div className="min-w-0">
-                    <span className="text-xs font-semibold block">{acc.label}</span>
-                    <span
-                      className={`text-[10px] font-sans block mt-0.5 ${
-                        isSelected ? 'text-stone-300 dark:text-stone-600' : 'text-stone-400'
-                      }`}
-                    >
-                      {acc.desc}
-                    </span>
-                  </div>
-                  <Volume2
-                    className={`w-3.5 h-3.5 shrink-0 mt-0.5 ${
-                      isSelected ? 'text-emerald-400 dark:text-emerald-600' : 'text-stone-400'
-                    }`}
-                  />
-                </button>
-              );
-            })}
-          </div>
-        </div>
-
-        {/* 自动朗读开关 */}
-        <div className="flex items-center justify-between pt-2.5 border-t border-stone-900/[0.05] dark:border-white/[0.06]">
-          <div>
-            <span className="text-xs font-medium text-stone-800 dark:text-stone-200 block">
-              点按查词时自动发音
-            </span>
-            <span className="text-[10px] text-stone-400">
-              展开单词释义抽屉时自动朗读该词的标准发音
-            </span>
-          </div>
-          <button
-            type="button"
-            onClick={handleAutoPronounceToggle}
-            aria-pressed={autoPronounce}
-            className={`w-11 h-6 rounded-full transition-colors cursor-pointer relative p-0.5 shrink-0 ${
-              autoPronounce ? 'bg-emerald-500' : 'bg-stone-300 dark:bg-stone-700'
-            }`}
-          >
-            <div
-              className={`w-5 h-5 rounded-full bg-white transition-transform transform shadow-xs ${
-                autoPronounce ? 'translate-x-5' : 'translate-x-0'
-              }`}
-            />
-          </button>
-        </div>
       </div>
 
       {/* 3. AI 引擎与大模型配置 */}

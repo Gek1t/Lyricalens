@@ -738,6 +738,7 @@ const CATEGORY_ZH_FALLBACK: Record<string, string> = {
 export function formatBookNameZh(book: string): string {
   if (!book) return '剑雅真题';
   if (book === 'ALL') return '全部卷册';
+  if (book === '实时联网真题' || /实时联网/i.test(book)) return '实时联网题源';
   const camMatch = book.match(/Cambridge\s*(\d+)/i);
   if (camMatch) return `剑桥雅思 ${camMatch[1]}`;
   if (/Special/i.test(book)) return '剑雅专项特辑';
@@ -753,6 +754,7 @@ export function formatBookNameZh(book: string): string {
 export function getPassageBilingualMeta(passage: {
   id?: string;
   title: string;
+  subtitle?: string;
   category?: string;
   text?: string;
   passageNumber?: number;
@@ -762,13 +764,20 @@ export function getPassageBilingualMeta(passage: {
   const lowerTitle = rawTitle.toLowerCase();
 
   // 1. Check if title already contains "中文标题 (English Title)"
-  const mixedMatch = rawTitle.match(/^([\u4e00-\u9fa5][^()（）]+?)\s*[（(]([A-Za-z0-9\s:,&'-]+)[)）]$/);
-  if (mixedMatch) {
+  const mixedMatch = rawTitle.match(/^(.+?)\s*[（(]([A-Za-z0-9][^()（）]+)[)）]$/);
+  if (mixedMatch && /[\u4e00-\u9fa5]/.test(mixedMatch[1])) {
+    const firstParaClean = (passage.text || '')
+      .replace(/^Paragraph\s+[A-Z]\s*/i, '')
+      .split(/\n+/)[0]
+      ?.slice(0, 140);
     return {
       titleZh: mixedMatch[1].trim(),
       titleEn: mixedMatch[2].trim(),
-      categoryZh: passage.category || '学术阅读真题',
-      gistZh: '剑桥雅思官方学术阅读精选长文，涵盖高频同义替换与核心论证结构。'
+      categoryZh: passage.category || '实时联网学术阅读',
+      gistZh:
+        passage.summary ||
+        passage.subtitle ||
+        (firstParaClean ? `${firstParaClean}...` : '实时联网抓取的国际学术文献与百科真题，涵盖全文实考同义替换与核心论证结构。')
     };
   }
 

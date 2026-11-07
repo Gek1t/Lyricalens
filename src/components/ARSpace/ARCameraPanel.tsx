@@ -169,7 +169,7 @@ export const ARCameraPanel: React.FC<ARCameraPanelProps> = ({ onOpenNotebook }) 
     }
   });
   const [dismissedThisSession, setDismissedThisSession] = useState<boolean>(false);
-  const [guideEntered, setGuideEntered] = useState<boolean>(false);
+  const [guideEntered, setGuideEntered] = useState<boolean>(true);
 
   // Spatial Tags & Interactive Bubble
   const [tags, setTags] = useState<ARDetectedObject[]>([]);
@@ -382,9 +382,8 @@ export const ARCameraPanel: React.FC<ARCameraPanelProps> = ({ onOpenNotebook }) 
     prevFrozenRef.current = isFrozen;
   }, [isFrozen, streamActive, activeSpace, facingMode]);
 
-  // Lifecycle stream control & delayed guide entrance based on active panel
+  // Lifecycle stream control based on active panel
   useEffect(() => {
-    let guideTimer: ReturnType<typeof setTimeout> | null = null;
     if (activeSpace === 0) {
       if (streamStopTimerRef.current) {
         clearTimeout(streamStopTimerRef.current);
@@ -395,11 +394,8 @@ export const ARCameraPanel: React.FC<ARCameraPanelProps> = ({ onOpenNotebook }) 
           startCamera(facingMode);
         }
       }
-      guideTimer = setTimeout(() => {
-        setGuideEntered(true);
-      }, 420);
+      setGuideEntered(true);
     } else {
-      setGuideEntered(false);
       // Keep camera active during normal in-app tab switching to eliminate black flash when swiping back!
       const video = videoRef.current;
       const canvas = freezeCanvasRef.current;
@@ -417,9 +413,6 @@ export const ARCameraPanel: React.FC<ARCameraPanelProps> = ({ onOpenNotebook }) 
         }
       }
     }
-    return () => {
-      if (guideTimer) clearTimeout(guideTimer);
-    };
   }, [activeSpace, isScannerActive, isFrozen, facingMode]);
 
   // Clean background unmount & phone screen sleep / minimize listener
@@ -770,7 +763,9 @@ export const ARCameraPanel: React.FC<ARCameraPanelProps> = ({ onOpenNotebook }) 
   }, [tags]);
 
   return (
-    <div className="relative w-full h-full flex flex-col justify-between overflow-hidden bg-[#0D0F12] select-none">
+    <div
+      className="relative w-full h-full flex flex-col justify-between overflow-hidden bg-transparent select-none"
+    >
       {/* Hidden Snapshot Canvas & Album File Picker */}
       <canvas ref={hiddenCanvasRef} className="hidden" />
       <input
@@ -781,7 +776,7 @@ export const ARCameraPanel: React.FC<ARCameraPanelProps> = ({ onOpenNotebook }) 
         className="hidden"
       />
 
-      {/* Top Header (Always in Camera Viewfinder Mode) */}
+      {/* Top Header (Frosted Camera Variant) */}
       <TopHeader
         variant="camera"
         centerLabel={isFrozen ? 'FRAME LOCKED' : 'VIEWFINDER'}
@@ -813,7 +808,7 @@ export const ARCameraPanel: React.FC<ARCameraPanelProps> = ({ onOpenNotebook }) 
       <div
         ref={containerRef}
         onClick={() => setActiveBubbleId(null)}
-        className="absolute inset-0 z-0 overflow-hidden bg-[#12161F]"
+        className="absolute inset-0 z-0 overflow-hidden bg-transparent"
       >
         {/* Cached Freeze Background Texture (Smoothly bridges transitions without black gap) */}
         <canvas
@@ -843,14 +838,14 @@ export const ARCameraPanel: React.FC<ARCameraPanelProps> = ({ onOpenNotebook }) 
               exit={{ opacity: 0 }}
               transition={{ duration: 0.35, ease: 'easeOut' }}
               onClick={e => e.stopPropagation()}
-              className="absolute inset-0 z-30 flex items-center justify-center px-6 pointer-events-auto bg-black/25 backdrop-blur-[2px]"
+              className="absolute inset-0 z-30 flex items-center justify-center px-6 pointer-events-auto"
             >
               <motion.div
                 initial={{ opacity: 0, y: 24, scale: 0.94, filter: 'blur(8px)' }}
                 animate={{ opacity: 1, y: 0, scale: 1, filter: 'blur(0px)' }}
                 exit={{ opacity: 0, y: 12, scale: 0.96, filter: 'blur(4px)' }}
                 transition={{ duration: 0.5, ease: [0.22, 1, 0.36, 1] }}
-                className="w-full max-w-[308px] rounded-[26px] bg-stone-950/72 backdrop-blur-2xl border border-white/14 p-3.5 shadow-[0_24px_60px_rgba(0,0,0,0.6)] text-white"
+                className="w-full max-w-[308px] rounded-[26px] bg-stone-950/82 dark:bg-stone-950/75 backdrop-blur-2xl border border-stone-900/15 dark:border-white/14 p-3.5 shadow-[0_24px_60px_rgba(28,25,23,0.22)] dark:shadow-[0_24px_60px_rgba(0,0,0,0.6)] text-white"
               >
                 {/* Clean Single Desk Preview Image (Tappable) */}
                 <div
@@ -925,10 +920,10 @@ export const ARCameraPanel: React.FC<ARCameraPanelProps> = ({ onOpenNotebook }) 
             <button
               type="button"
               onClick={() => startCamera(facingMode)}
-              className="pointer-events-auto flex flex-col items-center gap-3 px-6 py-4 rounded-2xl bg-white/8 hover:bg-white/12 backdrop-blur-xl border border-white/15 text-white/85 transition-all active:scale-95 cursor-pointer"
+              className="pointer-events-auto flex flex-col items-center gap-3 px-6 py-4 rounded-2xl bg-white/8 hover:bg-white/12 backdrop-blur-xl border border-white/15 transition-all active:scale-95 cursor-pointer"
             >
               <Camera className="w-5 h-5 text-white/70 stroke-[1.6]" />
-              <span className="text-xs font-sans tracking-wide text-white/85">
+              <span className="text-xs text-white/85 font-sans tracking-wide">
                 未开启相机权限 · 轻触重试或从左下角相册选图
               </span>
             </button>

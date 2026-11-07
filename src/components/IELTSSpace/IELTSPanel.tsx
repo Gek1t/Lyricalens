@@ -10,8 +10,14 @@ import { db, collectWord, bulkUpdateMastery } from '../../db';
 import { TopHeader } from '../TopHeader';
 import { IELTSHubView } from './IELTSHubView';
 import { IELTSListeningView } from './IELTSListeningView';
-import { speakWord } from '../../utils/audioEngine';
+import { speakWordIfAutoEnabled } from '../../utils/audioEngine';
 import { lookupLyricTerm, cleanWordText } from '../../utils/lyricDictionary';
+import {
+  getCompleteWorkbookPassages,
+  getSiblingPassages,
+  resolveNextSequentialPassage,
+  normalizeVolumeKey
+} from '../../utils/ieltsWorkbookEngine';
 import {
   Sparkles,
   ArrowRight,
@@ -33,7 +39,8 @@ import {
   RotateCcw,
   Play,
   Pause,
-  BookOpen
+  BookOpen,
+  Check
 } from 'lucide-react';
 
 interface IELTSPanelProps {
@@ -110,6 +117,7 @@ export const IELTSPanel: React.FC<IELTSPanelProps> = ({ onOpenNotebook }) => {
   const isAdjustMenuOpen = useAppStore(s => s.isIeltsAdjustMenuOpen);
   const setIsAdjustMenuOpen = useAppStore(s => s.setIsIeltsAdjustMenuOpen);
   const [isCustomStepOpen, setIsCustomStepOpen] = useState<boolean>(false);
+  const [isSubmittingTest, setIsSubmittingTest] = useState<boolean>(false);
   
   // History memory for last extension
   const [lastExtensionMinutes, setLastExtensionMinutes] = useState<number>(() => {
@@ -186,6 +194,9 @@ export const IELTSPanel: React.FC<IELTSPanelProps> = ({ onOpenNotebook }) => {
   const showToast = useAppStore(s => s.showToast);
 
   const openCambridgeSelector = useAppStore(s => s.openCambridgeSelector);
+  const loadCambridgePassage = useAppStore(s => s.loadCambridgePassage);
+  const clearItemDraft = useAppStore(s => s.clearItemDraft);
+  const passageDrafts = useAppStore(s => s.passageDrafts);
   const activePassageData = useAppStore(s => s.activePassageData);
   const setActivePassageData = useAppStore(s => s.setActivePassageData);
   const currentPassageId = useAppStore(s => s.currentPassageId);
@@ -196,6 +207,14 @@ export const IELTSPanel: React.FC<IELTSPanelProps> = ({ onOpenNotebook }) => {
   const activeArchivePassage = useAppStore(s => s.activeArchivePassage);
   const activeListeningSectionData = useAppStore(s => s.activeListeningSectionData);
   const setActiveListeningSectionData = useAppStore(s => s.setActiveListeningSectionData);
+  const pendingEvidenceJumpPara = useAppStore(s => s.pendingEvidenceJumpPara);
+  const setPendingEvidenceJumpPara = useAppStore(s => s.setPendingEvidenceJumpPara);
+
+  // Evidence paragraph highlight & scroll-minimize states
+  const [highlightedParaIdx, setHighlightedParaIdx] = useState<number | null>(null);
+  const [isScrollMinimized, setIsScrollMinimized] = useState<boolean>(false);
+  const lastPassageScrollTopRef = useRef<number>(0);
+  const quizSwipeStartRef = useRef<{ x: number; y: number } | null>(null);
 
   // Query collected words from Dexie database to highlight in text
   const collectedWords = useLiveQuery(() => db.words.toArray(), []);
@@ -211,22 +230,59 @@ export const IELTSPanel: React.FC<IELTSPanelProps> = ({ onOpenNotebook }) => {
     return set;
   }, [collectedWords]);
 
-  // Query custom online passages from Dexie
+  // Query custom online passages and test history from Dexie
   const customPassages = useLiveQuery(() => db.customPassages.toArray(), []) || [];
+  const allTestRecords = useLiveQuery(() => db.ieltsTests.toArray(), []) || [];
+
+  const allWorkbookPassages = useMemo(
+    () => getCompleteWorkbookPassages(customPassages),
+    [customPassages]
+  );
 
   // Active Cambridge Passage Metadata for clean editorial header display
   const activeCambridgeInfo = useMemo(() => {
-    const allPassages = [...customPassages, ...CAMBRIDGE_IELTS_PASSAGES];
-    return allPassages.find(p => p.id === currentPassageId) || {
-      id: currentPassageId || 'c18_t1_p2',
-      cambridgeBook: 'Cambridge IELTS',
-      testNum: 1,
-      passageNum: 1,
-      category: 'Academic Reading',
-      title: passageData.title,
-      bandDifficulty: 'Band 7.5 - 8.5'
-    };
-  }, [currentPassageId, passageData.title, customPassages]);
+    return (
+      allWorkbookPassages.find(p => p.id === currentPassageId) ||
+      allWorkbookPassages.find(p => p.title === passageData.title) || {
+        id: currentPassageId || 'c18_t1_p2',
+        cambridgeBook: 'Cambridge 18',
+        testNum: 1,
+        passageNum: 2,
+        category: 'Academic Reading',
+        title: passageData.title,
+        subtitle: passageData.subtitle,
+        timeAllowedMins: passageData.timeAllowedMins || 20,
+        bandDifficulty: 'Band 7.5 - 8.5',
+        text: passageData.text,
+        questions: passageData.questions
+      }
+    );
+  }, [currentPassageId, passageData, allWorkbookPassages]);
+
+  // Sibling passages in the same Volume + Test (P1, P2, P3)
+  const siblingPassages = useMemo(
+    () => getSiblingPassages(allWorkbookPassages, activeCambridgeInfo as CambridgePassage),
+    [allWorkbookPassages, activeCambridgeInfo]
+  );
+
+  // Next sequential passage in the workbook (P1 -> P2 -> P3 -> Next Test P1)
+  const nextSequentialPassage = useMemo(
+    () => resolveNextSequentialPassage(allWorkbookPassages, activeCambridgeInfo as CambridgePassage),
+    [allWorkbookPassages, activeCambridgeInfo]
+  );
+
+  const completedTitleMap = useMemo(() => {
+    const map = new Map<string, IELTSTestRecord>();
+    allTestRecords.forEach(r => {
+      if (r.passageTitle) {
+        const prev = map.get(r.passageTitle);
+        if (!prev || r.timestamp >= prev.timestamp) {
+          map.set(r.passageTitle, r);
+        }
+      }
+    });
+    return map;
+  }, [allTestRecords]);
 
   // Active quiz questions
   const questions: IELTSQuestion[] = passageData.questions;
@@ -375,9 +431,12 @@ export const IELTSPanel: React.FC<IELTSPanelProps> = ({ onOpenNotebook }) => {
   // Drag to resize quiz drawer
   const handleDragStart = (e: React.PointerEvent<HTMLDivElement>) => {
     e.preventDefault();
+    if (isScrollMinimized) {
+      setIsScrollMinimized(false);
+    }
     setIsDragging(true);
     dragStartYRef.current = e.clientY;
-    dragStartHeightRef.current = drawerHeightPercent;
+    dragStartHeightRef.current = isScrollMinimized ? 26 : drawerHeightPercent;
 
     const handlePointerMove = (moveEvent: PointerEvent) => {
       if (!containerRef.current) return;
@@ -398,7 +457,63 @@ export const IELTSPanel: React.FC<IELTSPanelProps> = ({ onOpenNotebook }) => {
     window.addEventListener('pointerup', handlePointerUp);
   };
 
-  const isExpanded = drawerHeightPercent >= 36;
+  // Horizontal swipe left/right inside quiz drawer to switch questions (Item 3)
+  const handleQuizSwipeStart = (e: React.PointerEvent<HTMLDivElement>) => {
+    quizSwipeStartRef.current = { x: e.clientX, y: e.clientY };
+  };
+
+  const handleQuizSwipeEnd = (e: React.PointerEvent<HTMLDivElement>) => {
+    if (!quizSwipeStartRef.current) return;
+    const dx = e.clientX - quizSwipeStartRef.current.x;
+    const dy = e.clientY - quizSwipeStartRef.current.y;
+    quizSwipeStartRef.current = null;
+
+    if (Math.abs(dx) > 44 && Math.abs(dx) > Math.abs(dy) * 1.35) {
+      if (dx < 0 && currentQuizQuestionIndex < (questions.length || 1) - 1) {
+        triggerHaptic(10);
+        setCurrentQuizQuestionIndex(currentQuizQuestionIndex + 1);
+      } else if (dx > 0 && currentQuizQuestionIndex > 0) {
+        triggerHaptic(10);
+        setCurrentQuizQuestionIndex(currentQuizQuestionIndex - 1);
+      }
+    }
+  };
+
+  const evidenceScrollTimerRef = useRef<number | null>(null);
+  const evidenceClearTimerRef = useRef<number | null>(null);
+
+  // Listen to pendingEvidenceJumpPara from AssessmentSummaryModal (Item 2)
+  useEffect(() => {
+    if (pendingEvidenceJumpPara === null) return;
+    const targetIdx = pendingEvidenceJumpPara;
+    setPendingEvidenceJumpPara(null);
+    setViewMode('reading');
+    setIsScrollMinimized(true);
+    setHighlightedParaIdx(targetIdx);
+
+    if (evidenceScrollTimerRef.current) clearTimeout(evidenceScrollTimerRef.current);
+    if (evidenceClearTimerRef.current) clearTimeout(evidenceClearTimerRef.current);
+
+    evidenceScrollTimerRef.current = window.setTimeout(() => {
+      const container = passageContainerRef.current;
+      const paraEl = container?.querySelector(
+        `[data-para-block="${targetIdx}"]`
+      ) as HTMLElement | null;
+      if (container && paraEl) {
+        const targetTop = Math.max(0, paraEl.offsetTop - 84);
+        container.scrollTo({ top: targetTop, behavior: 'smooth' });
+      }
+      const paraLetter = String.fromCharCode(65 + targetIdx);
+      showToast(`已定位至原文 Paragraph ${paraLetter}（Q${currentQuizQuestionIndex + 1} 出题段）`);
+    }, 160);
+
+    evidenceClearTimerRef.current = window.setTimeout(() => {
+      setHighlightedParaIdx(prev => (prev === targetIdx ? null : prev));
+    }, 7000);
+  }, [pendingEvidenceJumpPara, setPendingEvidenceJumpPara, currentQuizQuestionIndex, showToast]);
+
+  const effectiveDrawerHeightPercent = isScrollMinimized ? 10.5 : drawerHeightPercent;
+  const isExpanded = !isScrollMinimized && drawerHeightPercent >= 36;
 
   // Timer countdown logic with timeout detection (only runs when active space is IELTS and user started)
   useEffect(() => {
@@ -417,8 +532,9 @@ export const IELTSPanel: React.FC<IELTSPanelProps> = ({ onOpenNotebook }) => {
     return () => clearInterval(timer);
   }, [isTimerRunning, activeSpace]);
 
-  // Select and load an authentic Cambridge IELTS reading test
+  // Select and load an authentic Cambridge IELTS reading test (with draft & bookmark persistence)
   const handleSelectCambridgePassage = (passage: CambridgePassage, matchedWords?: string[]) => {
+    loadCambridgePassage(passage, matchedWords);
     setPassageData({
       title: passage.title,
       subtitle: passage.subtitle,
@@ -426,15 +542,15 @@ export const IELTSPanel: React.FC<IELTSPanelProps> = ({ onOpenNotebook }) => {
       text: passage.text,
       questions: passage.questions
     });
-    setCurrentPassageId(passage.id);
-    setCurrentQuizQuestionIndex(0);
-    resetUserAnswers();
-    setTimerSeconds(passage.timeAllowedMins * 60);
+    setTimerSeconds((passage.timeAllowedMins || 20) * 60);
     setTotalAddedSeconds(0);
     setExtensionCount(0);
     setIsTimerRunning(false);
     setHasStarted(false);
     setViewMode('reading');
+    if (passageContainerRef.current) {
+      passageContainerRef.current.scrollTop = 0;
+    }
   };
 
   // Start reading from IELTS Hub Shelf
@@ -473,7 +589,6 @@ export const IELTSPanel: React.FC<IELTSPanelProps> = ({ onOpenNotebook }) => {
         questions: activePassageData.questions
       });
       setCurrentQuizQuestionIndex(0);
-      resetUserAnswers();
       setTimerSeconds((activePassageData.timeAllowedMins || 20) * 60);
       setTotalAddedSeconds(0);
       setExtensionCount(0);
@@ -481,6 +596,9 @@ export const IELTSPanel: React.FC<IELTSPanelProps> = ({ onOpenNotebook }) => {
       setHasStarted(false);
       setViewMode('reading');
       setActivePassageData(null);
+      if (passageContainerRef.current) {
+        passageContainerRef.current.scrollTop = 0;
+      }
     }
   }, [activePassageData, setActivePassageData]);
 
@@ -649,7 +767,6 @@ export const IELTSPanel: React.FC<IELTSPanelProps> = ({ onOpenNotebook }) => {
 
     const wordData = await lookupLyricTerm(cleaned, fullSentence);
     openWordDetail(wordData, heroRect);
-    speakWord(cleaned, 'en-GB');
   };
 
   // 1. TouchStart / MouseDown on a word in passage
@@ -933,7 +1050,9 @@ export const IELTSPanel: React.FC<IELTSPanelProps> = ({ onOpenNotebook }) => {
       const wordData = await lookupLyricTerm(selectedText, fullSentence);
       triggerHaptic(20);
       openWordDetail(wordData, heroRect);
-      speakWord(selectedText, 'en-GB');
+      if (selectedText.includes(' ')) {
+        speakWordIfAutoEnabled(selectedText, 'en-GB');
+      }
     }
 
     resetGesture();
@@ -980,9 +1099,16 @@ export const IELTSPanel: React.FC<IELTSPanelProps> = ({ onOpenNotebook }) => {
     return false;
   };
 
-  // Submit test and calculate Band Score with Honesty Record
+  // Submit test and calculate Band Score with Honesty Record & Smooth Grading Ceremony
   const handleSubmitTest = async () => {
+    if (isSubmittingTest) return;
     setIsTimeoutModalOpen(false);
+    setIsSubmittingTest(true);
+    setIsTimerRunning(false);
+    setHasStarted(false);
+    setDrawerHeightPercent(24);
+    triggerHaptic([15, 40, 20]);
+
     let correct = 0;
     const conqueredList: string[] = [];
 
@@ -1035,11 +1161,16 @@ export const IELTSPanel: React.FC<IELTSPanelProps> = ({ onOpenNotebook }) => {
     };
 
     await db.ieltsTests.add(testRecord);
+    if (currentPassageId) {
+      clearItemDraft(currentPassageId);
+    }
+
+    // Allow the editorial grading ceremony animation to complete smoothly before sliding up the report
+    await new Promise(resolve => setTimeout(resolve, 460));
     setAssessmentResult(testRecord);
     setAssessmentModalOpen(true);
-    setDrawerHeightPercent(28);
-    setIsTimerRunning(false);
-    setHasStarted(false);
+    setIsSubmittingTest(false);
+    setDrawerHeightPercent(26);
   };
 
   // Generate real-time IELTS reading passage
@@ -1118,7 +1249,7 @@ export const IELTSPanel: React.FC<IELTSPanelProps> = ({ onOpenNotebook }) => {
       onTouchEnd={isReadingMode ? handlePointerUp : undefined}
       onMouseUp={isReadingMode ? handlePointerUp : undefined}
       onTouchCancel={isReadingMode ? handlePointerUp : undefined}
-      className="relative w-full h-full flex flex-col justify-between overflow-hidden bg-gradient-to-r from-[#FAF7F2]/45 via-[#FAF7F2]/82 to-[#FAF7F2]/95 dark:from-[#0B0F17]/50 dark:via-[#0B0F17]/85 dark:to-[#0C1017]/96 select-none"
+      className="relative w-full h-full flex flex-col justify-between overflow-hidden bg-transparent select-none"
     >
       {/* Dedicated Clean Academic Paper Background Overlay */}
       <div
@@ -1577,83 +1708,145 @@ export const IELTSPanel: React.FC<IELTSPanelProps> = ({ onOpenNotebook }) => {
             <div
               ref={passageContainerRef}
               onScroll={(e) => {
-                const scrolled = e.currentTarget.scrollTop > 10;
+                const currentTop = e.currentTarget.scrollTop;
+                const scrolled = currentTop > 10;
                 if (scrolled !== isPassageScrolled) {
                   setIsPassageScrolled(scrolled);
                 }
+                const deltaY = currentTop - lastPassageScrollTopRef.current;
+                if (deltaY > 24 && currentTop > 55 && !isScrollMinimized && !isDragging) {
+                  setIsScrollMinimized(true);
+                }
+                lastPassageScrollTopRef.current = currentTop;
               }}
               className="relative flex-1 overflow-y-auto no-scrollbar px-6 sm:px-8 pt-3 pb-64 z-10 touch-pan-y"
             >
               <div className="max-w-lg mx-auto">
-                {/* Unboxed Editorial Running Header Bar with Coordinated Entrance */}
+                {/* Unboxed Editorial Running Header Bar + In-Test Sibling Switcher (P1 · P2 · P3) */}
                 <motion.div
                   initial={{ opacity: 0, y: 8 }}
                   animate={{ opacity: 1, y: 0 }}
                   transition={{ duration: 0.22, ease: [0.16, 1, 0.3, 1] }}
-                  className="flex items-center justify-between gap-2.5 mb-4 pt-1"
+                  className="mb-4 pt-1 space-y-2.5"
                 >
-                  <div className="flex items-center gap-2 min-w-0">
-                    {/* Unboxed Editorial Meta Trail */}
-                    <AnimatePresence mode="wait" initial={false}>
-                      <motion.div
-                        key={`meta-${activeCambridgeInfo.cambridgeBook}-${activeCambridgeInfo.testNum}-${activeCambridgeInfo.passageNum}`}
-                        initial={{ opacity: 0, y: 5 }}
-                        animate={{ opacity: 1, y: 0 }}
-                        exit={{ opacity: 0, y: -5 }}
-                        transition={{ duration: 0.2, ease: [0.16, 1, 0.3, 1] }}
-                        className="flex items-center gap-1.5 text-[11px] font-mono tabular-nums uppercase tracking-wider text-stone-400 dark:text-stone-500 truncate"
+                  <div className="flex items-center justify-between gap-2.5">
+                    <div className="flex items-center gap-2 min-w-0 flex-1 overflow-hidden">
+                      {/* Unboxed Editorial Meta Trail */}
+                      <AnimatePresence mode="wait" initial={false}>
+                        <motion.div
+                          key={`meta-${activeCambridgeInfo.cambridgeBook}-${activeCambridgeInfo.testNum}-${activeCambridgeInfo.passageNum}`}
+                          initial={{ opacity: 0, y: 5 }}
+                          animate={{ opacity: 1, y: 0 }}
+                          exit={{ opacity: 0, y: -5 }}
+                          transition={{ duration: 0.2, ease: [0.16, 1, 0.3, 1] }}
+                          className="flex items-center gap-1.5 text-[11px] font-mono tabular-nums uppercase tracking-wider text-stone-400 dark:text-stone-500 min-w-0 overflow-hidden"
+                        >
+                          <span className="text-stone-700 dark:text-stone-300 font-semibold whitespace-nowrap shrink-0">
+                            {normalizeVolumeKey(activeCambridgeInfo.cambridgeBook) === '2026 考场真题'
+                              ? '2026 考季真题'
+                              : activeCambridgeInfo.cambridgeBook}
+                          </span>
+                          <span className="shrink-0">·</span>
+                          <span className="whitespace-nowrap shrink-0">TEST {activeCambridgeInfo.testNum}</span>
+                          {activeCambridgeInfo.category && (
+                            <>
+                              <span className="shrink-0">·</span>
+                              <span className="font-sans-ui normal-case text-stone-500 dark:text-stone-400 truncate">
+                                {activeCambridgeInfo.category}
+                              </span>
+                            </>
+                          )}
+                        </motion.div>
+                      </AnimatePresence>
+                    </div>
+
+                    {/* Right Action Cluster: Typography (Aa) & Passage Switcher (换篇) */}
+                    <div className="flex items-center gap-1.5 shrink-0">
+                      <button
+                        id="ielts-typography-btn"
+                        type="button"
+                        onClick={() => {
+                          setIsAdjustMenuOpen(false);
+                          setActiveAdjustPanel(activeAdjustPanel ? null : 'font');
+                        }}
+                        className={`flex items-center justify-center px-2.5 py-1 rounded-full border text-[11px] font-medium transition-all cursor-pointer active:scale-95 focus:outline-none ${
+                          activeAdjustPanel
+                            ? 'bg-[#516050] text-white border-[#516050] shadow-xs'
+                            : 'bg-white/85 hover:bg-white dark:bg-white/[0.06] dark:hover:bg-white/[0.1] border-stone-200/80 dark:border-white/[0.08] text-stone-700 dark:text-stone-300'
+                        }`}
+                        title="调节正文字号与行距 (Typography Settings)"
+                        aria-label="Adjust font size and line spacing"
                       >
-                        <span className="text-stone-700 dark:text-stone-300 font-semibold">
-                          {activeCambridgeInfo.cambridgeBook}
-                        </span>
-                        <span>·</span>
-                        <span>T{activeCambridgeInfo.testNum} P{activeCambridgeInfo.passageNum}</span>
-                        {activeCambridgeInfo.category && (
-                          <>
-                            <span>·</span>
-                            <span className="font-sans-ui normal-case text-stone-500 dark:text-stone-400 truncate">
-                              {activeCambridgeInfo.category}
-                            </span>
-                          </>
-                        )}
-                      </motion.div>
-                    </AnimatePresence>
+                        <span className="font-serif-luxury font-semibold text-xs leading-none tracking-tight">Aa</span>
+                      </button>
+
+                      <button
+                        id="cambridge-passages-btn"
+                        type="button"
+                        onClick={() => {
+                          setActiveAdjustPanel(null);
+                          openCambridgeSelector();
+                        }}
+                        className="flex items-center gap-1 px-2.5 py-1 rounded-full bg-white/85 hover:bg-white dark:bg-white/[0.06] dark:hover:bg-white/[0.1] border border-stone-200/80 dark:border-white/[0.08] text-[#516050] dark:text-[#8FB996] text-[11px] font-medium transition-all cursor-pointer active:scale-95 shrink-0 focus:outline-none"
+                        title="切换剑桥雅思官方真题库"
+                      >
+                        <BookOpen className="w-3 h-3" />
+                        <span>换卷</span>
+                      </button>
+                    </div>
                   </div>
 
-                  {/* Right Action Cluster: Typography (Aa) & Passage Switcher (换篇) */}
-                  <div className="flex items-center gap-1.5 shrink-0">
-                    <button
-                      id="ielts-typography-btn"
-                      type="button"
-                      onClick={() => {
-                        setIsAdjustMenuOpen(false);
-                        setActiveAdjustPanel(activeAdjustPanel ? null : 'font');
-                      }}
-                      className={`flex items-center justify-center px-2.5 py-1 rounded-full border text-[11px] font-medium transition-all cursor-pointer active:scale-95 focus:outline-none ${
-                        activeAdjustPanel
-                          ? 'bg-[#516050] text-white border-[#516050] shadow-xs'
-                          : 'bg-white/85 hover:bg-white dark:bg-white/[0.06] dark:hover:bg-white/[0.1] border-stone-200/80 dark:border-white/[0.08] text-stone-700 dark:text-stone-300'
-                      }`}
-                      title="调节正文字号与行距 (Typography Settings)"
-                      aria-label="Adjust font size and line spacing"
+                  {/* In-Test Sibling Switcher Bar (卷内 P1 · P2 · P3 顺刷切换条) */}
+                  {siblingPassages.length > 1 && (
+                    <div
+                      id="in-test-passage-switcher"
+                      className="flex items-center justify-between gap-1 p-1 rounded-xl bg-stone-900/[0.035] dark:bg-white/[0.04] border border-stone-900/[0.06] dark:border-white/[0.06]"
                     >
-                      <span className="font-serif-luxury font-semibold text-xs leading-none tracking-tight">Aa</span>
-                    </button>
+                      <div className="flex items-center gap-1 flex-1 min-w-0">
+                        {siblingPassages.map(sib => {
+                          const isCurrentSib = sib.id === activeCambridgeInfo.id;
+                          const isDoneSib = completedTitleMap.has(sib.title);
+                          const doneRec = completedTitleMap.get(sib.title);
+                          const draftAnsCount = Object.keys(passageDrafts[sib.id] || {}).filter(
+                            k => (passageDrafts[sib.id]?.[Number(k)] || '').trim().length > 0
+                          ).length;
 
-                    <button
-                      id="cambridge-passages-btn"
-                      type="button"
-                      onClick={() => {
-                        setActiveAdjustPanel(null);
-                        openCambridgeSelector();
-                      }}
-                      className="flex items-center gap-1 px-2.5 py-1 rounded-full bg-white/85 hover:bg-white dark:bg-white/[0.06] dark:hover:bg-white/[0.1] border border-stone-200/80 dark:border-white/[0.08] text-[#516050] dark:text-[#8FB996] text-[11px] font-medium transition-all cursor-pointer active:scale-95 shrink-0 focus:outline-none"
-                      title="切换剑桥雅思官方真题库"
-                    >
-                      <BookOpen className="w-3 h-3" />
-                      <span>换篇</span>
-                    </button>
-                  </div>
+                          return (
+                            <button
+                              key={`sib-tab-${sib.id}`}
+                              type="button"
+                              onClick={() => {
+                                if (!isCurrentSib) {
+                                  handleSelectCambridgePassage(sib);
+                                }
+                              }}
+                              className={`flex-1 py-1.5 px-1.5 rounded-lg text-[11px] font-mono tabular-nums transition-all cursor-pointer flex items-center justify-center gap-1 min-w-0 whitespace-nowrap ${
+                                isCurrentSib
+                                  ? 'bg-white dark:bg-[#192231] text-stone-900 dark:text-stone-100 font-bold shadow-2xs border border-stone-200/80 dark:border-white/[0.08]'
+                                  : 'text-stone-500 dark:text-stone-400 hover:text-stone-900 dark:hover:text-stone-200 font-medium'
+                              }`}
+                              title={`Passage ${sib.passageNum}: ${sib.title}`}
+                            >
+                              <span className="whitespace-nowrap">Passage {sib.passageNum}</span>
+                              {isDoneSib && doneRec ? (
+                                <span className="text-[10px] text-[#516050] dark:text-[#8FB996] font-semibold whitespace-nowrap">
+                                  ✓{doneRec.correctCount}/{doneRec.totalQuestions}
+                                </span>
+                              ) : draftAnsCount > 0 && !isCurrentSib ? (
+                                <span className="text-[10px] text-amber-700 dark:text-amber-300 whitespace-nowrap">
+                                  {draftAnsCount}/{sib.questions.length}
+                                </span>
+                              ) : isCurrentSib && answeredCount > 0 ? (
+                                <span className="text-[10px] text-[#516050] dark:text-[#8FB996] whitespace-nowrap">
+                                  {answeredCount}/{questions.length}
+                                </span>
+                              ) : null}
+                            </button>
+                          );
+                        })}
+                      </div>
+                    </div>
+                  )}
                 </motion.div>
 
                 {/* Animated Passage Body (smoothly transitions both on initial enter and when switching passages via 换篇) */}
@@ -1693,16 +1886,27 @@ export const IELTSPanel: React.FC<IELTSPanelProps> = ({ onOpenNotebook }) => {
                           : -1;
 
                         const hasAnchor = highlightAnchor && highlightAnchor.paraIdx === para.pIdx;
+                        const isEvidenceHighlighted = highlightedParaIdx === para.pIdx;
 
                         return (
                           <p
                             key={para.pIdx}
+                            data-para-block={para.pIdx}
                             style={{
                               fontSize: `${fontSize}px`,
                               lineHeight: lineSpacing
                             }}
-                            className="font-serif-luxury text-stone-850 dark:text-stone-150 tracking-normal select-none transition-[font-size,line-height] duration-150 subpixel-antialiased"
+                            className={`font-serif-luxury text-stone-850 dark:text-stone-150 tracking-normal select-none transition-all duration-300 subpixel-antialiased ${
+                              isEvidenceHighlighted
+                                ? 'bg-[#516050]/[0.08] dark:bg-[#8FB996]/[0.12] ring-1 ring-[#516050]/35 dark:ring-[#8FB996]/40 rounded-2xl px-3.5 py-2.5 -mx-3.5 shadow-[0_4px_20px_rgba(81,96,80,0.08)]'
+                                : ''
+                            }`}
                           >
+                            {isEvidenceHighlighted && (
+                              <span className="inline-flex items-center gap-1 px-2 py-0.5 mr-2 mb-1 rounded-md bg-[#516050] dark:bg-[#8FB996] text-white dark:text-stone-950 font-mono text-[10px] font-bold tracking-wider uppercase align-middle">
+                                PARA {String.fromCharCode(65 + para.pIdx)} · Q{currentQuizQuestionIndex + 1} 出题定位
+                              </span>
+                            )}
                             {para.tokens.map((token, wIdx) => {
                               const isInGesture = isParaFocused && wIdx >= minWordIdx && wIdx <= maxWordIdx;
                               const isAnchor = hasAnchor && wIdx >= highlightAnchor.startWord && wIdx <= highlightAnchor.endWord;
@@ -1776,11 +1980,61 @@ export const IELTSPanel: React.FC<IELTSPanelProps> = ({ onOpenNotebook }) => {
                       })}
                     </motion.div>
 
-                    {/* Passage footer indicator */}
-                    <div className="pt-10 pb-6 text-center">
-                      <span className="text-[11px] font-mono tracking-widest text-stone-400 dark:text-stone-500 uppercase">
-                        —— END OF PASSAGE ——
-                      </span>
+                    {/* Passage footer indicator + Sequential Workbook Progression Card */}
+                    <div className="pt-10 pb-8 space-y-5">
+                      <div className="text-center">
+                        <span className="text-[11px] font-mono tracking-widest text-stone-400 dark:text-stone-500 uppercase">
+                          —— END OF PASSAGE {activeCambridgeInfo.passageNum} ——
+                        </span>
+                      </div>
+
+                      {/* Sequential Paper-Workbook Footer Card */}
+                      <div className="p-4 rounded-2xl bg-[#F3EFE6]/85 dark:bg-[#131A26]/90 border border-stone-900/[0.08] dark:border-white/[0.08] space-y-3">
+                        <div className="flex items-center justify-between gap-2 text-[11px] font-mono tabular-nums text-stone-500 dark:text-stone-400">
+                          <span>
+                            本篇进度 · 已答 <strong className="text-stone-900 dark:text-stone-100">{answeredCount}/{questions.length}</strong> 题
+                          </span>
+                          <span>
+                            Test {activeCambridgeInfo.testNum} · Passage {activeCambridgeInfo.passageNum}/3
+                          </span>
+                        </div>
+
+                        <div className="flex items-center gap-2.5">
+                          <button
+                            type="button"
+                            onClick={() => {
+                              if (answeredCount >= questions.length) {
+                                handleSubmitTest();
+                              } else {
+                                setDrawerHeightPercent(drawerHeightPercent < 55 ? 68 : 26);
+                              }
+                            }}
+                            className="flex-1 py-2.5 px-3.5 rounded-xl bg-white dark:bg-white/[0.06] border border-stone-200/85 dark:border-white/[0.08] text-stone-800 dark:text-stone-200 text-xs font-semibold hover:bg-stone-100 dark:hover:bg-white/[0.1] transition-all cursor-pointer active:scale-98"
+                          >
+                            {answeredCount >= questions.length ? '交卷并查看评估报告' : `展开答题卡 (${answeredCount}/${questions.length})`}
+                          </button>
+
+                          {nextSequentialPassage.next && (
+                            <button
+                              id="end-of-passage-next-btn"
+                              type="button"
+                              onClick={() => {
+                                if (nextSequentialPassage.next) {
+                                  handleSelectCambridgePassage(nextSequentialPassage.next);
+                                }
+                              }}
+                              className="flex-[1.35] py-2.5 px-4 rounded-xl bg-[#516050] hover:bg-[#3F4C3E] dark:bg-[#8FB996] text-white dark:text-stone-950 text-xs font-semibold flex items-center justify-center gap-1.5 transition-all cursor-pointer active:scale-98 shadow-xs"
+                            >
+                              <span className="truncate">
+                                {nextSequentialPassage.isSameTest
+                                  ? `顺刷下一篇 · Passage ${nextSequentialPassage.next.passageNum}`
+                                  : `开启下一套 · Test ${nextSequentialPassage.next.testNum} P1`}
+                              </span>
+                              <ArrowRight className="w-3.5 h-3.5 shrink-0" />
+                            </button>
+                          )}
+                        </div>
+                      </div>
                     </div>
                   </motion.div>
                 </AnimatePresence>
@@ -1790,13 +2044,13 @@ export const IELTSPanel: React.FC<IELTSPanelProps> = ({ onOpenNotebook }) => {
             {/* Soft Upward Feather Gradient Scrim above Quiz Drawer — prevents harsh half-cut text lines */}
             <div
               style={{
-                bottom: `${drawerHeightPercent}%`,
+                bottom: `${effectiveDrawerHeightPercent}%`,
                 transition: isDragging ? 'none' : 'bottom 0.28s cubic-bezier(0.16, 1, 0.3, 1)'
               }}
               className="pointer-events-none absolute left-0 right-0 h-9 bg-gradient-to-t from-[#FAF7F2] via-[#FAF7F2]/85 to-transparent dark:from-[#0C1017] dark:via-[#0C1017]/85 dark:to-transparent z-20"
             />
 
-            {/* Floating Bottom Quiz Sheet with Resizable Height & Elevated Warm Ivory Surface */}
+            {/* Floating Bottom Quiz Sheet with Resizable Height, Auto-Scroll Minimize & Horizontal Swipe */}
             <motion.div
               id="ielts-quiz-drawer"
               initial={{ opacity: 0, y: 36, scale: 0.99 }}
@@ -1804,14 +2058,19 @@ export const IELTSPanel: React.FC<IELTSPanelProps> = ({ onOpenNotebook }) => {
               exit={{ opacity: 0, y: 28, scale: 0.99 }}
               transition={{ duration: 0.28, delay: 0.04, ease: [0.16, 1, 0.3, 1] }}
               style={{
-                height: `${drawerHeightPercent}%`,
+                height: `${effectiveDrawerHeightPercent}%`,
                 transition: isDragging ? 'none' : 'height 0.28s cubic-bezier(0.16, 1, 0.3, 1)'
               }}
+              onPointerDown={handleQuizSwipeStart}
+              onPointerUp={handleQuizSwipeEnd}
               className="absolute bottom-0 left-0 right-0 z-30 bg-[#FDFCF9]/98 dark:bg-[#111722]/98 backdrop-blur-2xl border-t border-stone-300/75 dark:border-white/[0.1] rounded-t-[26px] shadow-[0_-10px_32px_rgba(28,25,23,0.07)] dark:shadow-[0_-12px_36px_rgba(0,0,0,0.45)] flex flex-col overflow-hidden"
             >
               {/* Drawer Drag Handle Bar */}
               <div
                 onPointerDown={handleDragStart}
+                onClick={() => {
+                  if (isScrollMinimized) setIsScrollMinimized(false);
+                }}
                 className="w-full pt-2 pb-1 flex flex-col items-center justify-center cursor-ns-resize select-none touch-none shrink-0"
               >
                 <div className="w-9 h-1 bg-stone-300/90 dark:bg-white/20 rounded-full hover:bg-stone-400 transition-colors" />
@@ -1820,7 +2079,30 @@ export const IELTSPanel: React.FC<IELTSPanelProps> = ({ onOpenNotebook }) => {
               {/* Drawer Content Body with Smooth State Transitions */}
               <div className="flex-1 min-h-0 overflow-y-auto no-scrollbar px-5 pb-3.5 pt-0.5 flex flex-col justify-between">
                 <AnimatePresence mode="wait" initial={false}>
-                  {!isExpanded ? (
+                  {isScrollMinimized ? (
+                    /* Auto-Minimized Single-Line Reading Bar (Item 3: frees up reading viewport when scrolling passage) */
+                    <motion.div
+                      key="scroll-minimized-bar"
+                      initial={{ opacity: 0, y: 6 }}
+                      animate={{ opacity: 1, y: 0 }}
+                      exit={{ opacity: 0, y: -6 }}
+                      transition={{ duration: 0.18, ease: [0.16, 1, 0.3, 1] }}
+                      onClick={() => setIsScrollMinimized(false)}
+                      className="flex items-center justify-between gap-2.5 h-full cursor-pointer select-none"
+                    >
+                      <div className="flex items-center gap-2 min-w-0 flex-1">
+                        <span className="px-2 py-0.5 rounded-md bg-[#516050]/12 dark:bg-[#8FB996]/15 text-[#516050] dark:text-[#8FB996] font-mono text-[11px] font-bold tabular-nums shrink-0">
+                          Q{currentQuizQuestionIndex + 1}/{questions.length || 1}
+                        </span>
+                        <p className="text-xs text-stone-700 dark:text-stone-200 font-medium truncate">
+                          {questions[currentQuizQuestionIndex]?.prompt || '点击展开答题抽屉'}
+                        </p>
+                      </div>
+                      <span className="text-[10.5px] font-mono text-[#516050] dark:text-[#8FB996] font-semibold whitespace-nowrap shrink-0">
+                        展开答题 ↑
+                      </span>
+                    </motion.div>
+                  ) : !isExpanded ? (
                     /* Collapsed / Peek Mode (< 36% height) */
                     <motion.div
                       key="peek-mode"
@@ -1857,39 +2139,53 @@ export const IELTSPanel: React.FC<IELTSPanelProps> = ({ onOpenNotebook }) => {
                           </button>
                         </div>
 
-                        {/* Question Quick Dots Indicator */}
-                        <div className="flex items-center gap-1 max-w-[140px] overflow-x-auto no-scrollbar py-0.5">
-                          {questions.map((q, idx) => (
-                            <button
-                              key={`peek-dot-${q.id || idx}`}
-                              type="button"
-                              onClick={() => setCurrentQuizQuestionIndex(idx)}
-                              className={`rounded-full transition-all cursor-pointer focus:outline-none ${
-                                idx === currentQuizQuestionIndex
-                                  ? 'w-4 h-1.5 bg-[#516050] dark:bg-[#8FB996]'
-                                  : userAnswers[q.id]
-                                  ? 'w-1.5 h-1.5 bg-[#516050]/55 dark:bg-[#8FB996]/55'
-                                  : 'w-1.5 h-1.5 bg-stone-300 dark:bg-stone-700'
-                              }`}
-                              title={`第 ${idx + 1} 题`}
-                            />
-                          ))}
-                        </div>
-
-                        <div className="flex items-center gap-2">
-                          <span className="text-[10.5px] text-stone-400 font-mono tabular-nums">
-                            {progressPercent}%
-                          </span>
-                          {progressPercent === 100 && (
-                            <button
-                              type="button"
-                              onClick={handleSubmitTest}
-                              className="px-2.5 py-0.5 rounded-full bg-[#516050] text-white text-[10px] font-semibold tracking-wide hover:bg-[#3F4C3E] active:scale-95 transition-all cursor-pointer focus:outline-none"
-                            >
-                              交卷
-                            </button>
-                          )}
-                        </div>
+                        {(progressPercent === 100 || currentQuizQuestionIndex >= (questions.length || 1) - 1 || answeredCount > 0) && (
+                          <motion.button
+                            id="quiz-header-submit-btn"
+                            type="button"
+                            disabled={isSubmittingTest}
+                            initial={{ opacity: 0, scale: 0.92, x: 4 }}
+                            animate={{ opacity: 1, scale: 1, x: 0 }}
+                            whileTap={{ scale: 0.95 }}
+                            transition={{ duration: 0.2, ease: [0.16, 1, 0.3, 1] }}
+                            onClick={handleSubmitTest}
+                            className={`h-7 px-2.5 rounded-[9px] font-sans-ui text-[11px] font-semibold tracking-wide leading-none inline-flex items-center gap-1.5 transition-all cursor-pointer focus:outline-none whitespace-nowrap ${
+                              progressPercent === 100
+                                ? 'bg-gradient-to-b from-[#586857] to-[#465445] hover:from-[#4D5C4C] hover:to-[#3E4B3D] dark:from-[#8FB996] dark:to-[#76A17D] text-[#FAF7F2] dark:text-stone-950 shadow-[0_2px_6px_rgba(81,96,80,0.22),inset_0_1px_0_rgba(255,255,255,0.2)] border border-[#3F4C3E]/60 dark:border-white/20'
+                                : 'bg-[#F3EFE6]/90 hover:bg-[#EAE3D5] dark:bg-white/[0.07] dark:hover:bg-white/[0.12] text-[#465445] dark:text-[#8FB996] border border-[#516050]/22 dark:border-[#8FB996]/25 shadow-[inset_0_1px_0_rgba(255,255,255,0.7)] dark:shadow-none'
+                            }`}
+                            title="提交答卷并生成评估报告"
+                          >
+                            {isSubmittingTest ? (
+                              <Loader2 className="w-3 h-3 animate-spin shrink-0" />
+                            ) : (
+                              <svg
+                                className="w-3.5 h-3.5 shrink-0"
+                                viewBox="0 0 16 16"
+                                fill="none"
+                                xmlns="http://www.w3.org/2000/svg"
+                              >
+                                <rect
+                                  x="2.25"
+                                  y="1.75"
+                                  width="11.5"
+                                  height="12.5"
+                                  rx="2.5"
+                                  stroke="currentColor"
+                                  strokeWidth="1.35"
+                                />
+                                <path
+                                  d="M5.25 8.1L7.1 9.95L10.85 6.05"
+                                  stroke="currentColor"
+                                  strokeWidth="1.45"
+                                  strokeLinecap="round"
+                                  strokeLinejoin="round"
+                                />
+                              </svg>
+                            )}
+                            <span>{isSubmittingTest ? '批改中' : progressPercent === 100 ? '交卷批改' : '交卷'}</span>
+                          </motion.button>
+                        )}
                       </div>
 
                       {/* Unboxed Editorial Question Prompt — Full Text Visibility without 2-line Clamping */}
@@ -1971,7 +2267,7 @@ export const IELTSPanel: React.FC<IELTSPanelProps> = ({ onOpenNotebook }) => {
                     >
                       {/* Question Header & Content */}
                       <div className="overflow-y-auto no-scrollbar space-y-3.5">
-                        <div className="flex items-center justify-between text-[11px] font-mono tabular-nums font-semibold tracking-wider text-stone-500 dark:text-stone-400">
+                        <div className="flex items-center justify-between text-[11px] font-mono tabular-nums pb-1.5 border-b border-stone-200/60 dark:border-white/[0.06]">
                           <div className="flex items-center gap-1.5">
                             <button
                               type="button"
@@ -1982,8 +2278,9 @@ export const IELTSPanel: React.FC<IELTSPanelProps> = ({ onOpenNotebook }) => {
                             >
                               <ChevronLeft className="w-3.5 h-3.5" />
                             </button>
-                            <span className="text-stone-900 dark:text-stone-100">
-                              QUESTION {currentQuizQuestionIndex + 1} <span className="text-stone-400 font-normal">/ {questions.length || 1}</span>
+                            <span className="font-semibold tracking-wider text-stone-900 dark:text-stone-100 text-xs">
+                              Q{currentQuizQuestionIndex + 1}
+                              <span className="text-[10.5px] text-stone-400 font-normal"> / {questions.length || 1}</span>
                             </span>
                             <button
                               type="button"
@@ -1995,15 +2292,48 @@ export const IELTSPanel: React.FC<IELTSPanelProps> = ({ onOpenNotebook }) => {
                               <ChevronRight className="w-3.5 h-3.5" />
                             </button>
                           </div>
-                          <span>{progressPercent}% COMPLETED</span>
-                        </div>
 
-                        {/* Minimal Hairline Progress Bar */}
-                        <div className="w-full h-[2px] bg-stone-200/80 dark:bg-white/[0.08] rounded-full overflow-hidden">
-                          <div
-                            className="h-full bg-[#516050] dark:bg-[#8FB996] transition-all duration-300"
-                            style={{ width: `${progressPercent}%` }}
-                          />
+                          <motion.button
+                            id="quiz-expanded-header-submit-btn"
+                            type="button"
+                            disabled={isSubmittingTest}
+                            whileTap={{ scale: 0.95 }}
+                            onClick={handleSubmitTest}
+                            className={`h-7 px-2.5 rounded-[9px] font-sans-ui text-[11px] font-semibold tracking-wide leading-none inline-flex items-center gap-1.5 transition-all cursor-pointer focus:outline-none whitespace-nowrap ${
+                              progressPercent === 100
+                                ? 'bg-gradient-to-b from-[#586857] to-[#465445] hover:from-[#4D5C4C] hover:to-[#3E4B3D] dark:from-[#8FB996] dark:to-[#76A17D] text-[#FAF7F2] dark:text-stone-950 shadow-[0_2px_6px_rgba(81,96,80,0.22),inset_0_1px_0_rgba(255,255,255,0.2)] border border-[#3F4C3E]/60 dark:border-white/20'
+                                : 'bg-[#F3EFE6]/90 hover:bg-[#EAE3D5] dark:bg-white/[0.07] dark:hover:bg-white/[0.12] text-[#465445] dark:text-[#8FB996] border border-[#516050]/22 dark:border-[#8FB996]/25 shadow-[inset_0_1px_0_rgba(255,255,255,0.7)] dark:shadow-none'
+                            }`}
+                          >
+                            {isSubmittingTest ? (
+                              <Loader2 className="w-3 h-3 animate-spin shrink-0" />
+                            ) : (
+                              <svg
+                                className="w-3.5 h-3.5 shrink-0"
+                                viewBox="0 0 16 16"
+                                fill="none"
+                                xmlns="http://www.w3.org/2000/svg"
+                              >
+                                <rect
+                                  x="2.25"
+                                  y="1.75"
+                                  width="11.5"
+                                  height="12.5"
+                                  rx="2.5"
+                                  stroke="currentColor"
+                                  strokeWidth="1.35"
+                                />
+                                <path
+                                  d="M5.25 8.1L7.1 9.95L10.85 6.05"
+                                  stroke="currentColor"
+                                  strokeWidth="1.45"
+                                  strokeLinecap="round"
+                                  strokeLinejoin="round"
+                                />
+                              </svg>
+                            )}
+                            <span>{isSubmittingTest ? '批改中' : '交卷批改'}</span>
+                          </motion.button>
                         </div>
 
                         {/* Animated Question Prompt & Options in Expanded Mode */}
@@ -2074,25 +2404,6 @@ export const IELTSPanel: React.FC<IELTSPanelProps> = ({ onOpenNotebook }) => {
                             )}
                           </motion.div>
                         </AnimatePresence>
-
-                        {/* Horizontal Question Switcher Dots */}
-                        <div className="flex items-center justify-center gap-2 py-1">
-                          {questions.map((q, idx) => (
-                            <button
-                              key={`quiz-switcher-dot-${q.id ?? ''}-${idx}`}
-                              type="button"
-                              onClick={() => setCurrentQuizQuestionIndex(idx)}
-                              className={`h-1.5 rounded-full transition-all cursor-pointer focus:outline-none ${
-                                idx === currentQuizQuestionIndex
-                                  ? 'w-6 bg-[#516050] dark:bg-[#8FB996]'
-                                  : userAnswers[q.id]
-                                  ? 'w-1.5 bg-[#516050]/50 dark:bg-[#8FB996]/50'
-                                  : 'w-1.5 bg-stone-300 dark:bg-stone-700'
-                              }`}
-                              aria-label={`Question ${idx + 1}`}
-                            />
-                          ))}
-                        </div>
                       </div>
 
                       {/* Submit Test & View Vocabulary Button */}
@@ -2100,11 +2411,44 @@ export const IELTSPanel: React.FC<IELTSPanelProps> = ({ onOpenNotebook }) => {
                         <button
                           id="quiz-submit-test-btn"
                           type="button"
+                          disabled={isSubmittingTest}
                           onClick={handleSubmitTest}
-                          className="w-full py-3 px-5 rounded-full bg-[#516050] hover:bg-[#3F4C3E] dark:bg-[#6B8F71] dark:hover:bg-[#4A6B50] text-white font-sans-ui text-xs uppercase tracking-widest font-semibold flex items-center justify-center gap-2 shadow-md active:scale-98 transition-all cursor-pointer focus:outline-none"
+                          className="w-full py-3 px-5 rounded-xl bg-gradient-to-b from-[#586857] to-[#465445] hover:from-[#4D5C4C] hover:to-[#3E4B3D] dark:from-[#8FB996] dark:to-[#76A17D] text-white dark:text-stone-950 font-sans-ui text-xs tracking-wide font-semibold flex items-center justify-center gap-2 shadow-[0_4px_14px_rgba(81,96,80,0.22),inset_0_1px_0_rgba(255,255,255,0.2)] active:scale-98 transition-all cursor-pointer focus:outline-none"
                         >
-                          <span>提交试卷并查看评估报告</span>
-                          <ArrowRight className="w-4 h-4" />
+                          {isSubmittingTest ? (
+                            <>
+                              <Loader2 className="w-4 h-4 animate-spin" />
+                              <span>正在批阅并生成报告...</span>
+                            </>
+                          ) : (
+                            <>
+                              <svg
+                                className="w-4 h-4 shrink-0"
+                                viewBox="0 0 16 16"
+                                fill="none"
+                                xmlns="http://www.w3.org/2000/svg"
+                              >
+                                <rect
+                                  x="2.25"
+                                  y="1.75"
+                                  width="11.5"
+                                  height="12.5"
+                                  rx="2.5"
+                                  stroke="currentColor"
+                                  strokeWidth="1.35"
+                                />
+                                <path
+                                  d="M5.25 8.1L7.1 9.95L10.85 6.05"
+                                  stroke="currentColor"
+                                  strokeWidth="1.45"
+                                  strokeLinecap="round"
+                                  strokeLinejoin="round"
+                                />
+                              </svg>
+                              <span>交卷批改并查看评估报告</span>
+                              <ArrowRight className="w-3.5 h-3.5" />
+                            </>
+                          )}
                         </button>
                       </div>
                     </motion.div>
@@ -2112,6 +2456,65 @@ export const IELTSPanel: React.FC<IELTSPanelProps> = ({ onOpenNotebook }) => {
                 </AnimatePresence>
               </div>
             </motion.div>
+
+            {/* Editorial Grading Ceremony Transition Overlay */}
+            <AnimatePresence>
+              {isSubmittingTest && (
+                <motion.div
+                  id="ielts-grading-ceremony"
+                  initial={{ opacity: 0 }}
+                  animate={{ opacity: 1 }}
+                  exit={{ opacity: 0 }}
+                  transition={{ duration: 0.2, ease: [0.22, 1, 0.36, 1] }}
+                  className="absolute inset-0 z-50 flex items-center justify-center bg-[#FAF7F2]/80 dark:bg-[#0B0F17]/80 backdrop-blur-md pointer-events-auto"
+                >
+                  <motion.div
+                    initial={{ opacity: 0, scale: 0.9, y: 12 }}
+                    animate={{ opacity: 1, scale: 1, y: 0 }}
+                    exit={{ opacity: 0, scale: 0.95, y: -8 }}
+                    transition={{ type: 'spring', damping: 26, stiffness: 320 }}
+                    className="px-7 py-6 rounded-[26px] bg-[#FDFCF9]/98 dark:bg-[#131924]/98 border border-stone-200/85 dark:border-white/[0.09] shadow-[0_20px_50px_rgba(28,25,23,0.14)] flex flex-col items-center gap-3 text-center max-w-[260px]"
+                  >
+                    <div className="relative w-12 h-12 flex items-center justify-center">
+                      <svg className="w-12 h-12 -rotate-90" viewBox="0 0 48 48">
+                        <circle
+                          cx="24"
+                          cy="24"
+                          r="20"
+                          fill="none"
+                          stroke="currentColor"
+                          strokeWidth="3"
+                          className="text-stone-200 dark:text-white/10"
+                        />
+                        <motion.circle
+                          cx="24"
+                          cy="24"
+                          r="20"
+                          fill="none"
+                          stroke="currentColor"
+                          strokeWidth="3"
+                          strokeLinecap="round"
+                          strokeDasharray={125.6}
+                          initial={{ strokeDashoffset: 125.6 }}
+                          animate={{ strokeDashoffset: 18 }}
+                          transition={{ duration: 0.42, ease: [0.16, 1, 0.3, 1] }}
+                          className="text-[#516050] dark:text-[#8FB996]"
+                        />
+                      </svg>
+                      <Check className="w-5 h-5 text-[#516050] dark:text-[#8FB996] absolute" />
+                    </div>
+                    <div className="space-y-1">
+                      <p className="font-serif-luxury text-base font-bold text-stone-900 dark:text-stone-100">
+                        正在批阅答卷
+                      </p>
+                      <p className="font-mono text-[11px] tabular-nums text-stone-500 dark:text-stone-400">
+                        核验 {questions.length} 道题目与学术词汇...
+                      </p>
+                    </div>
+                  </motion.div>
+                </motion.div>
+              )}
+            </AnimatePresence>
           </motion.div>
         )}
       </AnimatePresence>

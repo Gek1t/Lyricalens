@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
-import { ChevronDown, MoreHorizontal, Moon, Sun, BookMarked } from 'lucide-react';
+import { ChevronDown, MoreHorizontal, Moon, Sun, BookMarked, Volume2, VolumeX, Settings } from 'lucide-react';
 import { useAppStore } from '../store/useAppStore';
 
 interface TopHeaderProps {
@@ -34,6 +34,9 @@ export const TopHeader: React.FC<TopHeaderProps> = ({
   const [isMenuOpen, setIsMenuOpen] = useState(false);
   const isDark = useAppStore(s => s.isDark);
   const toggleTheme = useAppStore(s => s.toggleTheme);
+  const autoPronounce = useAppStore(s => s.autoPronounce);
+  const toggleAutoPronounce = useAppStore(s => s.toggleAutoPronounce);
+  const showToast = useAppStore(s => s.showToast);
   const openPersonalHub = useAppStore(s => s.openPersonalHub);
   const activeSpace = useAppStore(s => s.activeSpace);
   const isFullscreenLyricsOpen = useAppStore(s => s.isFullscreenLyricsOpen);
@@ -48,15 +51,13 @@ export const TopHeader: React.FC<TopHeaderProps> = ({
     if (onLeftClick) {
       onLeftClick();
     } else {
-      openPersonalHub();
+      openPersonalHub('compass');
     }
   };
 
   return (
     <header
-      className={`relative w-full z-40 pt-[var(--android-safe-top,max(3.25rem,calc(env(safe-area-inset-top,44px)+0.85rem)))] pb-2.5 px-5 flex items-center justify-between shrink-0 pointer-events-auto transition-all duration-300 ${
-        isCamera ? 'bg-gradient-to-b from-black/50 via-black/15 to-transparent' : ''
-      } ${className}`}
+      className={`relative w-full z-40 pt-[var(--android-safe-top,max(3.25rem,calc(env(safe-area-inset-top,44px)+0.85rem)))] pb-2.5 px-5 flex items-center justify-between shrink-0 pointer-events-auto transition-all duration-300 ${className}`}
     >
       {/* Left circular button */}
       <button
@@ -188,7 +189,7 @@ export const TopHeader: React.FC<TopHeaderProps> = ({
                   transformOrigin: 'top right',
                   willChange: 'transform, opacity'
                 }}
-                className="absolute right-0 top-11 w-56 rounded-2xl p-2 bg-[#FDFBF7] dark:bg-[#141B2B] border border-stone-200/85 dark:border-slate-800/95 shadow-[0_18px_40px_-10px_rgba(0,0,0,0.22),0_4px_12px_rgba(0,0,0,0.08)] dark:shadow-[0_20px_45px_-10px_rgba(0,0,0,0.78)] z-[60] space-y-1 hardware-accelerated"
+                className="absolute right-0 top-11 w-60 rounded-2xl p-2 bg-[#FDFBF7] dark:bg-[#141B2B] border border-stone-200/85 dark:border-slate-800/95 shadow-[0_18px_40px_-10px_rgba(0,0,0,0.22),0_4px_12px_rgba(0,0,0,0.08)] dark:shadow-[0_20px_45px_-10px_rgba(0,0,0,0.78)] z-[60] space-y-1 hardware-accelerated"
               >
                 <button
                   id="menu-open-notebook-btn"
@@ -200,6 +201,38 @@ export const TopHeader: React.FC<TopHeaderProps> = ({
                 >
                   <BookMarked className="w-4 h-4 text-[#516050] dark:text-[#8FB996] shrink-0" />
                   <span>Vocabulary Vault</span>
+                </button>
+
+                <button
+                  id="menu-toggle-auto-pronounce-btn"
+                  onClick={() => {
+                    const nextVal = !autoPronounce;
+                    toggleAutoPronounce();
+                    showToast(
+                      nextVal
+                        ? '已开启默认点词朗读'
+                        : '已关闭默认点词朗读 · 仅点击喇叭图标时发音'
+                    );
+                  }}
+                  className="w-full flex items-center justify-between gap-2 px-3 py-2.5 text-xs font-medium text-stone-700 dark:text-stone-200 hover:bg-stone-200/60 dark:hover:bg-slate-800/80 active:scale-[0.98] rounded-xl transition-all text-left cursor-pointer"
+                >
+                  <div className="flex items-center gap-3 min-w-0">
+                    {autoPronounce ? (
+                      <Volume2 className="w-4 h-4 text-emerald-600 dark:text-emerald-400 shrink-0" />
+                    ) : (
+                      <VolumeX className="w-4 h-4 text-stone-400 shrink-0" />
+                    )}
+                    <span className="truncate">默认点词朗读</span>
+                  </div>
+                  <span
+                    className={`px-2 py-0.5 rounded-full text-[10px] font-semibold shrink-0 transition-colors ${
+                      autoPronounce
+                        ? 'bg-emerald-500/15 text-emerald-700 dark:text-emerald-300'
+                        : 'bg-stone-200/80 dark:bg-slate-800 text-stone-500 dark:text-stone-400'
+                    }`}
+                  >
+                    {autoPronounce ? '已开启' : '已关闭'}
+                  </span>
                 </button>
 
                 <button
@@ -222,6 +255,20 @@ export const TopHeader: React.FC<TopHeaderProps> = ({
                     </>
                   )}
                 </button>
+
+                <div className="pt-1 mt-1 border-t border-stone-200/70 dark:border-slate-800/80">
+                  <button
+                    id="menu-open-settings-btn"
+                    onClick={() => {
+                      setIsMenuOpen(false);
+                      openPersonalHub('settings');
+                    }}
+                    className="w-full flex items-center gap-3 px-3 py-2.5 text-xs font-medium text-stone-700 dark:text-stone-200 hover:bg-stone-200/60 dark:hover:bg-slate-800/80 active:scale-[0.98] rounded-xl transition-all text-left cursor-pointer"
+                  >
+                    <Settings className="w-4 h-4 text-stone-500 dark:text-stone-400 shrink-0" />
+                    <span>同步与偏好设置</span>
+                  </button>
+                </div>
               </motion.div>
             </>
           )}

@@ -2,7 +2,7 @@ import React, { useState, useEffect, useRef } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
 import { ChevronDown, Volume2, Music2, BookOpen, Layers, Sparkles, Compass } from 'lucide-react';
 import { useAppStore } from '../store/useAppStore';
-import { speakWord } from '../utils/audioEngine';
+import { speakWord, speakWordIfAutoEnabled } from '../utils/audioEngine';
 import { SubWordItem, MasteryLevel, WordItem } from '../types';
 import { cycleWordMastery } from '../db';
 import { HighlightedText } from './HighlightedText';
@@ -54,6 +54,12 @@ export const WordDetailSheet: React.FC = () => {
   // The item currently on display (either the root phrase/word or active drilled subword)
   const currentItem = activeSubWord || displayWord;
   const isViewingSubWord = Boolean(activeSubWord);
+
+  useEffect(() => {
+    if (isVisible && currentItem?.word) {
+      speakWordIfAutoEnabled(currentItem.word);
+    }
+  }, [isVisible, currentItem?.word]);
 
   const handleMasteryToggle = async () => {
     if (!currentItem) return;

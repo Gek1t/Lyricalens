@@ -3,7 +3,6 @@ import { useLiveQuery } from 'dexie-react-hooks';
 import { db } from '../../db';
 import { IELTSTestRecord } from '../../types';
 import { useAppStore } from '../../store/useAppStore';
-import { speakWord } from '../../utils/audioEngine';
 import { lookupWord } from '../../utils/lyricDictionary';
 import {
   BookOpen,
@@ -66,7 +65,6 @@ export const IELTSArchivesTab: React.FC<IELTSArchivesTabProps> = ({ onOpenReview
         wordData = await lookupWord(cleaned);
       }
       openWordDetail(wordData, heroRect, 'drawer');
-      speakWord(cleaned, 'en-GB');
     } catch (err) {
       console.warn('Failed to load word detail:', err);
     }
