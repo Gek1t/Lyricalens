@@ -12,6 +12,7 @@ type HubTab = 'compass' | 'archives' | 'settings';
 
 export const PersonalHubModal: React.FC = () => {
   const isPersonalHubOpen = useAppStore(s => s.isPersonalHubOpen);
+  const personalHubInitialTab = useAppStore(s => s.personalHubInitialTab);
   const closePersonalHub = useAppStore(s => s.closePersonalHub);
   const loadArchiveToIELTS = useAppStore(s => s.loadArchiveToIELTS);
   const setActiveSpace = useAppStore(s => s.setActiveSpace);
@@ -19,7 +20,13 @@ export const PersonalHubModal: React.FC = () => {
   const reviewRecord = useAppStore(s => s.activeArchiveReviewRecord);
   const setReviewRecord = useAppStore(s => s.setActiveArchiveReviewRecord);
 
-  const [activeTab, setActiveTab] = useState<HubTab>('compass');
+  const [activeTab, setActiveTab] = useState<HubTab>(personalHubInitialTab || 'compass');
+
+  React.useEffect(() => {
+    if (isPersonalHubOpen && personalHubInitialTab) {
+      setActiveTab(personalHubInitialTab);
+    }
+  }, [isPersonalHubOpen, personalHubInitialTab]);
 
   const handleRetestFromReview = (record: IELTSTestRecord) => {
     setReviewRecord(null);

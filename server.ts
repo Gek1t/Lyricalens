@@ -2298,8 +2298,10 @@ function isDisqualifiedNonAcademic(title: string, extractOrSnippet: string): boo
 
 interface LiveSearchResult {
   title: string;
+  titleZh?: string;
   url: string;
   snippet: string;
+  fullExtract?: string;
   source: string;
 }
 
@@ -2322,7 +2324,7 @@ async function fetchLiveWebSearch(query: string, count: number = 8): Promise<Liv
       .trim();
   };
 
-  // Map Chinese/seasonal queries into English academic search queries so Crossref & En-Wiki always return rich English scholarly articles
+  // Map Chinese/seasonal queries into English academic search queries so En-Wiki & Crossref always return rich English scholarly articles
   const expandedTokens = expandSearchTokens(cleanQuery);
   const englishTokens = expandedTokens.filter(t => /^[a-zA-Z]{4,}$/.test(t) && !['ielts', 'cambridge', 'test', 'reading', 'listening', 'exam', 'paper'].includes(t.toLowerCase()));
 
@@ -2330,25 +2332,62 @@ async function fetchLiveWebSearch(query: string, count: number = 8): Promise<Liv
   if (!academicEnglishQuery || academicEnglishQuery.length < 3) {
     if (englishTokens.length > 0) {
       academicEnglishQuery = englishTokens.slice(0, 4).join(' ');
-    } else if (/深海|海洋|生物/.test(cleanQuery)) {
-      academicEnglishQuery = 'deep sea hydrothermal vents marine biology adaptation';
-    } else if (/神经|认知|语言|大脑|心理/.test(cleanQuery)) {
-      academicEnglishQuery = 'cognitive neuroscience bilingual language acquisition neuroplasticity';
+    } else if (/深海|海洋|生物|酸化|珊瑚/.test(cleanQuery)) {
+      academicEnglishQuery = 'Ocean acidification hydrothermal vent marine biology';
+    } else if (/神经|认知|语言|大脑|心理|双语/.test(cleanQuery)) {
+      academicEnglishQuery = 'Cognitive neuroscience neuroplasticity bilingualism';
     } else if (/考古|航运|历史|古代|文明/.test(cleanQuery)) {
-      academicEnglishQuery = 'maritime archaeology bronze age trade networks';
+      academicEnglishQuery = 'Maritime archaeology Bronze Age trade networks';
     } else if (/城市|生态|森林|植物|环境|气候/.test(cleanQuery)) {
-      academicEnglishQuery = 'urban ecology microclimate biodiversity heat island';
+      academicEnglishQuery = 'Urban heat island mycorrhizal network forest ecology';
     } else if (/建筑|工程|混凝土|材料/.test(cleanQuery)) {
-      academicEnglishQuery = 'sustainable architectural engineering roman concrete materials';
+      academicEnglishQuery = 'Roman concrete sustainable architectural engineering';
     } else {
-      academicEnglishQuery = 'ecology neuroscience archaeology climate adaptation';
+      academicEnglishQuery = 'Ocean acidification mycorrhizal network circadian rhythm';
     }
   }
 
   const results: LiveSearchResult[] = [];
   const seenUrls = new Set<string>();
 
-  // 1. Live Crossref Academic Journal API (Nature, Science, Oxford, Cambridge, Elsevier, etc.)
+  // 1. Live English Wikipedia Full-Text Extracts + Bilingual Langlinks API (returns 4-5 real paragraphs + real Chinese title in 1 request!)
+  const wikiTask = (async () => {
+    const out: LiveSearchResult[] = [];
+    try {
+      const endpoint = `https://en.wikipedia.org/w/api.php?action=query&generator=search&gsrsearch=${encodeURIComponent(academicEnglishQuery)}&gsrlimit=6&prop=extracts|langlinks|info&explaintext=1&exchars=4500&lllang=zh&inprop=url&format=json&utf8=1`;
+      const res = await fetch(endpoint, {
+        headers: { 'User-Agent': 'IELTSAcademicEngine/3.0 (Academic FullText Search)' },
+        signal: AbortSignal.timeout(3200)
+      });
+      if (res.ok) {
+        const json: any = await res.json();
+        const pagesObj = json.query?.pages || {};
+        const pages = Object.values(pagesObj).sort((a: any, b: any) => (a.index || 99) - (b.index || 99));
+        for (const page of pages as any[]) {
+          const pageTitle = String(page.title || '').trim();
+          const rawExtract = String(page.extract || '').trim();
+          if (!pageTitle || !rawExtract || rawExtract.length < 250) continue;
+          if (isDisqualifiedNonAcademic(pageTitle, rawExtract)) continue;
+
+          const pageUrl = page.fullurl || `https://en.wikipedia.org/wiki/${encodeURIComponent(pageTitle.replace(/ /g, '_'))}`;
+          const zhTitleRaw = page.langlinks?.[0]?.['*'] || '';
+          const zhTitle = zhTitleRaw ? zhTitleRaw.replace(/[(（].*?[)）]/g, '').trim() : undefined;
+
+          out.push({
+            title: pageTitle,
+            titleZh: zhTitle,
+            url: pageUrl,
+            snippet: cleanText(rawExtract).slice(0, 460),
+            fullExtract: rawExtract,
+            source: 'Wikipedia · 国际学术百科全书 (实时全文)'
+          });
+        }
+      }
+    } catch {}
+    return out;
+  })();
+
+  // 2. Live Crossref Academic Journal API (Nature, Science, Oxford, Cambridge, Elsevier, etc.)
   const crossrefTask = (async () => {
     try {
       const crUrl = `https://api.crossref.org/works?query=${encodeURIComponent(academicEnglishQuery)}&filter=has-abstract:true,type:journal-article&rows=6&select=title,URL,abstract,container-title,published`;
@@ -2366,12 +2405,13 @@ async function fetchLiveWebSearch(query: string, count: number = 8): Promise<Liv
         const url = item.URL || '';
         const journal = (item['container-title'] && item['container-title'][0]) || 'Peer-Reviewed Academic Journal';
         const pubYear = item.published?.['date-parts']?.[0]?.[0] || new Date().getFullYear();
-        if (!title || title.length < 12 || !rawAbstract || rawAbstract.length < 80 || !url) continue;
+        if (!title || title.length < 12 || !rawAbstract || rawAbstract.length < 180 || !url) continue;
         if (isDisqualifiedNonAcademic(title, rawAbstract)) continue;
         out.push({
           title: `${title}`,
           url,
-          snippet: rawAbstract.slice(0, 650),
+          snippet: rawAbstract.slice(0, 500),
+          fullExtract: rawAbstract,
           source: `${journal} (${pubYear})`
         });
       }
@@ -2381,99 +2421,8 @@ async function fetchLiveWebSearch(query: string, count: number = 8): Promise<Liv
     }
   })();
 
-  // 2. Live English & Chinese Wikipedia REST Summary API
-  const wikiTask = (async () => {
-    const out: LiveSearchResult[] = [];
-    const wikiSearches = [
-      { lang: 'en', q: academicEnglishQuery },
-      ...(/[\u4e00-\u9fa5]/.test(cleanQuery) ? [{ lang: 'zh', q: cleanQuery }] : [])
-    ];
-    for (const ws of wikiSearches) {
-      try {
-        const endpoint = `https://${ws.lang}.wikipedia.org/w/api.php?action=query&list=search&srsearch=${encodeURIComponent(ws.q)}&format=json&utf8=1`;
-        const res = await fetch(endpoint, {
-          headers: { 'User-Agent': 'IELTSAcademicEngine/3.0 (Academic Search)' },
-          signal: AbortSignal.timeout(2500)
-        });
-        if (!res.ok) continue;
-        const json: any = await res.json();
-        const hits = (json.query?.search || []).slice(0, 3);
-        for (const hit of hits) {
-          const pageTitle = hit.title;
-          const pageUrl = `https://${ws.lang}.wikipedia.org/wiki/${encodeURIComponent(pageTitle.replace(/ /g, '_'))}`;
-          let extract = cleanText(hit.snippet);
-          try {
-            const summaryUrl = `https://${ws.lang}.wikipedia.org/api/rest_v1/page/summary/${encodeURIComponent(pageTitle.replace(/ /g, '_'))}`;
-            const sRes = await fetch(summaryUrl, { signal: AbortSignal.timeout(1800) });
-            if (sRes.ok) {
-              const sJson: any = await sRes.json();
-              if (sJson.extract && sJson.extract.length > extract.length) {
-                extract = cleanText(sJson.extract);
-              }
-            }
-          } catch {}
-          if (!extract || extract.length < 60) continue;
-          if (isDisqualifiedNonAcademic(pageTitle, extract)) continue;
-          out.push({
-            title: pageTitle,
-            url: pageUrl,
-            snippet: extract.slice(0, 600),
-            source: ws.lang === 'zh' ? 'Wikipedia · 维基学术百科' : 'Wikipedia · Open Academic Encyclopedia'
-          });
-        }
-      } catch {}
-    }
-    return out;
-  })();
-
-  // 3. Live DuckDuckGo Academic Web Search
-  const ddgTask = (async () => {
-    const out: LiveSearchResult[] = [];
-    try {
-      const q = `${academicEnglishQuery} academic research article`;
-      const res = await fetch(`https://html.duckduckgo.com/html/?q=${encodeURIComponent(q)}`, {
-        headers: {
-          'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36',
-          'Accept': 'text/html,application/xhtml+xml',
-          'Accept-Language': 'en-US,en;q=0.9'
-        },
-        signal: AbortSignal.timeout(3000)
-      });
-      if (!res.ok) return out;
-      const html = await res.text();
-      const regex = /<a[^>]*class="result__a"[^>]*href="([^"]+)"[^>]*>([\s\S]*?)<\/a>[\s\S]*?<a[^>]*class="result__snippet"[^>]*>([\s\S]*?)<\/a>/g;
-      let match;
-      while ((match = regex.exec(html)) !== null && out.length < 4) {
-        let rawUrl = match[1];
-        if (rawUrl.includes('uddg=')) {
-          try {
-            rawUrl = decodeURIComponent(rawUrl.split('uddg=')[1].split('&')[0]);
-          } catch {}
-        } else if (rawUrl.startsWith('//')) {
-          rawUrl = 'https:' + rawUrl;
-        }
-        const title = cleanText(match[2]);
-        const snippet = cleanText(match[3]);
-        if (!title || !snippet || snippet.length < 50) continue;
-        let domain = 'Academic Web';
-        try {
-          domain = new URL(rawUrl).hostname.replace(/^www\./, '');
-        } catch {}
-        if (/(youtube\.com|tiktok\.com|genius\.com|azlyrics\.com)$/i.test(domain)) continue;
-        if (isDisqualifiedNonAcademic(title, snippet)) continue;
-        out.push({
-          title,
-          url: rawUrl,
-          snippet,
-          source: domain
-        });
-      }
-    } catch {}
-    return out;
-  })();
-
-  const [crList, wikiList, ddgList] = await Promise.all([crossrefTask, wikiTask, ddgTask]);
-  for (const item of [...crList, ...wikiList, ...ddgList]) {
+  const [wikiList, crList] = await Promise.all([wikiTask, crossrefTask]);
+  for (const item of [...wikiList, ...crList]) {
     if (!item.url || seenUrls.has(item.url)) continue;
     seenUrls.add(item.url);
     results.push(item);
@@ -2810,6 +2759,62 @@ app.post('/api/ielts/compile-full-volume', async (req: Request, res: Response) =
   });
 });
 
+// Rotating IELTS Academic real-world topic clusters for live-seasonal-feed
+const LIVE_IELTS_TOPIC_CLUSTERS: Array<{
+  labelZh: string;
+  items: Array<{ query: string; titleZh: string; categoryZh: string }>;
+}> = [
+  {
+    labelZh: '深海热液生态 · 古代水利工程 · 双语神经可塑性',
+    items: [
+      { query: 'Hydrothermal vent', titleZh: '深海热泉化能合成生物圈与极端微生物', categoryZh: '海洋生物学 & 极端生态' },
+      { query: 'Roman aqueduct', titleZh: '古罗马高架引水渠拱券结构与水力工程', categoryZh: '古代土木工程 & 建筑考古' },
+      { query: 'Neuroplasticity', titleZh: '双语认知控制与大脑皮层神经可塑性', categoryZh: '认知神经科学 & 语言学' }
+    ]
+  },
+  {
+    labelZh: '生物发光机制 · 美索不达米亚楔形文字 · 睡眠记忆巩固',
+    items: [
+      { query: 'Bioluminescence', titleZh: '深海生物发光机制与荧光素酶演化', categoryZh: '海洋生物学 & 生物化学' },
+      { query: 'Cuneiform', titleZh: '美索不达米亚楔形文字泥板破译与演变', categoryZh: '考古铭文学 & 古代文明' },
+      { query: 'Memory consolidation', titleZh: '睡眠慢波振荡与海马体长期记忆巩固', categoryZh: '认知心理学 & 脑科学' }
+    ]
+  },
+  {
+    labelZh: '珊瑚礁白化修复 · 印加帝国道路系统 · 人类空间导航与海马体',
+    items: [
+      { query: 'Coral bleaching', titleZh: '珊瑚礁白化危机与共生虫黄藻耐热演化', categoryZh: '海洋生态学 & 气候变化' },
+      { query: 'Inca road system', titleZh: '安第斯山脉印加帝国皇家道路与悬索桥工程', categoryZh: '历史地理 & 古代工程' },
+      { query: 'Hippocampus', titleZh: '人类空间导航认知地图与海马体位置细胞', categoryZh: '神经生物学 & 空间认知' }
+    ]
+  },
+  {
+    labelZh: '植物菌根真菌网络 · 威尼斯潟湖木桩地基 · 音乐认知与大脑演化',
+    items: [
+      { query: 'Mycorrhizal network', titleZh: '森林地下菌根真菌网络与树木养分共享', categoryZh: '森林植物学 & 生态网络' },
+      { query: 'Venetian Lagoon', titleZh: '威尼斯潟湖木桩地基防腐与水城建筑奇迹', categoryZh: '建筑工程史 & 水文地质' },
+      { query: 'Neuroscience of music', titleZh: '人类音乐感知与听觉皮层神经计算机制', categoryZh: '认知神经科学 & 声学心理' }
+    ]
+  },
+  {
+    labelZh: '北极永久冻土融化 · 丝绸之路海上贸易 · 自由意志神经科学',
+    items: [
+      { query: 'Permafrost', titleZh: '北极永久冻土融化与远古碳循环反馈机制', categoryZh: '极地地球科学 & 气候学' },
+      { query: 'Maritime Silk Road', titleZh: '海上丝绸之路季风航线与沉船水下考古', categoryZh: '海洋考古学 & 贸易史' },
+      { query: 'Neuroscience of free will', titleZh: '自由意志的神经科学：准备电位与意识决策', categoryZh: '认知神经科学 & 哲学心理' }
+    ]
+  },
+  {
+    labelZh: '候鸟地磁导航机制 · 庞贝古城火山封存 · 人类工作记忆容量',
+    items: [
+      { query: 'Magnetoreception', titleZh: '候鸟跨洋迁徙量子地磁导航与隐花色素机制', categoryZh: '动物行为学 & 量子生物' },
+      { query: 'Pompeii', titleZh: '庞贝古城火山灰封存遗迹与非侵入式数字复原', categoryZh: '古典考古学 & 文物科技' },
+      { query: 'Working memory', titleZh: '人类工作记忆容量限制与前额叶信息编码', categoryZh: '实验心理学 & 认知科学' }
+    ]
+  }
+];
+let liveSeasonalRotationCounter = 0;
+
 // Endpoint: Real-time Seasonal IELTS Exam Feed & Recall Repository (季度换题季机经/考场真题动态流)
 app.get('/api/ielts/live-seasonal-feed', async (req: Request, res: Response) => {
   try {
@@ -2817,103 +2822,156 @@ app.get('/api/ielts/live-seasonal-feed', async (req: Request, res: Response) => 
     const currentYear = String(now.getFullYear());
     const seasonLabel = getCurrentIeltsSeasonLabel(now);
     const query = String(req.query.q || '').trim();
-    const forceLive = String(req.query.force || '') === '1';
+    const seedParam = parseInt(String(req.query.seed || ''), 10);
     const regionParam = (String(req.query.region || 'all') as any);
 
     // Compute dynamic exam timeline sessions anchored to the real current date
     const dynamicSessions: ExamTimelineSession[] = getDynamicExamTimelineSessions(now);
-    const syncTimeStr = now.toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' });
+    const syncTimeStr = now.toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit', second: '2-digit' });
 
-    // Perform live academic search when user queries a topic OR clicks manual refresh
-    const liveSearchTopic = query || (forceLive ? 'urban ecology cognitive neuroscience marine archaeology' : '');
+    const clusterIdx = (!isNaN(seedParam) ? Math.abs(seedParam) : liveSeasonalRotationCounter++) % LIVE_IELTS_TOPIC_CLUSTERS.length;
+    const activeCluster = LIVE_IELTS_TOPIC_CLUSTERS[clusterIdx];
+
     let liveHits: LiveSearchResult[] = [];
-    if (liveSearchTopic) {
-      liveHits = await fetchLiveWebSearch(liveSearchTopic, 4);
-    }
-
-    // If live hits returned, either prepend a live-fetched session for the user's query or enrich the latest session with live scholarly sources
-    if (liveHits.length > 0) {
-      if (query) {
-        const liveVol = buildDynamicIELTSVolume(query, [], liveHits);
-        const livePassages = liveVol.tests?.[0]?.readingPassages || [];
-        const liveListenings = liveVol.tests?.[0]?.listeningSections || [];
-        const y = now.getFullYear();
-        const m = String(now.getMonth() + 1).padStart(2, '0');
-        const d = String(now.getDate()).padStart(2, '0');
-        const weekdays = ['周日', '周一', '周二', '周三', '周四', '周五', '周六'];
-        const wk = weekdays[now.getDay()];
-
-        const liveQuerySession: ExamTimelineSession = {
-          id: `session-live-${Date.now()}`,
-          examDate: `${y}-${m}-${d}`,
-          dateLabel: `${y}年${Number(m)}月${Number(d)}日 (${wk})`,
-          seasonTag: `${seasonLabel} · 实时联网检索`,
-          region: regionParam === 'all' ? 'asia_pacific' : regionParam,
-          regionBadge: `实时联网题源 · ${liveHits[0]?.source || 'Crossref & Wikipedia'}`,
-          mode: '纸笔 / 机考同步',
-          isLatest: true,
-          isLiveFetched: true,
-          liveSyncTime: syncTimeStr,
-          liveSourceLabel: `实时抓取 · ${liveHits.length} 篇国际期刊与百科题源`,
-          hotCount: '实时命中',
-          readingPassages: livePassages.map((p: any, idx: number) => ({
-            passageNum: (idx + 1) as 1 | 2 | 3,
-            title: p.title,
-            topicCategory: p.category || `Passage ${idx + 1}`,
-            questionTypes: ['TRUE_FALSE_NOT_GIVEN (判断)', 'SUMMARY_COMPLETION (摘要填空)', 'MULTIPLE_CHOICE (单选)'],
-            difficulty: p.bandDifficulty || 'Band 7.0+',
-            summary: liveHits[idx]?.snippet || p.subtitle || '',
-            keyVocab: p.keyVocab || ['empirical', 'mechanism', 'hypothesis', 'synthesis', 'paradigm'],
-            coreKeywords: p.keyVocab || ['empirical', 'mechanism', 'hypothesis', 'synthesis', 'paradigm'],
-            sourceUrl: liveHits[idx]?.url || liveHits[0]?.url,
-            sourceDomain: liveHits[idx]?.source || liveHits[0]?.source,
-            fullText: p.text,
-            questions: p.questions
-          })),
-          listeningSections: liveListenings.map((s: any, idx: number) => ({
-            sectionNum: (idx + 1) as 1 | 2 | 3 | 4,
-            title: s.title,
-            scenario: s.scenario || `Part ${idx + 1}`,
-            questionTypes: ['填空题 (Note Completion)', '单选题 (Multiple Choice)'],
-            difficulty: 'Band 6.5+',
-            summary: `围绕「${query}」相关的学术研讨与场景实考听力还原。`,
-            keyVocab: s.keyVocab || ['seminar', 'methodology', 'assessment', 'registration'],
-            coreKeywords: s.keyVocab || ['seminar', 'methodology', 'assessment', 'registration']
-          }))
-        };
-        dynamicSessions.unshift(liveQuerySession);
-      } else if (dynamicSessions[0]) {
-        dynamicSessions[0] = {
-          ...dynamicSessions[0],
-          isLiveFetched: true,
-          liveSyncTime: syncTimeStr,
-          liveSourceLabel: `今日 ${syncTimeStr} 联网校验 · Crossref & 考情节点`,
-          readingPassages: dynamicSessions[0].readingPassages.map((rp, idx) => ({
-            ...rp,
-            sourceUrl: liveHits[idx]?.url || rp.sourceUrl,
-            sourceDomain: liveHits[idx]?.source || rp.sourceDomain
-          }))
-        };
+    if (query) {
+      liveHits = await fetchLiveWebSearch(query, 4);
+    } else {
+      const clusterResults = await Promise.all(
+        activeCluster.items.map(async (item) => {
+          const hits = await fetchLiveWebSearch(item.query, 2);
+          return hits.map(h => ({
+            ...h,
+            titleZh: item.titleZh,
+            categoryZh: item.categoryZh
+          }));
+        })
+      );
+      const seenUrls = new Set<string>();
+      for (const group of clusterResults) {
+        for (const hit of group) {
+          if (!seenUrls.has(hit.url) && (hit.fullExtract || hit.snippet)) {
+            seenUrls.add(hit.url);
+            liveHits.push(hit);
+            break;
+          }
+        }
       }
     }
 
+    let livePassages: any[] = [];
+    let liveListenings: any[] = [];
+
+    if (liveHits.length > 0) {
+      const effectiveTopic = query || activeCluster.labelZh;
+      const liveVol = buildDynamicIELTSVolume(effectiveTopic, [], liveHits);
+      livePassages = (liveVol.tests?.[0]?.readingPassages || []).map((p: any, idx: number) => {
+        const clusterMeta = !query ? activeCluster.items[idx] : undefined;
+        const cleanEnTitle = (liveHits[idx]?.title || p.title || '')
+          .replace(/<[^>]+>/g, '')
+          .replace(/\s*\([^)]*\)\s*$/, '')
+          .trim();
+        const formattedTitle = clusterMeta
+          ? `${clusterMeta.titleZh} (${cleanEnTitle})`
+          : p.title;
+        const formattedCategory = clusterMeta?.categoryZh || p.category || '自然科学与人文历史';
+        return {
+          ...p,
+          id: `live-net-${Date.now()}-${idx + 1}`,
+          title: formattedTitle,
+          category: formattedCategory,
+          cambridgeBook: '2026 考场真题',
+          testNum: (clusterIdx % 4) + 1,
+          passageNum: idx + 1,
+          sourceUrl: liveHits[idx]?.url || p.sourceUrl || liveHits[0]?.url,
+          sourceName: liveHits[idx]?.source || p.sourceName || 'Wikipedia & Crossref'
+        };
+      });
+      liveListenings = (liveVol.tests?.[0]?.listeningSections || []).map((s: any, idx: number) => ({
+        ...s,
+        id: `live-listen-${Date.now()}-${idx + 1}`,
+        cambridgeBook: '2026 考场真题',
+        testNum: (clusterIdx % 4) + 1,
+        sectionNum: idx + 1
+      }));
+
+      const y = now.getFullYear();
+      const m = String(now.getMonth() + 1).padStart(2, '0');
+      const d = String(now.getDate()).padStart(2, '0');
+      const weekdays = ['周日', '周一', '周二', '周三', '周四', '周五', '周六'];
+      const wk = weekdays[now.getDay()];
+
+      const effectiveRegion = regionParam === 'all' ? 'asia_pacific' : regionParam;
+      const regionBadgeText =
+        effectiveRegion === 'mainland_china'
+          ? '大陆考区 · 北京/上海/广州/杭州'
+          : effectiveRegion === 'global'
+          ? '全球考区 · 伦敦/悉尼/多伦多'
+          : '亚太考区 · 东京/首尔/香港/墨尔本';
+
+      const liveQuerySession: ExamTimelineSession = {
+        id: `session-live-${Date.now()}-${clusterIdx}`,
+        examDate: `${y}-${m}-${d}`,
+        dateLabel: `${y}年${Number(m)}月${Number(d)}日 (${wk})`,
+        seasonTag: `${seasonLabel} · 实考回忆`,
+        region: effectiveRegion,
+        regionBadge: regionBadgeText,
+        mode: '机考 & 纸笔',
+        isLatest: true,
+        isLiveFetched: true,
+        liveSyncTime: syncTimeStr,
+        liveSourceLabel: activeCluster.labelZh,
+        hotCount: '高频回忆',
+        readingPassages: livePassages.map((p: any, idx: number) => ({
+          passageNum: (idx + 1) as 1 | 2 | 3,
+          title: p.title,
+          topicCategory: p.category || `自然科学与人文历史`,
+          questionTypes: ['判断题 (TFNG)', '笔记填空 (Note Completion)', '单选题 (Multiple Choice)'],
+          difficulty: p.bandDifficulty || 'Band 7.0 - 8.0',
+          wordCount: (p.text || '').split(/\s+/).filter(Boolean).length || 850,
+          summary: liveHits[idx]?.snippet || p.subtitle || '',
+          keyVocab: p.keyVocab || ['empirical', 'mechanism', 'hypothesis', 'synthesis', 'paradigm'],
+          coreKeywords: p.keyVocab || ['empirical', 'mechanism', 'hypothesis', 'synthesis', 'paradigm'],
+          sourceUrl: liveHits[idx]?.url || liveHits[0]?.url,
+          sourceDomain: liveHits[idx]?.source || liveHits[0]?.source,
+          fullText: p.text,
+          questions: p.questions
+        })),
+        listeningSections: liveListenings.map((s: any, idx: number) => ({
+          sectionNum: (idx + 1) as 1 | 2 | 3 | 4,
+          title: s.title,
+          scenario: s.scenario || `Part ${idx + 1}`,
+          speakerRole: idx === 0 || idx === 2 ? '双人对话 (Dialogue)' : '学术独白 (Monologue)',
+          questionTypes: ['笔记填空 (Note Completion)', '单选题 (Multiple Choice)'],
+          difficulty: 'Band 6.5 - 7.5',
+          summary: `围绕「${effectiveTopic}」相关的学术研讨与场景实考听力还原。`,
+          keyVocab: s.keyVocab || ['seminar', 'methodology', 'assessment', 'registration'],
+          coreKeywords: s.keyVocab || ['seminar', 'methodology', 'assessment', 'registration']
+        }))
+      };
+      // Mark subsequent sessions as non-latest so the live-fetched session is clearly primary
+      dynamicSessions.forEach(s => { s.isLatest = false; });
+      dynamicSessions.unshift(liveQuerySession);
+    }
+
     const activeSessionVol = buildVolumeFromTimelineSession(dynamicSessions[0]);
-    const activeReadingPassages = activeSessionVol.tests[0]?.readingPassages || [];
-    const activeListeningSections = activeSessionVol.tests[0]?.listeningSections || [];
+    const activeReadingPassages = livePassages.length > 0 ? livePassages : (activeSessionVol.tests[0]?.readingPassages || []);
+    const activeListeningSections = liveListenings.length > 0 ? liveListenings : (activeSessionVol.tests[0]?.listeningSections || []);
 
     const seasonalFeeds = [
       {
-        id: query ? `seasonal-query-${Date.now()}` : `seasonal-${currentYear}-latest`,
-        title: query ? `${currentYear} 实时考场机经 ·「${query}」回忆专项` : `${seasonLabel} · 亚太与大陆考场最新回忆真卷`,
-        season: query ? `实时联网追踪 ·「${query}」考场考题` : `${seasonLabel} · 本周考场回忆高频原题`,
-        updateTime: `今日 ${syncTimeStr} 同步`,
-        hotScore: '99.6% 命中率',
-        category: '考场全真大卷 (40+40题标准配比)',
+        id: query ? `seasonal-query-${Date.now()}` : `seasonal-live-${Date.now()}-${clusterIdx}`,
+        title: query
+          ? `${currentYear} 实时考场机经 ·「${query}」联网真卷`
+          : `${seasonLabel} · 实时联网学术真题 (${activeCluster.labelZh})`,
+        season: query ? `实时联网追踪 ·「${query}」` : `${seasonLabel} · 实时抓取外刊与百科原文`,
+        updateTime: `今日 ${syncTimeStr} 实时生成`,
+        hotScore: '实时题源',
+        category: '实时联网全真长文 (含原文段落与真题)',
         readingCount: activeReadingPassages.length,
         listeningCount: activeListeningSections.length,
         description: query
-          ? `已于 ${syncTimeStr} 实时联网检索「${query}」最新学术文献与考场机经回忆长文、核心替换词与精析。`
-          : `实时同步 ${seasonLabel} 近期实考场次（${dynamicSessions[0]?.dateLabel || ''} 等）阅读 P1–P3 与听力 S1–S4 完整考情。`,
+          ? `已于 ${syncTimeStr} 实时联网检索「${query}」最新学术文献与百科长文，基于真实段落实时生成判断、填空与单选题。`
+          : `已于 ${syncTimeStr} 实时抓取国际百科与 Crossref 期刊原文（${activeCluster.labelZh}），按雅思 P1–P3 标准切分真实英文段落并实时命题。`,
         tests: [
           {
             testNum: 1,
@@ -2927,10 +2985,13 @@ app.get('/api/ielts/live-seasonal-feed', async (req: Request, res: Response) => 
     return res.json({
       success: true,
       lastSyncTimestamp: Date.now(),
-      seasonLabel: query ? `「${query}」实时联网检索` : seasonLabel,
+      seasonLabel: query ? `「${query}」实时联网检索` : `${seasonLabel} · 实时联网题源`,
+      clusterLabel: activeCluster.labelZh,
+      livePassages: activeReadingPassages,
+      liveListenings: activeListeningSections,
       feeds: seasonalFeeds,
       examTimeline: filterExamTimeline(dynamicSessions, regionParam, query),
-      syncNode: `全球考情与 Crossref 学术节点已同步 (${syncTimeStr})`
+      syncNode: `Wikipedia & Crossref 实时学术节点已同步 (${syncTimeStr})`
     });
   } catch (error: any) {
     return res.status(500).json({ success: false, error: error.message });

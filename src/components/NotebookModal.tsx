@@ -4,7 +4,7 @@ import { useLiveQuery } from 'dexie-react-hooks';
 import { db, cycleWordMastery, setWordMastery, bulkUpdateMastery, bulkAddTags, bulkDeleteWords, recordWordReview } from '../db';
 import { WordItem, MasteryLevel } from '../types';
 import { useAppStore } from '../store/useAppStore';
-import { speakWord } from '../utils/audioEngine';
+import { speakWord, speakWordIfAutoEnabled } from '../utils/audioEngine';
 import { MasteryBadge, MASTERY_CONFIG } from './MasteryBadge';
 import { formatPartOfSpeech } from '../utils/lyricDictionary';
 import { calculateEbbinghausRetention } from '../utils/vocabEngine';
@@ -240,7 +240,7 @@ export const NotebookModal: React.FC<NotebookModalProps> = ({ isOpen, onClose })
     setIsFlashcardOpen(true);
 
     if (deck[0]) {
-      setTimeout(() => speakWord(deck[0].word, 'en-GB'), 180);
+      setTimeout(() => speakWordIfAutoEnabled(deck[0].word), 180);
     }
   };
 
@@ -257,7 +257,7 @@ export const NotebookModal: React.FC<NotebookModalProps> = ({ isOpen, onClose })
     setIsFlashcardFlipped(false);
     setFlashcardIndex(nextIdx);
     if (flashcardDeck[nextIdx]) {
-      setTimeout(() => speakWord(flashcardDeck[nextIdx].word, 'en-GB'), 140);
+      setTimeout(() => speakWordIfAutoEnabled(flashcardDeck[nextIdx].word), 140);
     }
   };
 
@@ -303,7 +303,7 @@ export const NotebookModal: React.FC<NotebookModalProps> = ({ isOpen, onClose })
     setFlashcardIndex(nextIdx);
 
     if (nextIdx < flashcardDeck.length) {
-      setTimeout(() => speakWord(flashcardDeck[nextIdx].word, 'en-GB'), 160);
+      setTimeout(() => speakWordIfAutoEnabled(flashcardDeck[nextIdx].word), 160);
     }
   };
 

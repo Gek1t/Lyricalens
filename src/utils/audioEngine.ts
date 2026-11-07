@@ -22,6 +22,22 @@ export function isAutoPronounceEnabled(): boolean {
   return true; // Default auto pronounce
 }
 
+export function setAutoPronounceEnabled(enabled: boolean): void {
+  try {
+    localStorage.setItem('lyricalens_auto_pronounce', String(enabled));
+    if (!enabled && typeof window !== 'undefined' && 'speechSynthesis' in window) {
+      window.speechSynthesis.cancel();
+    }
+  } catch {
+    // ignore
+  }
+}
+
+export function speakWordIfAutoEnabled(text: string, accent?: 'en-GB' | 'en-US'): void {
+  if (!isAutoPronounceEnabled()) return;
+  speakWord(text, accent);
+}
+
 // Pronounce a word with chosen accent ('en-GB' for UK, 'en-US' for US)
 export function speakWord(text: string, accent?: 'en-GB' | 'en-US'): void {
   if (!('speechSynthesis' in window)) {

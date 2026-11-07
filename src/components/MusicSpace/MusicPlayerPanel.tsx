@@ -771,7 +771,6 @@ export const MusicPlayerPanel: React.FC<MusicPlayerPanelProps> = ({ onOpenNotebo
     });
 
     openWordDetail(collected);
-    speakWord(cleanWord, 'en-GB');
   };
 
   const handleSeek = (e: React.ChangeEvent<HTMLInputElement>) => {

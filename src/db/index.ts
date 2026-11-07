@@ -1,6 +1,7 @@
 import { triggerDebouncedCloudSync, recordWordDeletion } from './cloudSync';
 import Dexie, { type EntityTable } from 'dexie';
 import { WordItem, SongItem, IELTSTestRecord, MasteryLevel } from '../types';
+export type { IELTSTestRecord, IELTSTestRecord as IeltsTestRecord };
 import { CambridgePassage } from '../data/ieltsPassages';
 import { IELTSListeningSection } from '../data/ieltsListening';
 import { SEED_WORDS, SEED_SONGS, SEED_IELTS_TESTS } from './seedData';

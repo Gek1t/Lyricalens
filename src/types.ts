@@ -122,6 +122,7 @@ export interface IELTSTestRecord {
   questions: IELTSQuestion[];
   answers: Record<number, string>;
   conqueredWords: string[];
+  wrongQuestionDetails?: any[];
 }
 
 export interface ARDetectedObject {

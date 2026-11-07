@@ -381,18 +381,21 @@ export const OnlineIELTSSearchModal: React.FC<OnlineIELTSSearchModalProps> = ({
   };
 
   // Fetch real-time seasonal exam feed (with live server Crossref/Wikipedia grounding & client fallback)
+  const [feedSeed, setFeedSeed] = useState<number>(0);
   const fetchSeasonalFeed = async (isManual = false, query = '', region = timelineRegionFilter) => {
     setIsLoadingFeeds(true);
     const startTime = Date.now();
+    const nextSeed = isManual ? feedSeed + 1 : feedSeed;
+    if (isManual) setFeedSeed(nextSeed);
     let loadedFromServer = false;
     try {
       if (!Capacitor.isNativePlatform() && navigator.onLine) {
         const qParam = query.trim() ? `&q=${encodeURIComponent(query.trim())}` : '';
         const rParam = region ? `&region=${region}` : '';
-        const forceParam = isManual || query.trim() ? '&force=1' : '&force=1';
+        const seedParam = `&seed=${nextSeed}`;
         const controller = new AbortController();
-        const timeoutId = setTimeout(() => controller.abort(), 12000);
-        const res = await fetch(`/api/ielts/live-seasonal-feed?_t=${Date.now()}${qParam}${rParam}${forceParam}`, { signal: controller.signal });
+        const timeoutId = setTimeout(() => controller.abort(), 14000);
+        const res = await fetch(`/api/ielts/live-seasonal-feed?_t=${Date.now()}${qParam}${rParam}${seedParam}&force=1`, { signal: controller.signal });
         clearTimeout(timeoutId);
         if (res.ok) {
           const data = await res.json();
@@ -402,6 +405,11 @@ export const OnlineIELTSSearchModal: React.FC<OnlineIELTSSearchModalProps> = ({
           }
           if (data.examTimeline && Array.isArray(data.examTimeline) && data.examTimeline.length > 0) {
             setTimelineSessions(data.examTimeline);
+            setExpandedSessionIds(prev => {
+              const next = new Set(prev);
+              if (data.examTimeline[0]?.id) next.add(data.examTimeline[0].id);
+              return next;
+            });
             loadedFromServer = true;
           }
         }
@@ -440,7 +448,7 @@ export const OnlineIELTSSearchModal: React.FC<OnlineIELTSSearchModalProps> = ({
     setLastFeedRefreshedTime(nowStr);
     setIsLoadingFeeds(false);
     if (isManual) {
-      showToast(query ? `已检索「${query}」考场机经回忆` : `已刷新考场回忆真题库（${nowStr} 最新同步）`);
+      showToast(query ? `已实时联网抓取「${query}」真题长文` : `已实时换一批最新国际学术真题（${nowStr} 同步）`);
     }
   };
 
@@ -892,35 +900,24 @@ export const OnlineIELTSSearchModal: React.FC<OnlineIELTSSearchModalProps> = ({
                         placeholder={
                           activeTab === 'my-library'
                             ? '在个人馆藏中筛选话题、标题或考次...'
-                            : '输入任意学术话题回车联网检索（如：微塑料、双语认知、深海热泉、古罗马建筑）...'
+                            : '在当前考季机经中筛选话题、城市或关键词...'
                         }
-                        className="w-full pl-9 pr-24 py-2 text-xs rounded-2xl bg-[#FDFBF7] dark:bg-white/[0.06] border border-stone-900/[0.08] dark:border-white/[0.08] focus:outline-none focus:border-stone-900/25 dark:focus:border-white/25 text-stone-800 dark:text-stone-200 placeholder:text-stone-400"
+                        className="w-full pl-9 pr-9 py-2 text-xs rounded-2xl bg-[#FDFBF7] dark:bg-white/[0.06] border border-stone-900/[0.08] dark:border-white/[0.08] focus:outline-none focus:border-stone-900/25 dark:focus:border-white/25 text-stone-800 dark:text-stone-200 placeholder:text-stone-400"
                       />
-                      <div className="absolute right-2 flex items-center gap-1">
-                        {feedSearchQuery && (
-                          <button
-                            type="button"
-                            onClick={() => {
-                              setFeedSearchQuery('');
-                              if (activeTab === 'live-feed') {
-                                fetchSeasonalFeed(true, '', timelineRegionFilter);
-                              }
-                            }}
-                            className="p-1 text-stone-400 hover:text-stone-700 dark:hover:text-stone-200 cursor-pointer"
-                          >
-                            <X className="w-3.5 h-3.5" />
-                          </button>
-                        )}
-                        {activeTab === 'live-feed' && feedSearchQuery.trim() && (
-                          <button
-                            type="button"
-                            onClick={() => fetchSeasonalFeed(true, feedSearchQuery, timelineRegionFilter)}
-                            className="px-2 py-1 rounded-lg bg-[#516050] text-white text-[11px] font-medium hover:bg-[#3F4C3E] transition-colors cursor-pointer"
-                          >
-                            联网搜
-                          </button>
-                        )}
-                      </div>
+                      {feedSearchQuery && (
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setFeedSearchQuery('');
+                            if (activeTab === 'live-feed') {
+                              fetchSeasonalFeed(true, '', timelineRegionFilter);
+                            }
+                          }}
+                          className="absolute right-2.5 p-1 text-stone-400 hover:text-stone-700 dark:hover:text-stone-200 cursor-pointer"
+                        >
+                          <X className="w-3.5 h-3.5" />
+                        </button>
+                      )}
                     </div>
                   </motion.div>
                 )}
@@ -1231,11 +1228,6 @@ export const OnlineIELTSSearchModal: React.FC<OnlineIELTSSearchModalProps> = ({
                                       最新考次
                                     </span>
                                   )}
-                                  {session.isLiveFetched && (
-                                    <span className="px-1.5 py-0.5 rounded-md bg-[#516050]/12 text-[10px] font-semibold text-[#516050] dark:text-[#8FB996] border border-[#516050]/20 shrink-0">
-                                      {session.liveSourceLabel || '实时联网同步'}
-                                    </span>
-                                  )}
                                   <span className="font-mono uppercase tracking-wider text-stone-500 dark:text-stone-400">
                                     {monthStr} {yearStr} {weekdayStr}
                                   </span>
@@ -1423,19 +1415,7 @@ export const OnlineIELTSSearchModal: React.FC<OnlineIELTSSearchModalProps> = ({
                                                       })}
                                                     </div>
                                                   )}
-                                                  <div className="pt-1 flex items-center justify-between gap-2 flex-wrap">
-                                                    {rp.sourceUrl ? (
-                                                      <a
-                                                        href={rp.sourceUrl}
-                                                        target="_blank"
-                                                        rel="noreferrer"
-                                                        className="inline-flex items-center gap-1 text-[11px] text-[#516050] dark:text-[#8FB996] hover:underline"
-                                                      >
-                                                        <Globe className="w-3 h-3" />
-                                                        <span>题源期刊：{rp.sourceDomain || 'Crossref / Academic Archive'}</span>
-                                                        <ExternalLink className="w-2.5 h-2.5" />
-                                                      </a>
-                                                    ) : <span />}
+                                                  <div className="pt-1 flex items-center justify-end gap-2">
                                                     {fullPassage && (
                                                       <button
                                                         type="button"
@@ -1953,42 +1933,6 @@ export const OnlineIELTSSearchModal: React.FC<OnlineIELTSSearchModalProps> = ({
                             <p className="text-[11px] text-stone-500 dark:text-stone-400">
                               {compiledVolume.description}
                             </p>
-                          )}
-
-                          {effectiveFoundArticles.length > 0 && (
-                            <div className="pt-2 space-y-1.5">
-                              <div className="flex items-center gap-1.5 text-[11px] font-medium text-[#516050] dark:text-[#8FB996]">
-                                <Globe className="w-3 h-3" />
-                                <span>实时联网命中学术文献与题源 ({effectiveFoundArticles.length} 篇)</span>
-                              </div>
-                              <div className="grid grid-cols-1 gap-1.5">
-                                {effectiveFoundArticles.slice(0, 3).map((art, aIdx) => (
-                                  <div
-                                    key={aIdx}
-                                    className="px-2.5 py-1.5 rounded-xl bg-stone-900/[0.03] dark:bg-white/[0.04] flex items-center justify-between gap-2 text-[11px]"
-                                  >
-                                    <div className="min-w-0 flex-1 truncate text-stone-700 dark:text-stone-300">
-                                      <span className="font-mono text-stone-400 mr-1.5">[P{aIdx + 1}题源]</span>
-                                      <span className="font-medium">{art.title}</span>
-                                      {art.source && (
-                                        <span className="text-stone-400 ml-1.5">· {art.source}</span>
-                                      )}
-                                    </div>
-                                    {art.url && (
-                                      <a
-                                        href={art.url}
-                                        target="_blank"
-                                        rel="noreferrer"
-                                        className="shrink-0 inline-flex items-center gap-0.5 text-[#516050] dark:text-[#8FB996] hover:underline"
-                                      >
-                                        <span>原文</span>
-                                        <ExternalLink className="w-2.5 h-2.5" />
-                                      </a>
-                                    )}
-                                  </div>
-                                ))}
-                              </div>
-                            </div>
                           )}
                         </div>
 

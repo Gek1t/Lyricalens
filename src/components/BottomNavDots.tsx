@@ -18,6 +18,8 @@ export const BottomNavDots: React.FC = () => {
   const isNotebookOpen = useAppStore(s => s.isNotebookOpen);
   const isCambridgeSelectorOpen = useAppStore(s => s.isCambridgeSelectorOpen);
   const isAssessmentModalOpen = useAppStore(s => s.isAssessmentModalOpen);
+  const isOnlineSearchOpen = useAppStore(s => s.isOnlineSearchOpen);
+  const ieltsViewMode = useAppStore(s => s.ieltsViewMode);
 
   // Hide 3 dots when taking a test / viewing passage, or when drawers/sheets are open
   const isHidden =
@@ -26,14 +28,16 @@ export const BottomNavDots: React.FC = () => {
     isFullscreenLyricsOpen ||
     isVocabRadarOpen ||
     isQuizDrawerOpen ||
+    (activeSpace === 2 && ieltsViewMode !== 'hub') ||
     Boolean(activePassageData) ||
     Boolean(activeListeningSectionData) ||
     isPersonalHubOpen ||
     isNotebookOpen ||
     isCambridgeSelectorOpen ||
+    isOnlineSearchOpen ||
     isAssessmentModalOpen;
 
-  // Use light translucent dots when over camera viewfinder (Space 0) or in dark mode
+  // Use light translucent dots when over dark camera viewfinder in Space 0 or in dark mode
   const isLightDots = isDark || activeSpace === 0;
 
   return (

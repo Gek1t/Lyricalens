@@ -2,12 +2,16 @@ import React, { useState, useMemo } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
 import { useLiveQuery } from 'dexie-react-hooks';
 import { BookOpen, Check, Sparkles, ChevronRight, ChevronDown, Flame, ArrowRight, Globe } from 'lucide-react';
-import { CAMBRIDGE_IELTS_PASSAGES, getPassagesWithHitStats } from '../../data/ieltsPassages';
 import { formatBookNameZh } from '../../data/ieltsTopicSynonyms';
+import {
+  getCompleteWorkbookPassages,
+  computeWordHitMapForPassages,
+  normalizeVolumeKey
+} from '../../utils/ieltsWorkbookEngine';
 import { useAppStore } from '../../store/useAppStore';
 import { db } from '../../db';
 
-const QUICK_BOOK_FILTERS = ['ALL', 'Cambridge 19', 'Cambridge 18'];
+const QUICK_BOOK_FILTERS = ['ALL', '2026 考场真题', 'Cambridge 20', 'Cambridge 19'];
 
 export const CambridgePassageSelectorModal: React.FC = () => {
   const isCambridgeSelectorOpen = useAppStore(s => s.isCambridgeSelectorOpen);
@@ -24,16 +28,28 @@ export const CambridgePassageSelectorModal: React.FC = () => {
   const customPassages = useLiveQuery(() => db.customPassages.toArray()) || [];
   const userWordStrings = useMemo(() => allDbWords.map(w => w.word), [allDbWords]);
 
-  // Real-time hit calculation against notebook words
+  const completePassages = useMemo(
+    () => getCompleteWorkbookPassages(customPassages),
+    [customPassages]
+  );
+
+  // Real-time hit calculation against notebook words across all workbook passages
   const passagesWithHits = useMemo(() => {
-    return getPassagesWithHitStats(userWordStrings, customPassages);
-  }, [userWordStrings, customPassages]);
+    const hitMap = computeWordHitMapForPassages(completePassages, userWordStrings);
+    return completePassages.map(passage => {
+      const hitInfo = hitMap[passage.id] || { count: 0, matchedWords: [] };
+      return {
+        passage,
+        matchedWords: hitInfo.matchedWords,
+        hitCount: hitInfo.count
+      };
+    });
+  }, [completePassages, userWordStrings]);
 
   const availableBooks = useMemo(() => {
-    const allList = [...customPassages, ...CAMBRIDGE_IELTS_PASSAGES];
-    const books = Array.from(new Set(allList.map(p => p.cambridgeBook)));
+    const books = Array.from(new Set(completePassages.map(p => normalizeVolumeKey(p.cambridgeBook))));
     return ['ALL', ...books];
-  }, [customPassages]);
+  }, [completePassages]);
 
   const extraBooks = useMemo(() => {
     return availableBooks.filter(b => !QUICK_BOOK_FILTERS.includes(b));
@@ -56,13 +72,15 @@ export const CambridgePassageSelectorModal: React.FC = () => {
   const getBookHitCount = (book: string) => {
     const list = book === 'ALL'
       ? passagesWithHits
-      : passagesWithHits.filter(p => p.passage.cambridgeBook === book);
+      : passagesWithHits.filter(p => normalizeVolumeKey(p.passage.cambridgeBook) === book);
     return list.reduce((sum, p) => sum + p.hitCount, 0);
   };
 
   const filteredPassages = useMemo(() => {
     if (selectedBookFilter === 'ALL') return passagesWithHits;
-    return passagesWithHits.filter(item => item.passage.cambridgeBook === selectedBookFilter);
+    return passagesWithHits.filter(
+      item => normalizeVolumeKey(item.passage.cambridgeBook) === selectedBookFilter
+    );
   }, [passagesWithHits, selectedBookFilter]);
 
   const handleClose = () => {

@@ -2,7 +2,6 @@ import React, { useState, useMemo } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
 import { useLiveQuery } from 'dexie-react-hooks';
 import { IELTSTestRecord } from '../../types';
-import { speakWord } from '../../utils/audioEngine';
 import { lookupWord } from '../../utils/lyricDictionary';
 import { db } from '../../db';
 import { useAppStore } from '../../store/useAppStore';
@@ -109,7 +108,6 @@ export const ArchiveReviewModal: React.FC<ArchiveReviewModalProps> = ({
         wordData = await lookupWord(cleaned);
       }
       openWordDetail(wordData, heroRect, 'drawer');
-      speakWord(cleaned, 'en-GB');
     } catch (err) {
       console.warn('Failed to load word detail:', err);
     }

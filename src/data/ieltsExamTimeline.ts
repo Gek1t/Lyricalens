@@ -37,11 +37,13 @@ export interface ExamTimelineSession {
   id: string;
   examDate: string; // e.g. "2026-10-24"
   dateLabel: string; // e.g. "2026年10月24日 (周六)"
+  seasonTag?: string;
   region: 'asia_pacific' | 'mainland_china' | 'global';
   regionBadge: string; // e.g. "亚太卷 · 香港/曼谷/墨尔本"
   mode: '机考 & 纸笔' | '机考专场' | '纸笔全国统考';
-  recallAccuracy: number; // e.g. 96
-  hotScore: string; // e.g. "99.4% 命中"
+  recallAccuracy?: number; // e.g. 96
+  hotScore?: string; // e.g. "99.4% 命中"
+  hotCount?: string;
   isLatest: boolean;
   isLiveFetched?: boolean;
   liveSyncTime?: string;
@@ -54,7 +56,7 @@ export interface ExamTimelineSession {
   };
   readingPassages: ExamTimelineReadingItem[];
   listeningSections: ExamTimelineListeningItem[];
-  volumeId: string;
+  volumeId?: string;
 }
 
 const WEEKDAY_NAMES_ZH = ['周日', '周一', '周二', '周三', '周四', '周五', '周六'];
@@ -336,7 +338,7 @@ function buildCoherentListeningFromTimelineItem(
     durationSec: 260,
     keyVocab: keywords,
     scriptParagraphs,
-    questions
+    questions: questions as any
   };
 }
 
