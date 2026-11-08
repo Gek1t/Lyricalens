@@ -19,6 +19,7 @@ export const BottomNavDots: React.FC = () => {
   const isCambridgeSelectorOpen = useAppStore(s => s.isCambridgeSelectorOpen);
   const isAssessmentModalOpen = useAppStore(s => s.isAssessmentModalOpen);
   const isOnlineSearchOpen = useAppStore(s => s.isOnlineSearchOpen);
+  const isAudioQualityModalOpen = useAppStore(s => s.isAudioQualityModalOpen);
   const ieltsViewMode = useAppStore(s => s.ieltsViewMode);
 
   // Hide 3 dots when taking a test / viewing passage, or when drawers/sheets are open
@@ -27,6 +28,7 @@ export const BottomNavDots: React.FC = () => {
     isWordSheetOpen ||
     isFullscreenLyricsOpen ||
     isVocabRadarOpen ||
+    isAudioQualityModalOpen ||
     isQuizDrawerOpen ||
     (activeSpace === 2 && ieltsViewMode !== 'hub') ||
     Boolean(activePassageData) ||

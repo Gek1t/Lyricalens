@@ -1560,7 +1560,7 @@ export const MusicPlayerPanel: React.FC<MusicPlayerPanelProps> = ({ onOpenNotebo
               initial={{ opacity: 0 }}
               animate={{ opacity: 1 }}
               exit={{ opacity: 0 }}
-              transition={{ duration: 0.32, ease: [0.22, 1, 0.36, 1] }}
+              transition={{ duration: 0.25, ease: [0.22, 1, 0.36, 1] }}
               className="absolute inset-0 bg-stone-950/45 dark:bg-black/75"
               onClick={() => setIsQualityModalOpen(false)}
             />
@@ -1572,7 +1572,7 @@ export const MusicPlayerPanel: React.FC<MusicPlayerPanelProps> = ({ onOpenNotebo
               initial={{ y: '100%' }}
               animate={{ y: 0 }}
               exit={{ y: '100%' }}
-              transition={{ type: 'spring', damping: 34, stiffness: 185, mass: 1.05 }}
+              transition={{ type: 'spring', damping: 32, stiffness: 235, mass: 0.92 }}
               onTouchStart={(e) => e.stopPropagation()}
               onTouchMove={(e) => e.stopPropagation()}
               className="relative w-full rounded-t-3xl bg-white dark:bg-[#1C1C1E] border-t border-stone-200/80 dark:border-white/10 shadow-2xl p-5 pb-8 z-10"
