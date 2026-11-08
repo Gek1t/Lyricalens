@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react';
-import { motion, AnimatePresence } from 'motion/react';
+import { motion, AnimatePresence, useDragControls } from 'motion/react';
 import { useLiveQuery } from 'dexie-react-hooks';
 import { useAppStore } from '../../store/useAppStore';
 import { db } from '../../db';
@@ -75,6 +75,7 @@ export const PlaylistDrawer: React.FC = () => {
   const [activeFilter, setActiveFilter] = useState<PlaylistFilterType>('ALL');
   const playlistContainerRef = useRef<HTMLDivElement | null>(null);
   const activeSongItemRef = useRef<HTMLDivElement | null>(null);
+  const dragControls = useDragControls();
 
   // Live Dexie query for user's vocabulary vault & due words
   const words = useLiveQuery(() => db.words.toArray(), []) || [];
@@ -263,6 +264,8 @@ export const PlaylistDrawer: React.FC = () => {
             animate={{ y: isExpanded ? '0%' : '20%' }}
             exit={{ y: '100%' }}
             drag="y"
+            dragListener={false}
+            dragControls={dragControls}
             dragConstraints={{ top: 0, bottom: 0 }}
             dragElastic={{ top: 0.08, bottom: 0.5 }}
             onDragStart={() => triggerHighRefreshBoost(1000)}
@@ -301,6 +304,7 @@ export const PlaylistDrawer: React.FC = () => {
             {/* Drag Pill Handle */}
             <div
               className="w-full flex flex-col items-center justify-center py-2.5 cursor-grab active:cursor-grabbing touch-none select-none group"
+              onPointerDown={(e) => dragControls.start(e)}
               onClick={() => {
                 triggerHighRefreshBoost(1000);
                 setIsExpanded(prev => !prev);
@@ -311,7 +315,14 @@ export const PlaylistDrawer: React.FC = () => {
             </div>
 
             {/* Header & Smart Spaced Sort Action */}
-            <div className="flex items-center justify-between pb-3 border-b border-stone-200/70 dark:border-slate-800/80 shrink-0">
+            <div
+              onPointerDown={(e) => {
+                if (!(e.target as HTMLElement)?.closest('button')) {
+                  dragControls.start(e);
+                }
+              }}
+              className="flex items-center justify-between pb-3 border-b border-stone-200/70 dark:border-slate-800/80 shrink-0 touch-none"
+            >
               <div>
                 <h4 className="font-serif-luxury text-lg font-medium text-stone-900 dark:text-stone-50">
                   Playlist
@@ -378,7 +389,8 @@ export const PlaylistDrawer: React.FC = () => {
             {/* Track list with smooth scrolling & auto-scroll support */}
             <div
               ref={playlistContainerRef}
-              className="flex-1 overflow-y-auto space-y-2.5 mt-3 min-h-0 select-none no-scrollbar"
+              className="flex-1 overflow-y-auto overscroll-contain touch-pan-y space-y-2.5 mt-3 min-h-0 select-none no-scrollbar"
+              onPointerDown={(e) => e.stopPropagation()}
               onTouchStart={(e) => e.stopPropagation()}
               onTouchMove={(e) => e.stopPropagation()}
             >
@@ -390,6 +402,7 @@ export const PlaylistDrawer: React.FC = () => {
                     <div
                       key={song.id}
                       ref={isCur ? activeSongItemRef : undefined}
+                      style={{ contentVisibility: 'auto', containIntrinsicSize: '0 74px' }}
                       onClick={() => handleSelectSong(originalIdx)}
                       className={`p-3 rounded-2xl flex items-center gap-3 cursor-pointer transition-transform duration-150 active:scale-[0.98] ${
                         isCur
