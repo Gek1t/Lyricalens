@@ -21,6 +21,11 @@
 
     --safe-top: env(safe-area-inset-top, 24px);
     --safe-bottom: env(safe-area-inset-bottom, 0px);
+    --android-safe-top: max(3.25rem, calc(env(safe-area-inset-top, 44px) + 0.85rem));
+    --device-fps: 60;
+    --frame-budget-ms: 16.67ms;
+    --spring-duration-space: 380ms;
+    --spring-duration-card: 340ms;
   }
 
   .dark {
@@ -100,42 +105,51 @@
   border: 1px solid rgba(255, 255, 255, 0.18);
 }
 
-/* Ambient breathing animations - Pure organic spatial motion & rich luminous diffusion */
+/* Ambient breathing animations - Pure GPU compositor 3D translation without texture re-rasterization */
 @keyframes ambientBreathe1 {
   0%, 100% {
-    transform: translate(0, 0) scale(1);
+    transform: translate3d(0, 0, 0);
   }
   50% {
-    transform: translate(4%, -4%) scale(1.12);
+    transform: translate3d(3.5%, -3.5%, 0);
   }
 }
 
 @keyframes ambientBreathe2 {
   0%, 100% {
-    transform: translate(0, 0) scale(1.06);
+    transform: translate3d(0, 0, 0);
   }
   50% {
-    transform: translate(-4%, 4%) scale(0.96);
+    transform: translate3d(-3.5%, 3.5%, 0);
   }
 }
 
 @keyframes ambientBreathe3 {
   0%, 100% {
-    transform: translate(0, 0) scale(1);
+    transform: translate3d(0, 0, 0);
   }
   50% {
-    transform: translate(3%, 5%) scale(1.10);
+    transform: translate3d(2.8%, 4%, 0);
   }
 }
 
 .animate-ambient-1 {
   animation: ambientBreathe1 12s ease-in-out infinite;
+  will-change: transform;
+  -webkit-backface-visibility: hidden;
+  backface-visibility: hidden;
 }
 .animate-ambient-2 {
   animation: ambientBreathe2 15s ease-in-out infinite;
+  will-change: transform;
+  -webkit-backface-visibility: hidden;
+  backface-visibility: hidden;
 }
 .animate-ambient-3 {
   animation: ambientBreathe3 18s ease-in-out infinite;
+  will-change: transform;
+  -webkit-backface-visibility: hidden;
+  backface-visibility: hidden;
 }
 
 /* Word fill animation for KTV lyrics */
@@ -225,14 +239,12 @@
   background-color: rgba(56, 189, 248, 0.2);
 }
 
-/* GPU Hardware Acceleration for Android WebView */
+/* GPU Hardware Acceleration for Android WebView (2D/3D layer promotion without redundant intermediate RenderSurface) */
 .hardware-accelerated {
   -webkit-transform: translate3d(0, 0, 0);
   transform: translate3d(0, 0, 0);
   -webkit-backface-visibility: hidden;
   backface-visibility: hidden;
   will-change: transform;
-  -webkit-transform-style: preserve-3d;
-  transform-style: preserve-3d;
 }
 

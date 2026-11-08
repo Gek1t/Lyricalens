@@ -40,6 +40,7 @@ interface MusicPlayerPanelProps {
 }
 
 export const MusicPlayerPanel: React.FC<MusicPlayerPanelProps> = ({ onOpenNotebook }) => {
+  const activeSpace = useAppStore(s => s.activeSpace);
   const songs = useAppStore(s => s.songs);
   const currentSongIndex = useAppStore(s => s.currentSongIndex);
   const isPlaying = useAppStore(s => s.isPlaying);
@@ -93,9 +94,10 @@ export const MusicPlayerPanel: React.FC<MusicPlayerPanelProps> = ({ onOpenNotebo
   useEffect(() => {
     const updateTime = () => {
       const now = new Date();
-      setRealTimeStr(now.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', hour12: false }));
+      const nextStr = now.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', hour12: false });
+      setRealTimeStr(prev => (prev === nextStr ? prev : nextStr));
     };
-    const timer = setInterval(updateTime, 1000);
+    const timer = setInterval(updateTime, 15000);
     return () => clearInterval(timer);
   }, []);
 
@@ -560,6 +562,7 @@ export const MusicPlayerPanel: React.FC<MusicPlayerPanelProps> = ({ onOpenNotebo
 
   // Trigger smooth compositor entry transition when song changes via buttons/auto-advance (when not already driven by gesture engine)
   const lastAnimatedSongIdRef = useRef<string>(currentSong.id);
+  const btnSwitchRafRef = useRef<number | null>(null);
   useEffect(() => {
     if (lastAnimatedSongIdRef.current === currentSong.id) return;
     lastAnimatedSongIdRef.current = currentSong.id;
@@ -571,6 +574,11 @@ export const MusicPlayerPanel: React.FC<MusicPlayerPanelProps> = ({ onOpenNotebo
 
     // Only trigger if useGestureEngine didn't already set up the vertical entry transform on this frame
     if (songTransitionDirection === 'left' || songTransitionDirection === 'right') {
+      if (btnSwitchRafRef.current !== null) {
+        cancelAnimationFrame(btnSwitchRafRef.current);
+        btnSwitchRafRef.current = null;
+      }
+
       const entryX = songTransitionDirection === 'right' ? 48 : -48;
       const textEntryX = songTransitionDirection === 'right' ? 18 : -18;
 
@@ -591,25 +599,36 @@ export const MusicPlayerPanel: React.FC<MusicPlayerPanelProps> = ({ onOpenNotebo
         quoteStage.style.opacity = '0';
       }
 
-      void wrapper.offsetHeight;
-      const enterSpring = 'transform 360ms cubic-bezier(0.16, 1, 0.3, 1), opacity 260ms cubic-bezier(0.16, 1, 0.3, 1)';
-      wrapper.style.transition = enterSpring;
-      (wrapper.style as any).webkitTransition = enterSpring;
-      wrapper.style.transform = 'translate3d(0, 0, 0) scale(1)';
-      (wrapper.style as any).webkitTransform = 'translate3d(0, 0, 0) scale(1)';
-      wrapper.style.opacity = '1';
+      btnSwitchRafRef.current = requestAnimationFrame(() => {
+        btnSwitchRafRef.current = requestAnimationFrame(() => {
+          btnSwitchRafRef.current = null;
+          const enterSpring = 'transform var(--spring-duration-card, 340ms) cubic-bezier(0.16, 1, 0.3, 1), opacity 250ms cubic-bezier(0.16, 1, 0.3, 1)';
+          wrapper.style.transition = enterSpring;
+          (wrapper.style as any).webkitTransition = enterSpring;
+          wrapper.style.transform = 'translate3d(0, 0, 0) scale(1)';
+          (wrapper.style as any).webkitTransform = 'translate3d(0, 0, 0) scale(1)';
+          wrapper.style.opacity = '1';
 
-      if (titleStage) {
-        titleStage.style.transition = enterSpring;
-        titleStage.style.transform = 'translate3d(0, 0, 0)';
-        titleStage.style.opacity = '1';
-      }
-      if (quoteStage) {
-        quoteStage.style.transition = enterSpring;
-        quoteStage.style.transform = 'translate3d(0, 0, 0)';
-        quoteStage.style.opacity = '1';
-      }
+          if (titleStage) {
+            titleStage.style.transition = enterSpring;
+            titleStage.style.transform = 'translate3d(0, 0, 0)';
+            titleStage.style.opacity = '1';
+          }
+          if (quoteStage) {
+            quoteStage.style.transition = enterSpring;
+            quoteStage.style.transform = 'translate3d(0, 0, 0)';
+            quoteStage.style.opacity = '1';
+          }
+        });
+      });
     }
+
+    return () => {
+      if (btnSwitchRafRef.current !== null) {
+        cancelAnimationFrame(btnSwitchRafRef.current);
+        btnSwitchRafRef.current = null;
+      }
+    };
   }, [currentSong.id, songTransitionDirection]);
 
   // Defer applying new audio src by 120ms on song switch so media decoder teardown never stalls frame 0 of the swipe animation
@@ -689,14 +708,40 @@ export const MusicPlayerPanel: React.FC<MusicPlayerPanelProps> = ({ onOpenNotebo
   activeLyricIndexRef.current = activeLyricIndex;
 
   useEffect(() => {
+    // Pause high-frequency VSync lyric polling when paused or when user is in AR Space (0) or IELTS Space (2)
+    if (!isPlaying || activeSpace !== 1) {
+      if (animationFrameRef.current) {
+        cancelAnimationFrame(animationFrameRef.current);
+        animationFrameRef.current = null;
+      }
+      return;
+    }
+
+    // Immediate state sync when entering Space 1 or resuming playback
+    if (audioRef.current) {
+      const syncTimeSec = audioRef.current.currentTime;
+      currentTimeRef.current = syncTimeSec;
+      if (!isFullscreenLyricsOpen) {
+        lastDispatchedTimeRef.current = syncTimeSec;
+        setCurrentTime(syncTimeSec);
+      }
+      const syncTimeMs = Math.max(0, (syncTimeSec + currentSongOffset) * 1000);
+      const syncIdx = findActiveLyricIndex(parsedLyrics, syncTimeMs);
+      if (syncIdx !== activeLyricIndexRef.current) {
+        activeLyricIndexRef.current = syncIdx;
+        setActiveLyricIndex(syncIdx);
+      }
+    }
+
     const updateLyricFrame = () => {
       const audio = audioRef.current;
       if (audio && isPlaying) {
         const curTimeSec = audio.currentTime;
         currentTimeRef.current = curTimeSec;
 
-        // Throttle global store time updates (~4-5Hz) to avoid 60Hz full React tree re-renders during animations
-        if (Math.abs(curTimeSec - lastDispatchedTimeRef.current) >= 0.22 || curTimeSec < 0.1) {
+        // Skip bottom seekbar store updates while FullscreenLyricsView is open (seekbar is hidden)
+        // Otherwise throttle global store time updates (~4Hz) to avoid 90/120Hz full React tree re-renders
+        if (!isFullscreenLyricsOpen && (Math.abs(curTimeSec - lastDispatchedTimeRef.current) >= 0.24 || curTimeSec < 0.08)) {
           lastDispatchedTimeRef.current = curTimeSec;
           setCurrentTime(curTimeSec);
         }
@@ -708,8 +753,8 @@ export const MusicPlayerPanel: React.FC<MusicPlayerPanelProps> = ({ onOpenNotebo
           activeLyricIndexRef.current = newActiveIdx;
           setActiveLyricIndex(newActiveIdx);
         }
+        animationFrameRef.current = requestAnimationFrame(updateLyricFrame);
       }
-      animationFrameRef.current = requestAnimationFrame(updateLyricFrame);
     };
 
     animationFrameRef.current = requestAnimationFrame(updateLyricFrame);
@@ -717,18 +762,42 @@ export const MusicPlayerPanel: React.FC<MusicPlayerPanelProps> = ({ onOpenNotebo
     return () => {
       if (animationFrameRef.current) {
         cancelAnimationFrame(animationFrameRef.current);
+        animationFrameRef.current = null;
       }
     };
-  }, [isPlaying, parsedLyrics, currentSongOffset, setCurrentTime, setActiveLyricIndex]);
+  }, [isPlaying, activeSpace, isFullscreenLyricsOpen, parsedLyrics, currentSongOffset, setCurrentTime, setActiveLyricIndex]);
 
   // Re-calculate active index immediately if offset or parsedLyrics change even while paused
   useEffect(() => {
-    const curTimeMs = Math.max(0, (currentTime + currentSongOffset) * 1000);
+    const curTimeSec = audioRef.current ? audioRef.current.currentTime : currentTimeRef.current;
+    const curTimeMs = Math.max(0, (curTimeSec + currentSongOffset) * 1000);
     const newActiveIdx = findActiveLyricIndex(parsedLyrics, curTimeMs);
-    if (newActiveIdx !== activeLyricIndex) {
+    if (newActiveIdx !== activeLyricIndexRef.current) {
+      activeLyricIndexRef.current = newActiveIdx;
       setActiveLyricIndex(newActiveIdx);
     }
-  }, [currentSongOffset, currentTime, parsedLyrics]);
+  }, [currentSongOffset, parsedLyrics, setActiveLyricIndex]);
+
+  const fallbackPalette = useMemo(() => ['#7C8F6E', '#C4AC82', '#A69880'], []);
+
+  const handleCloseFullscreenLyrics = useCallback(() => {
+    if (audioRef.current) {
+      const nowSec = audioRef.current.currentTime;
+      currentTimeRef.current = nowSec;
+      lastDispatchedTimeRef.current = nowSec;
+      setCurrentTime(nowSec);
+    }
+    setIsFullscreenLyricsOpen(false);
+  }, [setCurrentTime, setIsFullscreenLyricsOpen]);
+
+  const handleSeekFromLyrics = useCallback((timeSec: number) => {
+    if (audioRef.current) {
+      audioRef.current.currentTime = timeSec;
+    }
+    currentTimeRef.current = timeSec;
+    lastDispatchedTimeRef.current = timeSec;
+    setCurrentTime(timeSec);
+  }, [setCurrentTime]);
 
   // Click target word: collect to Dexie + open Word Detail bottom sheet with dual contexts
   const handleWordClick = async (wordText: string, contextSentence: string) => {
@@ -826,6 +895,9 @@ export const MusicPlayerPanel: React.FC<MusicPlayerPanelProps> = ({ onOpenNotebo
         }}
         src={deferredAudioSrc}
         loop={playMode === 'single'}
+        onTimeUpdate={(e) => {
+          currentTimeRef.current = e.currentTarget.currentTime;
+        }}
         onLoadedMetadata={handleAudioLoadedMetadata}
         onLoadedData={(e) => tryRestorePlaybackPosition(e.currentTarget)}
         onCanPlay={handleAudioCanPlay}
@@ -919,13 +991,13 @@ export const MusicPlayerPanel: React.FC<MusicPlayerPanelProps> = ({ onOpenNotebo
           }}
           className="relative flex items-center justify-center min-h-0 shrink w-full hardware-accelerated"
         >
-          {/* Gentle, ethereal ambient backlight (Ultra-clean) */}
+          {/* Gentle, ethereal ambient backlight (Zero GPU Gaussian Blur Re-Convolution Cost) */}
           <div
-            className={`absolute -inset-4 rounded-full blur-[64px] transition-opacity duration-700 pointer-events-none ${
-              isPlaying ? 'opacity-25 dark:opacity-20' : 'opacity-15 dark:opacity-10'
+            className={`absolute -inset-10 rounded-full transition-opacity duration-700 pointer-events-none ${
+              isPlaying ? 'opacity-30 dark:opacity-25' : 'opacity-18 dark:opacity-12'
             }`}
             style={{
-              backgroundColor: currentSong?.palette?.[0] || '#E8E4DC',
+              background: `radial-gradient(circle, ${currentSong?.palette?.[0] || '#E8E4DC'} 0%, transparent 70%)`,
               transform: 'translate3d(0, 0, 0)'
             }}
           />
@@ -1173,15 +1245,10 @@ export const MusicPlayerPanel: React.FC<MusicPlayerPanelProps> = ({ onOpenNotebo
           <FullscreenLyricsView
             parsedLyrics={parsedLyrics}
             activeLyricIndex={activeLyricIndex}
-            onClose={() => setIsFullscreenLyricsOpen(false)}
-            onSeek={(timeSec) => {
-              if (audioRef.current) {
-                audioRef.current.currentTime = timeSec;
-              }
-              setCurrentTime(timeSec);
-            }}
+            onClose={handleCloseFullscreenLyrics}
+            onSeek={handleSeekFromLyrics}
             albumArtUrl={currentSong?.albumArtUrl || ''}
-            palette={currentSong?.palette || ['#7C8F6E', '#C4AC82', '#A69880']}
+            palette={currentSong?.palette || fallbackPalette}
           />
         )}
       </AnimatePresence>

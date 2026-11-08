@@ -1,4 +1,4 @@
-import React, { useState, useRef, useEffect, useMemo } from 'react';
+import React, { useState, useRef, useEffect, useMemo, useCallback } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
 import { useLiveQuery } from 'dexie-react-hooks';
 import { LyricLine, SongItem } from '../../types';
@@ -42,7 +42,7 @@ interface GestureState {
   canReArm: boolean;
 }
 
-export const FullscreenLyricsView: React.FC<FullscreenLyricsViewProps> = ({
+export const FullscreenLyricsView: React.FC<FullscreenLyricsViewProps> = React.memo(({
   parsedLyrics,
   activeLyricIndex,
   onClose,
@@ -74,7 +74,12 @@ export const FullscreenLyricsView: React.FC<FullscreenLyricsViewProps> = ({
   // User interactive scrub / manual scroll state
   const [isScrubbing, setIsScrubbing] = useState(false);
   const [aimedLyricIndex, setAimedLyricIndex] = useState(activeLyricIndex);
+  const activeLyricIndexRef = useRef(activeLyricIndex);
+  activeLyricIndexRef.current = activeLyricIndex;
+  const aimedLyricIndexRef = useRef(aimedLyricIndex);
+  aimedLyricIndexRef.current = aimedLyricIndex;
   const isProgrammaticScrollingRef = useRef(false);
+  const programmaticScrollTimerRef = useRef<number | null>(null);
   const scrubbingTimeoutRef = useRef<number | null>(null);
 
   // Unified settings sheet state
@@ -219,6 +224,29 @@ export const FullscreenLyricsView: React.FC<FullscreenLyricsViewProps> = ({
   const autoScrollSpeedRef = useRef<number>(0);
   const gestureStateRef = useRef(gestureState);
   gestureStateRef.current = gestureState;
+  const touchCurrentPosRef = useRef<{ x: number; y: number }>({ x: 0, y: 0 });
+  const cachedSpanRectsRef = useRef<
+    Array<{ idx: number; left: number; right: number; top: number; bottom: number; cx: number; cy: number }>
+  >([]);
+
+  const refreshActiveLineSpanRects = useCallback((lineIdx: number) => {
+    const spanElements = document.querySelectorAll(`[data-lyric-line="${lineIdx}"]`);
+    const rects: Array<{ idx: number; left: number; right: number; top: number; bottom: number; cx: number; cy: number }> = [];
+    spanElements.forEach((el) => {
+      const r = el.getBoundingClientRect();
+      const idx = parseInt(el.getAttribute('data-span-index') || '0', 10);
+      rects.push({
+        idx,
+        left: r.left,
+        right: r.right,
+        top: r.top,
+        bottom: r.bottom,
+        cx: (r.left + r.right) / 2,
+        cy: (r.top + r.bottom) / 2,
+      });
+    });
+    cachedSpanRectsRef.current = rects;
+  }, []);
 
   const touchStartPosRef = useRef<{
     x: number;
@@ -323,18 +351,21 @@ export const FullscreenLyricsView: React.FC<FullscreenLyricsViewProps> = ({
   }, [isWordSheetOpen]);
 
   // Clean up timers on unmount
+  const scrollRafRef = useRef<number | null>(null);
   useEffect(() => {
     return () => {
       clearDwellTimer();
       stopAutoScroll();
       if (longPressTimerRef.current) clearTimeout(longPressTimerRef.current);
       if (scrubbingTimeoutRef.current) clearTimeout(scrubbingTimeoutRef.current);
+      if (programmaticScrollTimerRef.current) clearTimeout(programmaticScrollTimerRef.current);
+      if (scrollRafRef.current !== null) cancelAnimationFrame(scrollRafRef.current);
     };
   }, []);
 
   // Center alignment scroll utility with exact DOM bounding boxes
   const scrollToLine = (index: number, smooth: boolean = true) => {
-    if (gestureState.isLongPressing || isWordSheetOpen) return;
+    if (gestureStateRef.current.isLongPressing || isWordSheetOpen) return;
     const container = containerRef.current;
     if (!container) return;
 
@@ -342,20 +373,22 @@ export const FullscreenLyricsView: React.FC<FullscreenLyricsViewProps> = ({
     if (!lineEl) return;
 
     isProgrammaticScrollingRef.current = true;
-    const containerRect = container.getBoundingClientRect();
-    const lineRect = lineEl.getBoundingClientRect();
+    if (programmaticScrollTimerRef.current !== null) {
+      clearTimeout(programmaticScrollTimerRef.current);
+    }
+
     const targetScroll =
-      container.scrollTop +
-      (lineRect.top - containerRect.top) -
-      containerRect.height * 0.42 +
-      lineRect.height / 2;
+      lineEl.offsetTop -
+      container.clientHeight * 0.42 +
+      lineEl.offsetHeight / 2;
 
     container.scrollTo({
       top: Math.max(0, targetScroll),
       behavior: smooth ? 'smooth' : 'auto'
     });
 
-    setTimeout(() => {
+    programmaticScrollTimerRef.current = window.setTimeout(() => {
+      programmaticScrollTimerRef.current = null;
       isProgrammaticScrollingRef.current = false;
     }, 450);
   };
@@ -370,46 +403,52 @@ export const FullscreenLyricsView: React.FC<FullscreenLyricsViewProps> = ({
   // Initial jump to current playing line on mount
   useEffect(() => {
     const t = setTimeout(() => {
-      scrollToLine(activeLyricIndex, false);
+      scrollToLine(activeLyricIndexRef.current, false);
     }, 80);
     return () => clearTimeout(t);
   }, []);
 
-  // User manual scroll/drag detection (Apple Music / Netease aim timeline mode)
+  // User manual scroll/drag detection (Apple Music / Netease aim timeline mode, VSync rAF throttled for 90/120Hz)
   const handleScroll = () => {
-    if (isProgrammaticScrollingRef.current || gestureState.isLongPressing) return;
+    if (isProgrammaticScrollingRef.current || gestureStateRef.current.isLongPressing) return;
+    if (scrollRafRef.current !== null) return;
 
-    const container = containerRef.current;
-    if (!container) return;
+    scrollRafRef.current = requestAnimationFrame(() => {
+      scrollRafRef.current = null;
+      const container = containerRef.current;
+      if (!container) return;
 
-    setIsScrubbing(true);
+      setIsScrubbing((prev) => (prev ? prev : true));
 
-    // Calculate which lyric line is closest to the 42% vertical center line
-    const containerRect = container.getBoundingClientRect();
-    const focusY = containerRect.top + containerRect.height * 0.42;
+      // Calculate which lyric line is closest to the 42% vertical center line using offsetTop (avoids 100x getBoundingClientRect per frame)
+      const focusScrollY = container.scrollTop + container.clientHeight * 0.42;
 
-    let closestIdx = 0;
-    let minDistance = Infinity;
+      let closestIdx = aimedLyricIndexRef.current;
+      let minDistance = Infinity;
 
-    const lineElements = container.querySelectorAll('[data-line-index]');
-    lineElements.forEach((el) => {
-      const rect = el.getBoundingClientRect();
-      const lineCenterY = rect.top + rect.height / 2;
-      const dist = Math.abs(lineCenterY - focusY);
-      if (dist < minDistance) {
-        minDistance = dist;
-        closestIdx = parseInt(el.getAttribute('data-line-index') || '0', 10);
+      const lineElements = container.querySelectorAll('[data-line-index]');
+      for (let i = 0; i < lineElements.length; i++) {
+        const el = lineElements[i] as HTMLElement;
+        const lineCenterY = el.offsetTop + el.offsetHeight / 2;
+        const dist = Math.abs(lineCenterY - focusScrollY);
+        if (dist < minDistance) {
+          minDistance = dist;
+          closestIdx = parseInt(el.getAttribute('data-line-index') || '0', 10);
+        }
       }
+
+      if (closestIdx !== aimedLyricIndexRef.current) {
+        aimedLyricIndexRef.current = closestIdx;
+        setAimedLyricIndex(closestIdx);
+      }
+
+      // Auto-dismiss timeline and resume following playback if inactive for 3s (use ref so it never reads a stale closure index)
+      if (scrubbingTimeoutRef.current) clearTimeout(scrubbingTimeoutRef.current);
+      scrubbingTimeoutRef.current = window.setTimeout(() => {
+        setIsScrubbing(false);
+        scrollToLine(activeLyricIndexRef.current, true);
+      }, 3000);
     });
-
-    setAimedLyricIndex(closestIdx);
-
-    // Auto-dismiss timeline and resume following playback if inactive for 3s
-    if (scrubbingTimeoutRef.current) clearTimeout(scrubbingTimeoutRef.current);
-    scrubbingTimeoutRef.current = window.setTimeout(() => {
-      setIsScrubbing(false);
-      scrollToLine(activeLyricIndex, true);
-    }, 3000);
   };
 
   // Jump audio playback directly to aimed line
@@ -474,11 +513,13 @@ export const FullscreenLyricsView: React.FC<FullscreenLyricsViewProps> = ({
       spanIdx,
       spanText
     };
+    touchCurrentPosRef.current = { x: point.clientX, y: point.clientY };
 
     // Long press 250ms threshold
     if (longPressTimerRef.current) clearTimeout(longPressTimerRef.current);
     longPressTimerRef.current = window.setTimeout(() => {
       triggerHaptic(20);
+      refreshActiveLineSpanRects(lineIdx);
 
       setGestureState({
         isLongPressing: true,
@@ -534,6 +575,7 @@ export const FullscreenLyricsView: React.FC<FullscreenLyricsViewProps> = ({
   // 2. TouchMove / MouseMove
   const handlePointerMove = (e: React.TouchEvent | React.MouseEvent) => {
     const point = 'touches' in e ? e.touches[0] : e;
+    touchCurrentPosRef.current = { x: point.clientX, y: point.clientY };
 
     // Check if moving before long press threshold reached
     if (!gestureState.isLongPressing && touchStartPosRef.current) {
@@ -551,18 +593,44 @@ export const FullscreenLyricsView: React.FC<FullscreenLyricsViewProps> = ({
     const currentLine = parsedLyrics[gestureState.activeLineIdx];
     if (!currentLine) return;
 
-    // Measure span element under touch
-    let targetSpanIdx = gestureState.startSpanIdx ?? 0;
-    const spanElements = document.querySelectorAll(
-      `[data-lyric-line="${gestureState.activeLineIdx}"]`
-    );
-    spanElements.forEach((el) => {
-      const rect = el.getBoundingClientRect();
-      if (point.clientX >= rect.left - 8 && point.clientX <= rect.right + 8) {
-        const idx = parseInt(el.getAttribute('data-span-index') || '0', 10);
-        targetSpanIdx = idx;
+    // Refresh cached rects only if empty or while edge auto-scrolling is actively moving the viewport
+    if (cachedSpanRectsRef.current.length === 0 || autoScrollSpeedRef.current !== 0) {
+      refreshActiveLineSpanRects(gestureState.activeLineIdx);
+    }
+
+    // Hit-test span under touch using both Y-axis and X-axis bounds (prevents multi-line wrapped lyrics from jumping rows)
+    let targetSpanIdx = gestureState.currentSpanIdx ?? gestureState.startSpanIdx ?? 0;
+    const rects = cachedSpanRectsRef.current;
+    let matchedInRow = false;
+    for (let i = 0; i < rects.length; i++) {
+      const r = rects[i];
+      if (
+        point.clientY >= r.top - 14 &&
+        point.clientY <= r.bottom + 14 &&
+        point.clientX >= r.left - 8 &&
+        point.clientX <= r.right + 8
+      ) {
+        targetSpanIdx = r.idx;
+        matchedInRow = true;
+        break;
       }
-    });
+    }
+    if (!matchedInRow && rects.length > 0) {
+      // Fallback: find span on the same visual row (closest Y, then closest X)
+      let bestDist = Infinity;
+      for (let i = 0; i < rects.length; i++) {
+        const r = rects[i];
+        const dy = Math.abs(point.clientY - r.cy);
+        if (dy <= 26) {
+          const dx = Math.abs(point.clientX - r.cx);
+          const score = dy * 2.5 + dx;
+          if (score < bestDist) {
+            bestDist = score;
+            targetSpanIdx = r.idx;
+          }
+        }
+      }
+    }
 
     const startIdx = gestureState.startSpanIdx ?? targetSpanIdx;
     const minIdx = Math.min(startIdx, targetSpanIdx);
@@ -579,29 +647,53 @@ export const FullscreenLyricsView: React.FC<FullscreenLyricsViewProps> = ({
       // If user directly pulls down or up without dwelling
       if (dyFromStart > 25 && Math.abs(dyFromStart) > Math.abs(dxFromStart) * 1.1) {
         clearDwellTimer();
-        setGestureState((prev) => ({
-          ...prev,
-          currentSpanIdx: targetSpanIdx,
-          touchCurrentX: point.clientX,
-          touchCurrentY: point.clientY,
-          selectedText: phraseText,
-          isSavingDown: dyFromStart > 35,
-          isEscapingUp: false,
-          isMultiWord: false
-        }));
+        const nextSavingDown = dyFromStart > 35;
+        setGestureState((prev) => {
+          if (
+            prev.currentSpanIdx === targetSpanIdx &&
+            prev.selectedText === phraseText &&
+            prev.isSavingDown === nextSavingDown &&
+            prev.isEscapingUp === false &&
+            prev.isMultiWord === false
+          ) {
+            return prev;
+          }
+          return {
+            ...prev,
+            currentSpanIdx: targetSpanIdx,
+            touchCurrentX: point.clientX,
+            touchCurrentY: point.clientY,
+            selectedText: phraseText,
+            isSavingDown: nextSavingDown,
+            isEscapingUp: false,
+            isMultiWord: false
+          };
+        });
         return;
       } else if (dyFromStart < -25 && Math.abs(dyFromStart) > Math.abs(dxFromStart) * 1.1) {
         clearDwellTimer();
-        setGestureState((prev) => ({
-          ...prev,
-          currentSpanIdx: targetSpanIdx,
-          touchCurrentX: point.clientX,
-          touchCurrentY: point.clientY,
-          selectedText: phraseText,
-          isSavingDown: false,
-          isEscapingUp: dyFromStart < -35,
-          isMultiWord: false
-        }));
+        const nextEscapingUp = dyFromStart < -35;
+        setGestureState((prev) => {
+          if (
+            prev.currentSpanIdx === targetSpanIdx &&
+            prev.selectedText === phraseText &&
+            prev.isSavingDown === false &&
+            prev.isEscapingUp === nextEscapingUp &&
+            prev.isMultiWord === false
+          ) {
+            return prev;
+          }
+          return {
+            ...prev,
+            currentSpanIdx: targetSpanIdx,
+            touchCurrentX: point.clientX,
+            touchCurrentY: point.clientY,
+            selectedText: phraseText,
+            isSavingDown: false,
+            isEscapingUp: nextEscapingUp,
+            isMultiWord: false
+          };
+        });
         return;
       }
     }
@@ -610,17 +702,28 @@ export const FullscreenLyricsView: React.FC<FullscreenLyricsViewProps> = ({
     if (!gestureState.isDwellLocked) {
       updateEdgeScroll(point.clientY);
 
-      // In Free Selection phase, strictly BLOCK vertical triggers
-      setGestureState((prev) => ({
-        ...prev,
-        currentSpanIdx: targetSpanIdx,
-        touchCurrentX: point.clientX,
-        touchCurrentY: point.clientY,
-        selectedText: phraseText,
-        isMultiWord: isMulti,
-        isSavingDown: false,
-        isEscapingUp: false
-      }));
+      // In Free Selection phase, strictly BLOCK vertical triggers; only re-render if selected span range changed
+      setGestureState((prev) => {
+        if (
+          prev.currentSpanIdx === targetSpanIdx &&
+          prev.selectedText === phraseText &&
+          prev.isMultiWord === isMulti &&
+          prev.isSavingDown === false &&
+          prev.isEscapingUp === false
+        ) {
+          return prev;
+        }
+        return {
+          ...prev,
+          currentSpanIdx: targetSpanIdx,
+          touchCurrentX: point.clientX,
+          touchCurrentY: point.clientY,
+          selectedText: phraseText,
+          isMultiWord: isMulti,
+          isSavingDown: false,
+          isEscapingUp: false
+        };
+      });
 
       // Reschedule dwell timer on every motion
       scheduleDwellLock(point.clientX, point.clientY);
@@ -653,13 +756,18 @@ export const FullscreenLyricsView: React.FC<FullscreenLyricsViewProps> = ({
       const isSavingDown = dyFromAnchor > 35;
       const isEscapingUp = dyFromAnchor < -35;
 
-      setGestureState((prev) => ({
-        ...prev,
-        touchCurrentX: point.clientX,
-        touchCurrentY: point.clientY,
-        isSavingDown,
-        isEscapingUp
-      }));
+      setGestureState((prev) => {
+        if (prev.isSavingDown === isSavingDown && prev.isEscapingUp === isEscapingUp) {
+          return prev;
+        }
+        return {
+          ...prev,
+          touchCurrentX: point.clientX,
+          touchCurrentY: point.clientY,
+          isSavingDown,
+          isEscapingUp
+        };
+      });
     }
   };
 
@@ -687,11 +795,10 @@ export const FullscreenLyricsView: React.FC<FullscreenLyricsViewProps> = ({
       currentSpanIdx,
       isMultiWord,
       isDwellLocked,
-      touchStartY,
-      touchCurrentY
+      touchStartY
     } = gestureState;
 
-    const dyTotal = touchCurrentY - touchStartY;
+    const dyTotal = touchCurrentPosRef.current.y - touchStartY;
 
     // 1. Single Word Fast Path immediate release check
     if (!isMultiWord && !isDwellLocked) {
@@ -741,7 +848,7 @@ export const FullscreenLyricsView: React.FC<FullscreenLyricsViewProps> = ({
         endSpan: maxIdx
       });
 
-      // Measure exact bounding rect of selected words in screen coordinates
+      // Measure exact bounding rect of selected words in screen coordinates (safe for wrapped multi-line spans)
       const startEl = document.querySelector(
         `[data-lyric-line="${activeLineIdx}"][data-span-index="${minIdx}"]`
       );
@@ -753,11 +860,15 @@ export const FullscreenLyricsView: React.FC<FullscreenLyricsViewProps> = ({
       if (startEl && endEl) {
         const r1 = startEl.getBoundingClientRect();
         const r2 = endEl.getBoundingClientRect();
+        const left = Math.min(r1.left, r2.left);
+        const right = Math.max(r1.right, r2.right);
+        const top = Math.min(r1.top, r2.top);
+        const bottom = Math.max(r1.bottom, r2.bottom);
         heroRect = {
-          x: r1.left,
-          y: r1.top,
-          width: r2.right - r1.left,
-          height: Math.max(r1.height, r2.height)
+          x: left,
+          y: top,
+          width: Math.max(24, right - left),
+          height: Math.max(r1.height, r2.height, bottom - top)
         };
       }
 
@@ -774,6 +885,7 @@ export const FullscreenLyricsView: React.FC<FullscreenLyricsViewProps> = ({
   const resetGesture = () => {
     stopAutoScroll();
     clearDwellTimer();
+    cachedSpanRectsRef.current = [];
     setGestureState({
       isLongPressing: false,
       activeLineIdx: null,
@@ -1421,4 +1533,4 @@ export const FullscreenLyricsView: React.FC<FullscreenLyricsViewProps> = ({
       </AnimatePresence>
     </motion.div>
   );
-};
+});
