@@ -188,27 +188,291 @@ export async function safeHttpRequest(
 }
 
 /**
- * Directly retrieve real NetEase QR Login Unikey from public endpoint
+ * Zero-dependency ISO/IEC 18004 QR Code (Version 5-L, 37x37, up to 106 UTF-8 bytes) Canvas DataURL Generator.
+ * Generates `data:image/png;base64,...` offline in < 1ms without relying on external `api.qrserver.com`.
  */
-export async function getNetEaseQrKeyClient(): Promise<{ success: boolean; unikey: string }> {
+export function generateQrDataUrlLocal(text: string, sizePx: number = 300): string {
   try {
-    const data = await safeHttpRequest('https://music.163.com/api/login/qrcode/unikey', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-      data: { type: '3' },
-      formUrlEncoded: true
-    });
-    if (data && data.unikey) {
-      return { success: true, unikey: data.unikey };
+    const bytes = Array.from(new TextEncoder().encode(text));
+    if (bytes.length === 0 || bytes.length > 106 || typeof document === 'undefined') {
+      return `https://api.qrserver.com/v1/create-qr-code/?size=${sizePx}x${sizePx}&data=${encodeURIComponent(text)}`;
     }
-  } catch (e) {
-    console.warn('Direct NetEase unikey failed:', e);
+
+    // Version 5-L: 37x37 modules, 1 single block of 108 data codewords + 26 EC codewords = 134 total codewords
+    const N = 37;
+    const DATA_CW = 108;
+    const EC_CW = 26;
+
+    // 1. Encode Byte Mode bitstream (mode 0100 + 8-bit length + bytes + terminator + pad 0xEC/0x11)
+    const bits: number[] = [];
+    const pushBits = (val: number, len: number) => {
+      for (let i = len - 1; i >= 0; i--) bits.push((val >>> i) & 1);
+    };
+    pushBits(0b0100, 4);
+    pushBits(bytes.length, 8);
+    for (const b of bytes) pushBits(b, 8);
+    const maxDataBits = DATA_CW * 8;
+    for (let i = 0; i < 4 && bits.length < maxDataBits; i++) bits.push(0);
+    while (bits.length % 8 !== 0) bits.push(0);
+    const dataWords: number[] = [];
+    for (let i = 0; i < bits.length; i += 8) {
+      let w = 0;
+      for (let j = 0; j < 8; j++) w = (w << 1) | bits[i + j];
+      dataWords.push(w);
+    }
+    let padToggle = true;
+    while (dataWords.length < DATA_CW) {
+      dataWords.push(padToggle ? 0xec : 0x11);
+      padToggle = !padToggle;
+    }
+
+    // 2. GF(256) Reed-Solomon 26 EC codewords (primitive polynomial 0x11D)
+    const exp = new Uint8Array(512);
+    const log = new Uint8Array(256);
+    let x = 1;
+    for (let i = 0; i < 255; i++) {
+      exp[i] = x;
+      exp[i + 255] = x;
+      log[x] = i;
+      x <<= 1;
+      if (x & 0x100) x ^= 0x11d;
+    }
+    const gfMul = (a: number, b: number) => (a === 0 || b === 0 ? 0 : exp[log[a] + log[b]]);
+
+    let gen = [1];
+    for (let i = 0; i < EC_CW; i++) {
+      const next = new Array(gen.length + 1).fill(0);
+      const root = exp[i];
+      for (let j = 0; j < gen.length; j++) {
+        next[j] ^= gen[j];
+        next[j + 1] ^= gfMul(gen[j], root);
+      }
+      gen = next;
+    }
+
+    const rem = new Uint8Array(EC_CW);
+    for (const d of dataWords) {
+      const factor = d ^ rem[0];
+      for (let i = 0; i < EC_CW - 1; i++) {
+        rem[i] = rem[i + 1] ^ gfMul(gen[i + 1], factor);
+      }
+      rem[EC_CW - 1] = gfMul(gen[EC_CW], factor);
+    }
+
+    const allWords = [...dataWords, ...Array.from(rem)];
+    const fullBits: number[] = [];
+    for (const w of allWords) {
+      for (let i = 7; i >= 0; i--) fullBits.push((w >>> i) & 1);
+    }
+    // 7 remainder bits for Version 5
+    for (let i = 0; i < 7; i++) fullBits.push(0);
+
+    // 3. Construct 37x37 Matrix & Function Patterns
+    const grid: number[][] = Array.from({ length: N }, () => new Array(N).fill(0));
+    const reserved: boolean[][] = Array.from({ length: N }, () => new Array(N).fill(false));
+
+    const placeFinder = (row: number, col: number) => {
+      for (let r = -1; r <= 7; r++) {
+        for (let c = -1; c <= 7; c++) {
+          const rr = row + r;
+          const cc = col + c;
+          if (rr < 0 || rr >= N || cc < 0 || cc >= N) continue;
+          const inOuter = r >= 0 && r <= 6 && c >= 0 && c <= 6 && (r === 0 || r === 6 || c === 0 || c === 6);
+          const inInner = r >= 2 && r <= 4 && c >= 2 && c <= 4;
+          grid[rr][cc] = inOuter || inInner ? 1 : 0;
+          reserved[rr][cc] = true;
+        }
+      }
+    };
+    placeFinder(0, 0);
+    placeFinder(0, N - 7);
+    placeFinder(N - 7, 0);
+
+    // Alignment pattern at (30, 30) for Version 5
+    for (let r = -2; r <= 2; r++) {
+      for (let c = -2; c <= 2; c++) {
+        const rr = 30 + r;
+        const cc = 30 + c;
+        grid[rr][cc] = Math.abs(r) === 2 || Math.abs(c) === 2 || (r === 0 && c === 0) ? 1 : 0;
+        reserved[rr][cc] = true;
+      }
+    }
+
+    // Timing patterns
+    for (let i = 8; i < N - 8; i++) {
+      grid[6][i] = i % 2 === 0 ? 1 : 0;
+      reserved[6][i] = true;
+      grid[i][6] = i % 2 === 0 ? 1 : 0;
+      reserved[i][6] = true;
+    }
+
+    // Dark module & reserve format info areas
+    grid[4 * 5 + 9][8] = 1;
+    reserved[4 * 5 + 9][8] = true;
+    for (let i = 0; i < 9; i++) {
+      if (i < N) {
+        reserved[8][i] = true;
+        reserved[i][8] = true;
+      }
+    }
+    for (let i = 0; i < 8; i++) {
+      reserved[8][N - 1 - i] = true;
+      reserved[N - 1 - i][8] = true;
+    }
+
+    // 4. Zig-zag upward/downward module placement
+    let bitIdx = 0;
+    let upward = true;
+    for (let right = N - 1; right >= 1; right -= 2) {
+      if (right === 6) right = 5;
+      for (let vert = 0; vert < N; vert++) {
+        const r = upward ? N - 1 - vert : vert;
+        for (let j = 0; j < 2; j++) {
+          const c = right - j;
+          if (!reserved[r][c]) {
+            const bit = bitIdx < fullBits.length ? fullBits[bitIdx++] : 0;
+            // Apply Mask 0: (r + c) % 2 === 0
+            grid[r][c] = (r + c) % 2 === 0 ? bit ^ 1 : bit;
+          }
+        }
+      }
+      upward = !upward;
+    }
+
+    // 5. Place Format Info for Level L (01) + Mask 0 (000) -> BCH = 0x77C4
+    const fmt = 0x77c4;
+    for (let i = 0; i <= 5; i++) grid[8][i] = (fmt >>> i) & 1;
+    grid[8][7] = (fmt >>> 6) & 1;
+    grid[8][8] = (fmt >>> 7) & 1;
+    grid[7][8] = (fmt >>> 8) & 1;
+    for (let i = 9; i < 15; i++) grid[14 - i][8] = (fmt >>> i) & 1;
+    for (let i = 0; i < 8; i++) grid[8][N - 1 - i] = (fmt >>> i) & 1;
+    for (let i = 8; i < 15; i++) grid[N - 15 + i][8] = (fmt >>> i) & 1;
+
+    // 6. Render crisp modules onto HTML5 Canvas
+    const canvas = document.createElement('canvas');
+    canvas.width = sizePx;
+    canvas.height = sizePx;
+    const ctx = canvas.getContext('2d');
+    if (!ctx) {
+      return `https://api.qrserver.com/v1/create-qr-code/?size=${sizePx}x${sizePx}&data=${encodeURIComponent(text)}`;
+    }
+    const marginModules = 2;
+    const totalModules = N + marginModules * 2;
+    const scale = sizePx / totalModules;
+
+    ctx.fillStyle = '#FFFFFF';
+    ctx.fillRect(0, 0, sizePx, sizePx);
+    ctx.fillStyle = '#111111';
+
+    for (let r = 0; r < N; r++) {
+      for (let c = 0; c < N; c++) {
+        if (grid[r][c]) {
+          const x0 = Math.floor((c + marginModules) * scale);
+          const y0 = Math.floor((r + marginModules) * scale);
+          const x1 = Math.ceil((c + marginModules + 1) * scale);
+          const y1 = Math.ceil((r + marginModules + 1) * scale);
+          ctx.fillRect(x0, y0, Math.max(1, x1 - x0), Math.max(1, y1 - y0));
+        }
+      }
+    }
+    return canvas.toDataURL('image/png');
+  } catch {
+    return `https://api.qrserver.com/v1/create-qr-code/?size=${sizePx}x${sizePx}&data=${encodeURIComponent(text)}`;
   }
-  return { success: false, unikey: `ncm-${Date.now().toString(36)}` };
 }
 
 /**
- * Check NetEase QR Scan status directly from client
+ * Directly retrieve real NetEase QR Login Unikey from non-blocking native EAPI bridge or public endpoint
+ */
+export async function getNetEaseQrKeyClient(): Promise<{ success: boolean; unikey: string; qrimg?: string }> {
+  // 1. Non-blocking Native Android EAPI bridge (runs HTTP on background qrExecutor and emits 'lyricalens:native-ncm-key')
+  if (Capacitor.isNativePlatform() && typeof window !== 'undefined' && window.AndroidNativeMedia?.nativeNetEaseQrKey) {
+    try {
+      const nativeRes = await new Promise<{ success: boolean; unikey?: string } | null>((resolve) => {
+        let settled = false;
+        const timer = window.setTimeout(() => {
+          if (!settled) {
+            settled = true;
+            window.removeEventListener('lyricalens:native-ncm-key', onEvent as EventListener);
+            resolve(null);
+          }
+        }, 4200);
+
+        const onEvent = (ev: CustomEvent) => {
+          if (settled) return;
+          settled = true;
+          window.clearTimeout(timer);
+          window.removeEventListener('lyricalens:native-ncm-key', onEvent as EventListener);
+          resolve(ev.detail || null);
+        };
+
+        window.addEventListener('lyricalens:native-ncm-key', onEvent as EventListener);
+        const immediateRaw = window.AndroidNativeMedia?.nativeNetEaseQrKey?.();
+        if (immediateRaw) {
+          try {
+            const parsed = JSON.parse(immediateRaw);
+            if (parsed && parsed.unikey && !parsed.pending) {
+              settled = true;
+              window.clearTimeout(timer);
+              window.removeEventListener('lyricalens:native-ncm-key', onEvent as EventListener);
+              resolve(parsed);
+            }
+          } catch {
+            // wait for CustomEvent
+          }
+        }
+      });
+
+      if (nativeRes && nativeRes.unikey) {
+        const unikey = String(nativeRes.unikey);
+        const qrurl = `https://music.163.com/login?codekey=${encodeURIComponent(unikey)}`;
+        return {
+          success: true,
+          unikey,
+          qrimg: generateQrDataUrlLocal(qrurl)
+        };
+      }
+    } catch (e) {
+      console.warn('Native Android NetEase QR key failed:', e);
+    }
+  }
+
+  // 2. Direct HTTP fallback (try type=1 web unikey first, then type=3)
+  for (const qrType of ['1', '3']) {
+    try {
+      const data = await safeHttpRequest('https://music.163.com/api/login/qrcode/unikey', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/x-www-form-urlencoded',
+          'Referer': 'https://music.163.com/'
+        },
+        data: { type: qrType },
+        formUrlEncoded: true
+      });
+      if (data && data.unikey) {
+        const unikey = String(data.unikey);
+        const qrurl = `https://music.163.com/login?codekey=${encodeURIComponent(unikey)}`;
+        return {
+          success: true,
+          unikey,
+          qrimg: generateQrDataUrlLocal(qrurl)
+        };
+      }
+    } catch (e) {
+      console.warn(`Direct NetEase unikey (type=${qrType}) failed:`, e);
+    }
+  }
+  const fallbackKey = `ncm-${Date.now().toString(36)}`;
+  return {
+    success: false,
+    unikey: fallbackKey,
+    qrimg: generateQrDataUrlLocal(`https://music.163.com/login?codekey=${encodeURIComponent(fallbackKey)}`)
+  };
+}
+
+/**
+ * Check NetEase QR Scan status directly from native EAPI bridge or client
  * 800: expired, 801: waiting scan, 802: waiting confirm, 803: success
  */
 export async function checkNetEaseQrStatusClient(key: string): Promise<{
@@ -216,45 +480,253 @@ export async function checkNetEaseQrStatusClient(key: string): Promise<{
   code: number;
   message: string;
   cookie?: string;
+  profile?: {
+    userId: number;
+    nickname: string;
+    avatarUrl: string;
+    vipType?: number;
+  };
 }> {
-  try {
-    const timestamp = Date.now();
-    const data = await safeHttpRequest(`https://music.163.com/api/login/qrcode/client/login?_t=${timestamp}`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-      data: { key, type: '3', timestamp },
-      formUrlEncoded: true
-    });
-    if (data && typeof data === 'object') {
-      const code = Number(data.code || 801);
-      let cookie = data.cookie || '';
-      if (code === 803 && (!cookie || !cookie.includes('MUSIC_U=')) && Capacitor.isNativePlatform()) {
-        try {
-          const nativeCookie = (window as any).AndroidNativeMedia?.getCookiesForUrl?.('https://music.163.com') || '';
-          const mU = nativeCookie.match(/MUSIC_U=([^;,\s]+)/);
-          const cS = nativeCookie.match(/__csrf=([^;,\s]+)/);
-          if (mU) {
-            cookie = `MUSIC_U=${mU[1]}; ${cS ? `__csrf=${cS[1]}; ` : ''}os=pc;`;
-          }
-        } catch {
-          // ignore
+  // 1. Native Android EAPI bridge (preserves multi-header Set-Cookie and caches 803 across app resume)
+  if (Capacitor.isNativePlatform()) {
+    try {
+      const rawJson = window.AndroidNativeMedia?.nativeNetEaseQrCheck?.(key);
+      if (rawJson) {
+        const parsed = JSON.parse(rawJson);
+        if (parsed && typeof parsed === 'object' && parsed.code) {
+          const code = Number(parsed.code);
+          return {
+            success: true,
+            code,
+            message: parsed.message || (code === 803 ? '授权登录成功' : code === 802 ? '扫描成功，请在客户端点击确认' : '等待扫码'),
+            cookie: parsed.cookie || '',
+            profile: parsed.profile
+          };
         }
       }
-      return {
-        success: true,
-        code,
-        message: data.message || (code === 803 ? '授权登录成功' : code === 802 ? '待确认' : '等待扫码'),
-        cookie
-      };
+    } catch (e) {
+      console.warn('Native Android NetEase QR check failed:', e);
     }
-  } catch (e) {
-    console.warn('Direct NetEase QR check failed:', e);
+  }
+
+  // 2. Direct HTTP fallback (check both type=1 and type=3)
+  for (const qrType of ['1', '3']) {
+    try {
+      const timestamp = Date.now();
+      const data = await safeHttpRequest(`https://music.163.com/api/login/qrcode/client/login?_t=${timestamp}`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/x-www-form-urlencoded',
+          'Referer': 'https://music.163.com/'
+        },
+        data: { key, type: qrType, timestamp },
+        formUrlEncoded: true
+      });
+      if (data && typeof data === 'object' && data.code) {
+        const code = Number(data.code || 801);
+        let cookie = data.cookie || '';
+        if (code === 803 && (!cookie || !cookie.includes('MUSIC_U=')) && Capacitor.isNativePlatform()) {
+          try {
+            const nativeCookie = window.AndroidNativeMedia?.getCookiesForUrl?.('https://music.163.com') || '';
+            const mU = nativeCookie.match(/MUSIC_U=([^;,\s]+)/);
+            const cS = nativeCookie.match(/__csrf=([^;,\s]+)/);
+            if (mU) {
+              cookie = `MUSIC_U=${mU[1]}; ${cS ? `__csrf=${cS[1]}; ` : ''}os=pc;`;
+            }
+          } catch {
+            // ignore
+          }
+        }
+        if (code === 803 || code === 802 || code === 800 || qrType === '3') {
+          return {
+            success: true,
+            code,
+            message: data.message || (code === 803 ? '授权登录成功' : code === 802 ? '待确认' : '等待扫码'),
+            cookie
+          };
+        }
+      }
+    } catch (e) {
+      console.warn(`Direct NetEase QR check (type=${qrType}) failed:`, e);
+    }
   }
   return {
     success: false,
     code: 801,
     message: '等待扫码中...'
   };
+}
+
+/**
+ * Retrieve QQ Music Official QR Image & qrsig directly from non-blocking native Android bridge
+ */
+export async function getQqQrKeyClient(): Promise<{
+  success: boolean;
+  unikey?: string;
+  qrimg?: string;
+  qrurl?: string;
+}> {
+  if (Capacitor.isNativePlatform() && typeof window !== 'undefined' && window.AndroidNativeMedia?.nativeQqQrKey) {
+    try {
+      const nativeRes = await new Promise<{
+        success: boolean;
+        unikey?: string;
+        qrimg?: string;
+        qrurl?: string;
+      } | null>((resolve) => {
+        let settled = false;
+        const timer = window.setTimeout(() => {
+          if (!settled) {
+            settled = true;
+            window.removeEventListener('lyricalens:native-qq-key', onEvent as EventListener);
+            resolve(null);
+          }
+        }, 4200);
+
+        const onEvent = (ev: CustomEvent) => {
+          if (settled) return;
+          settled = true;
+          window.clearTimeout(timer);
+          window.removeEventListener('lyricalens:native-qq-key', onEvent as EventListener);
+          resolve(ev.detail || null);
+        };
+
+        window.addEventListener('lyricalens:native-qq-key', onEvent as EventListener);
+        const immediateRaw = window.AndroidNativeMedia?.nativeQqQrKey?.();
+        if (immediateRaw) {
+          try {
+            const parsed = JSON.parse(immediateRaw);
+            if (parsed && parsed.unikey && parsed.qrimg && !parsed.pending) {
+              settled = true;
+              window.clearTimeout(timer);
+              window.removeEventListener('lyricalens:native-qq-key', onEvent as EventListener);
+              resolve(parsed);
+            }
+          } catch {
+            // wait for CustomEvent
+          }
+        }
+      });
+
+      if (nativeRes && nativeRes.success && nativeRes.unikey && nativeRes.qrimg) {
+        return {
+          success: true,
+          unikey: String(nativeRes.unikey),
+          qrimg: String(nativeRes.qrimg),
+          qrurl: nativeRes.qrurl || 'https://y.qq.com/'
+        };
+      }
+    } catch (e) {
+      console.warn('Native Android QQ QR key failed:', e);
+    }
+  }
+  return { success: false };
+}
+
+/**
+ * Check QQ Music Official QR Scan Status directly from native Android bridge
+ */
+export async function checkQqQrStatusClient(qrsig: string): Promise<{
+  success: boolean;
+  code: number;
+  message?: string;
+  cookie?: string;
+  profile?: {
+    userId: string;
+    nickname: string;
+    avatarUrl?: string;
+    vipType?: number;
+  };
+}> {
+  if (Capacitor.isNativePlatform()) {
+    try {
+      const rawJson = window.AndroidNativeMedia?.nativeQqQrCheck?.(qrsig);
+      if (rawJson) {
+        const parsed = JSON.parse(rawJson);
+        if (parsed && typeof parsed === 'object' && parsed.code) {
+          return {
+            success: Boolean(parsed.success),
+            code: Number(parsed.code),
+            message: parsed.message,
+            cookie: parsed.cookie || '',
+            profile: parsed.profile
+          };
+        }
+      }
+    } catch (e) {
+      console.warn('Native Android QQ QR check failed:', e);
+    }
+  }
+  return { success: false, code: 801 };
+}
+
+/**
+ * Fetch QQ Music user's created and collected playlists client-side using Cookie/UIN
+ */
+export async function fetchQqUserPlaylistsClient(
+  rawCookie?: string,
+  rawUin?: string | number
+): Promise<{
+  success: boolean;
+  playlists: Array<{
+    id: number;
+    name: string;
+    coverImgUrl: string;
+    trackCount: number;
+    playCount: number;
+  }>;
+}> {
+  const cookie = (rawCookie || '').trim();
+  const cookieUinMatch = cookie.match(/(?:pt2gguin|p_uin|uin|ptui_loginuin)=o?0*([1-9][0-9]{4,12})/);
+  const cleanUinMatch = String(rawUin || '').match(/^o?0*([1-9][0-9]{4,12})$/);
+  const targetUin = cleanUinMatch?.[1] || cookieUinMatch?.[1] || '';
+
+  if (!targetUin) {
+    return { success: false, playlists: [] };
+  }
+
+  const playlists: Array<{
+    id: number;
+    name: string;
+    coverImgUrl: string;
+    trackCount: number;
+    playCount: number;
+  }> = [];
+
+  // 1. Official QQ Music User Created Diss endpoint
+  try {
+    const dissUrl = `https://c.y.qq.com/rsc/fcgi-bin/fcg_user_created_diss?hostUin=0&hostuin=${targetUin}&sin=0&size=40&g_tk=5381&loginUin=${targetUin}&format=json&inCharset=utf8&outCharset=utf-8`;
+    const dissData = await safeHttpRequest(dissUrl, {
+      headers: {
+        'Referer': 'https://y.qq.com/portal/profile.html',
+        ...(cookie ? { 'Cookie': cookie } : {})
+      }
+    });
+    const disslist = dissData?.data?.disslist;
+    if (Array.isArray(disslist)) {
+      for (const item of disslist) {
+        const tidNum = Number(item.tid || item.dissid || 0);
+        if (!tidNum) continue;
+        playlists.push({
+          id: tidNum,
+          name: item.diss_name || item.dissname || 'QQ音乐歌单',
+          coverImgUrl:
+            item.diss_cover ||
+            item.logo ||
+            `https://q1.qlogo.cn/g?b=qq&nk=${targetUin}&s=100`,
+          trackCount: Number(item.song_cnt || item.songnum || 0),
+          playCount: Number(item.listen_num || 0)
+        });
+      }
+    }
+  } catch (e) {
+    console.warn('Client QQ created diss fetch failed:', e);
+  }
+
+  if (playlists.length > 0) {
+    return { success: true, playlists };
+  }
+  return { success: false, playlists: [] };
 }
 
 /**

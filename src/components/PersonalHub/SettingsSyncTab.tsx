@@ -18,9 +18,14 @@ import { SEED_SONGS } from '../../db/seedData';
 import { ChineseSongPromptModal } from '../MusicSpace/ChineseSongPromptModal';
 import {
   fetchPlaylistClient,
+  generateQrDataUrlLocal,
   getNetEaseQrKeyClient,
   checkNetEaseQrStatusClient,
+  getQqQrKeyClient,
+  checkQqQrStatusClient,
+  fetchQqUserPlaylistsClient,
   fetchNetEaseUserProfileWithCookieClient,
+  fetchNetEaseUserDetailAndPlaylistsClient,
   sendNetEaseCaptchaClient,
   loginNetEaseWithCaptchaClient,
   PlatformAuthProfile,
@@ -1001,12 +1006,25 @@ export const SettingsSyncTab: React.FC = () => {
     }
   };
 
-  // Load QQ Music User Playlists from backend
+  // Load QQ Music User Playlists from native client or backend
   const loadQqUserPlaylists = async (customCookie?: string, customUin?: string | number) => {
     const cookie = customCookie !== undefined ? customCookie : (localStorage.getItem('lyricalens_qq_cookie') || '');
     const uin = customUin !== undefined ? customUin : platformProfiles.qq?.userId;
     setIsLoadingPlaylists(true);
     try {
+      // 1. Try direct client fetch (works on standalone Android APK)
+      try {
+        const clientPl = await fetchQqUserPlaylistsClient(cookie, uin);
+        if (clientPl.success && clientPl.playlists.length > 0) {
+          setQqPlaylists(clientPl.playlists);
+          localStorage.setItem('lyricalens_qq_playlists', JSON.stringify(clientPl.playlists));
+          return;
+        }
+      } catch (clientErr) {
+        console.warn('Direct QQ playlist fetch failed, trying backend:', clientErr);
+      }
+
+      // 2. Fallback to node backend
       const plData = await safeFetchJson('/api/qq/user-playlists', {
         method: 'POST',
         body: JSON.stringify({ cookie, uin })
@@ -1429,6 +1447,22 @@ export const SettingsSyncTab: React.FC = () => {
     setQrImg(null);
 
     if (activeMusicPlatform === 'qq') {
+      // 1. Native Android QQ Official ptqrshow Bridge (works standalone without backend)
+      try {
+        const clientQqRes = await getQqQrKeyClient();
+        if (clientQqRes.success && clientQqRes.unikey && clientQqRes.qrimg) {
+          setQrUniKey(clientQqRes.unikey);
+          setQrAuthUrl(clientQqRes.qrurl || 'https://y.qq.com/');
+          setQrImg(clientQqRes.qrimg);
+          setQrStatus('waiting_scan');
+          setQrStatusText('请使用手机 QQ 扫一扫授权登录...');
+          return;
+        }
+      } catch (clientQqErr) {
+        console.warn('Client QQ QR key fetch failed, trying backend:', clientQqErr);
+      }
+
+      // 2. Backend fallback
       try {
         const qqRes = await safeFetchJson(`/api/qq/qr-key?_t=${Date.now()}`);
         if (qqRes?.unikey && qqRes?.qrimg) {
@@ -1451,31 +1485,39 @@ export const SettingsSyncTab: React.FC = () => {
         ? pl.buildAuthUrl(uniKey)
         : `https://music.163.com/login?codekey=${encodeURIComponent(uniKey)}`;
       setQrAuthUrl(officialAuthUrl);
-      const fallbackQrUrl = `https://api.qrserver.com/v1/create-qr-code/?size=300x300&data=${encodeURIComponent(officialAuthUrl)}`;
-      setQrImg(fallbackQrUrl);
+      const localQrDataUrl = generateQrDataUrlLocal(officialAuthUrl);
+      setQrImg(localQrDataUrl);
       setQrStatus('waiting_scan');
       setQrStatusText(`等待${pl.shortName}扫一扫中...`);
-      try {
-        const localQrRes = await safeFetchJson(
-          `/api/netease/qr-key?key=${encodeURIComponent(uniKey)}&url=${encodeURIComponent(officialAuthUrl)}&_t=${Date.now()}`
-        );
-        if (localQrRes?.qrimg) {
-          setQrImg(localQrRes.qrimg);
-        }
-      } catch {
-        // Keep fallbackQrUrl
-      }
       return;
     }
 
-    // 1. Backend official NCM API
+    // 1. Native Android EAPI & Direct Client unikey first on mobile APK
+    if (Capacitor.isNativePlatform()) {
+      try {
+        const clientKeyRes = await getNetEaseQrKeyClient();
+        if (clientKeyRes && clientKeyRes.success && clientKeyRes.unikey) {
+          setQrUniKey(clientKeyRes.unikey);
+          const officialAuthUrl = `https://music.163.com/login?codekey=${encodeURIComponent(clientKeyRes.unikey)}`;
+          setQrAuthUrl(officialAuthUrl);
+          setQrImg(clientKeyRes.qrimg || generateQrDataUrlLocal(officialAuthUrl));
+          setQrStatus('waiting_scan');
+          setQrStatusText('等待网易云扫一扫中...');
+          return;
+        }
+      } catch (err) {
+        console.warn('Native client unikey generation error:', err);
+      }
+    }
+
+    // 2. Backend official NCM API (Web Dev Mode)
     try {
       const backendRes = await safeFetchJson(`/api/netease/qr-key?_t=${Date.now()}`);
       if (backendRes?.unikey) {
         setQrUniKey(backendRes.unikey);
         const officialAuthUrl = backendRes.qrurl || `https://music.163.com/login?codekey=${encodeURIComponent(backendRes.unikey)}`;
         setQrAuthUrl(officialAuthUrl);
-        setQrImg(backendRes.qrimg || `https://api.qrserver.com/v1/create-qr-code/?size=300x300&data=${encodeURIComponent(officialAuthUrl)}`);
+        setQrImg(backendRes.qrimg || generateQrDataUrlLocal(officialAuthUrl));
         setQrStatus('waiting_scan');
         setQrStatusText('等待网易云扫一扫中...');
         return;
@@ -1484,14 +1526,14 @@ export const SettingsSyncTab: React.FC = () => {
       console.warn('Backend QR key generation error, trying client:', backendErr);
     }
 
-    // 2. Client fallback
+    // 3. Client fallback
     try {
       const clientKeyRes = await getNetEaseQrKeyClient();
       if (clientKeyRes && clientKeyRes.success && clientKeyRes.unikey) {
         setQrUniKey(clientKeyRes.unikey);
         const officialAuthUrl = `https://music.163.com/login?codekey=${encodeURIComponent(clientKeyRes.unikey)}`;
         setQrAuthUrl(officialAuthUrl);
-        setQrImg(`https://api.qrserver.com/v1/create-qr-code/?size=300x300&data=${encodeURIComponent(officialAuthUrl)}`);
+        setQrImg(clientKeyRes.qrimg || generateQrDataUrlLocal(officialAuthUrl));
         setQrStatus('waiting_scan');
         setQrStatusText('等待网易云扫一扫中...');
         return;
@@ -1517,18 +1559,34 @@ export const SettingsSyncTab: React.FC = () => {
       return;
     }
 
-    const checkStatus = async () => {
-      if (isCheckingQrRef.current || isSuccessHandledRef.current) return;
+    let resumeTimers: number[] = [];
+
+    const checkStatus = async (force: boolean = false) => {
+      if (isSuccessHandledRef.current) return;
+      if (isCheckingQrRef.current && !force) return;
       isCheckingQrRef.current = true;
       try {
         if (activeMusicPlatform === 'qq') {
-          const qqData = await safeFetchJson(
-            `/api/qq/qr-check?key=${encodeURIComponent(qrUniKey)}&_t=${Date.now()}`,
-            {
-              method: 'POST',
-              body: JSON.stringify({ key: qrUniKey, timestamp: Date.now() })
+          let qqData: any = null;
+          // 1. Native Android QQ ptqrlogin bridge first
+          try {
+            const clientQq = await checkQqQrStatusClient(qrUniKey);
+            if (clientQq && clientQq.success) {
+              qqData = clientQq;
             }
-          );
+          } catch {
+            // fallback to backend
+          }
+          // 2. Backend fallback
+          if (!qqData) {
+            qqData = await safeFetchJson(
+              `/api/qq/qr-check?key=${encodeURIComponent(qrUniKey)}&_t=${Date.now()}`,
+              {
+                method: 'POST',
+                body: JSON.stringify({ key: qrUniKey, timestamp: Date.now() })
+              }
+            );
+          }
           if (!qqData || isSuccessHandledRef.current) return;
           const qqCode = Number(qqData.code);
           if (qqCode === 800) {
@@ -1563,7 +1621,7 @@ export const SettingsSyncTab: React.FC = () => {
             saveStoredPlatformAuth('qq', newProfile, cookie);
             setPlatformProfiles(prev => ({ ...prev, qq: newProfile }));
             showToast('QQ 音乐账号已成功绑定！已解锁绿钻原声与专属歌单');
-            setTimeout(() => setIsQrModalOpen(false), 1200);
+            setTimeout(() => setIsQrModalOpen(false), 900);
             loadQqUserPlaylists(cookie, uin).catch(err => {
               console.warn('Async QQ playlist load error:', err);
             });
@@ -1605,17 +1663,24 @@ export const SettingsSyncTab: React.FC = () => {
           setQrStatus('waiting_confirm');
           setQrStatusText('扫描成功！请在网易云 App 上轻触「确认登录」');
         } else if (code === 803) {
+          const cookie = data.cookie || '';
+          const realUserId = Number(data.profile?.userId || 0);
+          // Guard against empty-cookie false positive: require either a valid MUSIC_U cookie or resolved userId
+          if (!cookie && !realUserId) {
+            setQrStatus('waiting_confirm');
+            setQrStatusText('正在同步网易云登录凭据...');
+            return;
+          }
           isSuccessHandledRef.current = true;
           setQrStatus('success');
           setQrStatusText('授权成功！已绑定网易云账号');
-          const cookie = data.cookie || '';
           if (cookie) {
             setNcmCookie(cookie);
             localStorage.setItem('lyricalens_ncm_cookie', cookie);
           }
 
           const defaultNcmProfile: NcmProfile = {
-            userId: data.profile?.userId || Date.now(),
+            userId: realUserId,
             nickname: data.profile?.nickname || '网易云VIP用户',
             avatarUrl: data.profile?.avatarUrl || 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=200&auto=format&fit=crop&q=80',
             vipType: data.profile?.vipType ?? 1
@@ -1625,7 +1690,9 @@ export const SettingsSyncTab: React.FC = () => {
 
           const newProfile: PlatformAuthProfile = {
             platform: 'netease',
+            userId: realUserId || undefined,
             nickname: defaultNcmProfile.nickname,
+            avatarUrl: defaultNcmProfile.avatarUrl,
             isVip: true,
             vipLabel: '网易云 VIP 原声已打通',
             credentialSummary: '网易云扫码授权',
@@ -1635,12 +1702,21 @@ export const SettingsSyncTab: React.FC = () => {
           setPlatformProfiles(prev => ({ ...prev, netease: newProfile }));
 
           showToast('网易云账号已成功绑定！已解锁 VIP 原声与专属歌单');
-          setTimeout(() => setIsQrModalOpen(false), 1200);
+          setTimeout(() => setIsQrModalOpen(false), 900);
 
           if (cookie) {
             loadUserProfileAndPlaylists(cookie).catch(err => {
               console.warn('Async playlist load error:', err);
             });
+          } else if (realUserId > 0) {
+            fetchNetEaseUserDetailAndPlaylistsClient(String(realUserId))
+              .then(res => {
+                if (res.success && res.playlists && res.playlists.length > 0) {
+                  setUserPlaylists(res.playlists);
+                  localStorage.setItem('lyricalens_ncm_playlists', JSON.stringify(res.playlists));
+                }
+              })
+              .catch(() => {});
           }
         }
       } catch (err) {
@@ -1650,28 +1726,50 @@ export const SettingsSyncTab: React.FC = () => {
       }
     };
 
-    // 1. Regular polling interval
-    const timer = setInterval(checkStatus, 1600);
+    const triggerResumeBurstCheck = () => {
+      resumeTimers.forEach(t => window.clearTimeout(t));
+      resumeTimers = [
+        window.setTimeout(() => checkStatus(true), 0),
+        window.setTimeout(() => checkStatus(true), 350),
+        window.setTimeout(() => checkStatus(true), 900),
+        window.setTimeout(() => checkStatus(true), 1800)
+      ];
+    };
 
-    // 2. Lifecycle Wakeup Listeners: Immediately poll when returning from NetEase App
+    // 1. Immediate initial check + regular polling interval
+    checkStatus(false);
+    const timer = window.setInterval(() => checkStatus(false), 1400);
+
+    // 2. Lifecycle Wakeup & Native Background Executor Listeners
     const handleVisibilityChange = () => {
       if (document.visibilityState === 'visible') {
-        checkStatus();
+        triggerResumeBurstCheck();
       }
     };
     const handleWindowFocus = () => {
-      checkStatus();
+      triggerResumeBurstCheck();
+    };
+    const handleNativeResume = () => {
+      triggerResumeBurstCheck();
+    };
+    const handleNativeQrStatus = (ev: Event) => {
+      const detail = (ev as CustomEvent)?.detail;
+      if (detail && (detail.code === 803 || detail.code === 802 || detail.code === 800)) {
+        checkStatus(true);
+      }
     };
 
     document.addEventListener('visibilitychange', handleVisibilityChange);
     window.addEventListener('focus', handleWindowFocus);
+    window.addEventListener('lyricalens:native-resume', handleNativeResume);
+    window.addEventListener('lyricalens:native-qr-status', handleNativeQrStatus);
 
     let appStateSub: any = null;
     if (Capacitor.isNativePlatform()) {
       try {
         appStateSub = CapApp.addListener('appStateChange', (state) => {
           if (state.isActive) {
-            checkStatus();
+            triggerResumeBurstCheck();
           }
         });
       } catch {
@@ -1680,9 +1778,12 @@ export const SettingsSyncTab: React.FC = () => {
     }
 
     return () => {
-      clearInterval(timer);
+      window.clearInterval(timer);
+      resumeTimers.forEach(t => window.clearTimeout(t));
       document.removeEventListener('visibilitychange', handleVisibilityChange);
       window.removeEventListener('focus', handleWindowFocus);
+      window.removeEventListener('lyricalens:native-resume', handleNativeResume);
+      window.removeEventListener('lyricalens:native-qr-status', handleNativeQrStatus);
       if (appStateSub) {
         appStateSub.then?.((sub: any) => sub.remove?.()).catch?.(() => {});
       }
@@ -2256,7 +2357,7 @@ export const SettingsSyncTab: React.FC = () => {
   return (
     <div className="space-y-4 pb-8 animate-in fade-in duration-300">
       {/* 1. 查词与语音朗读偏好 (全局默认点词自动发音开关 + 英/美口音切换) */}
-      <div className="rounded-3xl bg-white/45 dark:bg-white/[0.04] backdrop-blur-xl border border-stone-900/[0.06] dark:border-white/[0.07] p-5 shadow-[0_4px_24px_-4px_rgba(0,0,0,0.03)] dark:shadow-[0_4px_24px_-4px_rgba(0,0,0,0.3)] space-y-4">
+      <div className="rounded-3xl bg-white/80 dark:bg-[#151C28]/88 border border-stone-900/[0.06] dark:border-white/[0.07] p-5 shadow-[0_4px_24px_-4px_rgba(0,0,0,0.03)] dark:shadow-[0_4px_24px_-4px_rgba(0,0,0,0.3)] space-y-4">
         <div className="flex items-center justify-between">
           <h3 className="text-base font-semibold text-stone-800 dark:text-stone-100">
             查词与语音朗读偏好
@@ -2340,7 +2441,7 @@ export const SettingsSyncTab: React.FC = () => {
       </div>
 
       {/* 2. 音乐服务与音质 (多平台统一联动，无重复导入入口) */}
-      <div className="rounded-3xl bg-white/45 dark:bg-white/[0.04] backdrop-blur-xl border border-stone-900/[0.06] dark:border-white/[0.07] p-5 space-y-4 shadow-[0_4px_24px_-4px_rgba(0,0,0,0.03)] dark:shadow-[0_4px_24px_-4px_rgba(0,0,0,0.3)]">
+      <div className="rounded-3xl bg-white/80 dark:bg-[#151C28]/88 border border-stone-900/[0.06] dark:border-white/[0.07] p-5 space-y-4 shadow-[0_4px_24px_-4px_rgba(0,0,0,0.03)] dark:shadow-[0_4px_24px_-4px_rgba(0,0,0,0.3)]">
         {/* Card Header */}
         <div className="flex items-center justify-between">
           <h3 className="text-base font-semibold text-stone-800 dark:text-stone-100">
@@ -2392,7 +2493,7 @@ export const SettingsSyncTab: React.FC = () => {
                   animate={{ opacity: 1, scale: 1, y: 0 }}
                   exit={{ opacity: 0, scale: 0.96, y: -6 }}
                   transition={{ type: 'spring', stiffness: 450, damping: 28 }}
-                  className="absolute top-full left-0 right-0 mt-1.5 p-1.5 rounded-2xl bg-[#FAF8F5]/98 dark:bg-[#18191C]/98 backdrop-blur-2xl border border-stone-900/10 dark:border-white/10 shadow-[0_12px_32px_rgba(0,0,0,0.12)] dark:shadow-[0_16px_40px_rgba(0,0,0,0.6)] z-50 overflow-hidden space-y-0.5 origin-top"
+                  className="absolute top-full left-0 right-0 mt-1.5 p-1.5 rounded-2xl bg-[#FAF8F5] dark:bg-[#18191C] border border-stone-900/10 dark:border-white/10 shadow-[0_12px_32px_rgba(0,0,0,0.12)] dark:shadow-[0_16px_40px_rgba(0,0,0,0.6)] z-50 overflow-hidden space-y-0.5 origin-top"
                 >
                   {MAJOR_MUSIC_PLATFORMS.map(platform => {
                     const Icon = platform.icon;
@@ -2828,7 +2929,7 @@ export const SettingsSyncTab: React.FC = () => {
         const currentConfigured = isProviderConfigured(currentMeta.id);
 
         return (
-          <div className="relative z-20 rounded-3xl bg-white/45 dark:bg-white/[0.04] backdrop-blur-xl border border-stone-900/[0.06] dark:border-white/[0.07] p-5 space-y-4 shadow-[0_4px_24px_-4px_rgba(0,0,0,0.03)] dark:shadow-[0_4px_24px_-4px_rgba(0,0,0,0.3)]">
+          <div className="relative z-20 rounded-3xl bg-white/80 dark:bg-[#151C28]/88 border border-stone-900/[0.06] dark:border-white/[0.07] p-5 space-y-4 shadow-[0_4px_24px_-4px_rgba(0,0,0,0.03)] dark:shadow-[0_4px_24px_-4px_rgba(0,0,0,0.3)]">
             {/* 顶栏：标题与配置密钥按钮 */}
             <div className="flex items-center justify-between">
               <h3 className="text-base font-semibold text-stone-800 dark:text-stone-100">
@@ -2913,7 +3014,7 @@ export const SettingsSyncTab: React.FC = () => {
                       animate={{ opacity: 1, scale: 1, y: 0 }}
                       exit={{ opacity: 0, scale: 0.96, y: -6 }}
                       transition={{ type: 'spring', stiffness: 450, damping: 28 }}
-                      className="absolute top-full left-0 right-0 mt-1.5 p-1.5 rounded-2xl bg-[#FAF8F5]/98 dark:bg-[#18191C]/98 backdrop-blur-2xl border border-stone-900/10 dark:border-white/10 shadow-[0_16px_40px_rgba(0,0,0,0.16)] dark:shadow-[0_20px_48px_rgba(0,0,0,0.6)] z-50 max-h-72 overflow-y-auto space-y-0.5 origin-top"
+                      className="absolute top-full left-0 right-0 mt-1.5 p-1.5 rounded-2xl bg-[#FAF8F5] dark:bg-[#18191C] border border-stone-900/10 dark:border-white/10 shadow-[0_16px_40px_rgba(0,0,0,0.16)] dark:shadow-[0_20px_48px_rgba(0,0,0,0.6)] z-50 max-h-72 overflow-y-auto space-y-0.5 origin-top"
                     >
                       {MAJOR_AI_PROVIDERS.map(p => {
                         const Icon = p.icon;
@@ -3045,7 +3146,7 @@ export const SettingsSyncTab: React.FC = () => {
       })()}
 
       {/* 4. 数据存储与备份管理 */}
-      <div className="rounded-3xl bg-white/45 dark:bg-white/[0.04] backdrop-blur-xl border border-stone-900/[0.06] dark:border-white/[0.07] p-5 space-y-4 shadow-[0_4px_24px_-4px_rgba(0,0,0,0.03)] dark:shadow-[0_4px_24px_-4px_rgba(0,0,0,0.3)]">
+      <div className="rounded-3xl bg-white/80 dark:bg-[#151C28]/88 border border-stone-900/[0.06] dark:border-white/[0.07] p-5 space-y-4 shadow-[0_4px_24px_-4px_rgba(0,0,0,0.03)] dark:shadow-[0_4px_24px_-4px_rgba(0,0,0,0.3)]">
         <div className="flex items-center justify-between">
           <h3 className="text-base font-semibold text-stone-800 dark:text-stone-100">
             数据存储与备份
@@ -3216,7 +3317,12 @@ export const SettingsSyncTab: React.FC = () => {
                   </button>
                   <button
                     type="button"
-                    onClick={() => setNcmAuthTab('qr')}
+                    onClick={() => {
+                      setNcmAuthTab('qr');
+                      if (!qrImg || qrStatus === 'error' || qrStatus === 'expired') {
+                        startQrLogin(true);
+                      }
+                    }}
                     className={`flex-1 py-1.5 px-2 rounded-xl font-medium transition-all cursor-pointer flex items-center justify-center gap-1.5 ${
                       ncmAuthTab === 'qr'
                         ? 'bg-white dark:bg-stone-800 text-stone-900 dark:text-stone-100 shadow-xs font-semibold'

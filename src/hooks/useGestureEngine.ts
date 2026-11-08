@@ -39,7 +39,6 @@ function isAnyModalOpen(state: ReturnType<typeof useAppStore.getState>): boolean
 
 export function useGestureEngine(options: GestureEngineOptions = {}) {
   const { enableXSwipe = true, enableYSwipeInMusic = true } = options;
-  const activeSpace = useAppStore(s => s.activeSpace);
   const setActiveSpace = useAppStore(s => s.setActiveSpace);
   const nextSong = useAppStore(s => s.nextSong);
   const prevSong = useAppStore(s => s.prevSong);
@@ -146,6 +145,7 @@ export function useGestureEngine(options: GestureEngineOptions = {}) {
       const el = cache.viewport;
       if (!el) return;
 
+      const activeSpace = useAppStore.getState().activeSpace;
       const latestDiffX = pendingDiffX.current;
       const containerWidth = cache.containerWidth || 412;
       const dragRatio = Math.min(1, Math.abs(latestDiffX) / containerWidth);
@@ -195,7 +195,7 @@ export function useGestureEngine(options: GestureEngineOptions = {}) {
         arSolidCore.style.opacity = coreOpacity.toFixed(3);
       }
     });
-  }, [activeSpace, refreshDomCache]);
+  }, [refreshDomCache]);
 
   const resetViewportTransition = useCallback((targetSpace: number) => {
     if (rafId.current !== null) {
@@ -207,26 +207,24 @@ export function useGestureEngine(options: GestureEngineOptions = {}) {
     if (!el) return;
 
     triggerHighRefreshBoost(1200);
-    const { fps } = getDisplayRefreshRateState();
-    const durationMs = fps >= 120 ? 360 : fps >= 90 ? 380 : 400;
-    const opacityDurationMs = fps >= 120 ? 330 : fps >= 90 ? 350 : 370;
+    const durationCss = 'var(--spring-duration-space, 380ms)';
     const curve = 'cubic-bezier(0.22, 1, 0.36, 1)';
 
-    el.style.transition = `transform ${durationMs}ms ${curve}`;
-    (el.style as any).webkitTransition = `-webkit-transform ${durationMs}ms ${curve}`;
+    el.style.transition = `transform ${durationCss} ${curve}`;
+    (el.style as any).webkitTransition = `-webkit-transform ${durationCss} ${curve}`;
     el.style.transform = `translate3d(-${(targetSpace * 100) / 3}%, 0, 0)`;
     (el.style as any).webkitTransform = `translate3d(-${(targetSpace * 100) / 3}%, 0, 0)`;
 
     const arBackdrop = cache.arBackdrop || document.getElementById('ar-ambient-backdrop');
     if (arBackdrop) {
-      arBackdrop.style.transition = `opacity ${durationMs}ms ${curve}`;
-      (arBackdrop.style as any).webkitTransition = `opacity ${durationMs}ms ${curve}`;
+      arBackdrop.style.transition = `opacity ${durationCss} ${curve}`;
+      (arBackdrop.style as any).webkitTransition = `opacity ${durationCss} ${curve}`;
       arBackdrop.style.opacity = targetSpace === 0 ? '1' : '0';
     }
     const arSolidCore = cache.arSolidCore || document.getElementById('ar-solid-core');
     if (arSolidCore) {
-      arSolidCore.style.transition = `opacity ${opacityDurationMs}ms ${curve}`;
-      (arSolidCore.style as any).webkitTransition = `opacity ${opacityDurationMs}ms ${curve}`;
+      arSolidCore.style.transition = `opacity ${durationCss} ${curve}`;
+      (arSolidCore.style as any).webkitTransition = `opacity ${durationCss} ${curve}`;
       arSolidCore.style.opacity = targetSpace === 0 ? '1' : '0';
     }
   }, []);
@@ -247,6 +245,11 @@ export function useGestureEngine(options: GestureEngineOptions = {}) {
       if (!wrapper) return;
       const titleStage = cache.titleStage;
       const quoteStage = cache.quoteStage;
+
+      // Cancel any running Web Animations API entry animations before applying finger drag transform
+      wrapper.getAnimations?.().forEach(a => a.cancel());
+      titleStage?.getAnimations?.().forEach(a => a.cancel());
+      quoteStage?.getAnimations?.().forEach(a => a.cancel());
 
       const latestDiffY = pendingDiffY.current;
       if (wrapper.style.transition !== 'none') {
@@ -320,55 +323,71 @@ export function useGestureEngine(options: GestureEngineOptions = {}) {
       return;
     }
 
-    // Pure compositor-thread inertial entry from incoming direction (zero Group Opacity offscreen FBO on card wrapper)
+    // Pure compositor-thread Web Animations API entry on Frame 0 (never swallowed by single-rAF style coalescing)
     const entryY = direction === 'up' ? 64 : -64;
     const textEntryY = direction === 'up' ? 18 : -18;
 
+    wrapper.getAnimations?.().forEach(a => a.cancel());
     wrapper.style.transition = 'none';
     (wrapper.style as any).webkitTransition = 'none';
-    wrapper.style.transform = `translate3d(0, ${entryY}px, 0) scale(0.93)`;
-    (wrapper.style as any).webkitTransform = `translate3d(0, ${entryY}px, 0) scale(0.93)`;
+    wrapper.style.transform = 'translate3d(0, 0, 0) scale(1)';
+    (wrapper.style as any).webkitTransform = 'translate3d(0, 0, 0) scale(1)';
+    if (typeof wrapper.animate === 'function') {
+      wrapper.animate(
+        [
+          { transform: `translate3d(0, ${entryY}px, 0) scale(0.93)` },
+          { transform: 'translate3d(0, 0, 0) scale(1)' },
+        ],
+        {
+          duration: settleMs,
+          easing: 'cubic-bezier(0.16, 1, 0.3, 1)',
+        }
+      );
+    }
 
     if (titleStage) {
+      titleStage.getAnimations?.().forEach(a => a.cancel());
       titleStage.style.transition = 'none';
-      titleStage.style.transform = `translate3d(0, ${textEntryY}px, 0)`;
-      titleStage.style.opacity = '0';
+      titleStage.style.transform = 'translate3d(0, 0, 0)';
+      titleStage.style.opacity = '1';
+      if (typeof titleStage.animate === 'function') {
+        titleStage.animate(
+          [
+            { transform: `translate3d(0, ${textEntryY}px, 0)`, opacity: 0 },
+            { transform: 'translate3d(0, 0, 0)', opacity: 1 },
+          ],
+          {
+            duration: settleMs,
+            easing: 'cubic-bezier(0.16, 1, 0.3, 1)',
+          }
+        );
+      }
     }
     if (quoteStage) {
+      quoteStage.getAnimations?.().forEach(a => a.cancel());
       quoteStage.style.transition = 'none';
-      quoteStage.style.transform = `translate3d(0, ${textEntryY}px, 0)`;
-      quoteStage.style.opacity = '0';
+      quoteStage.style.transform = 'translate3d(0, 0, 0)';
+      quoteStage.style.opacity = '1';
+      if (typeof quoteStage.animate === 'function') {
+        quoteStage.animate(
+          [
+            { transform: `translate3d(0, ${textEntryY}px, 0)`, opacity: 0 },
+            { transform: 'translate3d(0, 0, 0)', opacity: 1 },
+          ],
+          {
+            duration: settleMs,
+            easing: 'cubic-bezier(0.16, 1, 0.3, 1)',
+          }
+        );
+      }
     }
-
-    // Use next-VSync frame handoff instead of synchronous `offsetHeight` forced layout reflow
-    cardSwitchRafId.current = requestAnimationFrame(() => {
-      cardSwitchRafId.current = requestAnimationFrame(() => {
-        cardSwitchRafId.current = null;
-        const cardEnterSpring = `transform ${settleMs}ms cubic-bezier(0.16, 1, 0.3, 1)`;
-        const textEnterSpring = `transform ${settleMs}ms cubic-bezier(0.16, 1, 0.3, 1), opacity ${fadeMs}ms cubic-bezier(0.16, 1, 0.3, 1)`;
-        wrapper.style.transition = cardEnterSpring;
-        (wrapper.style as any).webkitTransition = `-webkit-transform ${settleMs}ms cubic-bezier(0.16, 1, 0.3, 1)`;
-        wrapper.style.transform = 'translate3d(0, 0, 0) scale(1)';
-        (wrapper.style as any).webkitTransform = 'translate3d(0, 0, 0) scale(1)';
-
-        if (titleStage) {
-          titleStage.style.transition = textEnterSpring;
-          titleStage.style.transform = 'translate3d(0, 0, 0)';
-          titleStage.style.opacity = '1';
-        }
-        if (quoteStage) {
-          quoteStage.style.transition = textEnterSpring;
-          quoteStage.style.transform = 'translate3d(0, 0, 0)';
-          quoteStage.style.opacity = '1';
-        }
-      });
-    });
   }, []);
 
   const handleTouchMove = useCallback((e: TouchEvent | MouseEvent) => {
     if (!isDragging.current) return;
 
     const state = useAppStore.getState();
+    const activeSpace = state.activeSpace;
     if (isAnyModalOpen(state)) {
       isDragging.current = false;
       lockedAxis.current = null;
@@ -400,13 +419,14 @@ export function useGestureEngine(options: GestureEngineOptions = {}) {
     } else if (lockedAxis.current === 'y' && enableYSwipeInMusic && activeSpace === 1) {
       updateCardVerticalTransform(diffY);
     }
-  }, [activeSpace, enableXSwipe, enableYSwipeInMusic, updateViewportTransform, updateCardVerticalTransform, resetViewportTransition, animateCardVerticalSwitch]);
+  }, [enableXSwipe, enableYSwipeInMusic, updateViewportTransform, updateCardVerticalTransform, resetViewportTransition, animateCardVerticalSwitch]);
 
   const handleTouchEnd = useCallback(() => {
     if (!isDragging.current) return;
     isDragging.current = false;
 
     const state = useAppStore.getState();
+    const activeSpace = state.activeSpace;
     if (isAnyModalOpen(state)) {
       if (lockedAxis.current === 'x') {
         resetViewportTransition(activeSpace);
@@ -442,7 +462,6 @@ export function useGestureEngine(options: GestureEngineOptions = {}) {
       (lockedAxis.current !== 'y' && Math.abs(diffX) > Math.abs(diffY) * 1.2 && (isFastFlickX || isNormalSwipeX));
 
     let targetSpace = activeSpace;
-    let switchedDirection: 'up' | 'down' | null = null;
     if (isHorizontalIntent && enableXSwipe) {
       if (diffX < 0 && (diffX < -45 || isFastFlickX)) {
         if (activeSpace < 2) {
@@ -461,12 +480,10 @@ export function useGestureEngine(options: GestureEngineOptions = {}) {
       const isFastFlickY = Math.abs(velocityY) > 0.18 && Math.abs(diffY) > 16;
       if (diffY < -26 || (diffY < 0 && isFastFlickY)) {
         // Swipe Up -> Next song
-        switchedDirection = 'up';
         nextSong('up');
         animateCardVerticalSwitch('up');
       } else if (diffY > 26 || (diffY > 0 && isFastFlickY)) {
         // Swipe Down -> Previous song
-        switchedDirection = 'down';
         prevSong('down');
         animateCardVerticalSwitch('down');
       } else {
@@ -475,7 +492,7 @@ export function useGestureEngine(options: GestureEngineOptions = {}) {
     }
 
     lockedAxis.current = null;
-  }, [activeSpace, enableXSwipe, enableYSwipeInMusic, nextSong, prevSong, resetViewportTransition, animateCardVerticalSwitch, setActiveSpace]);
+  }, [enableXSwipe, enableYSwipeInMusic, nextSong, prevSong, resetViewportTransition, animateCardVerticalSwitch, setActiveSpace]);
 
   useEffect(() => {
     const el = window;
@@ -484,7 +501,7 @@ export function useGestureEngine(options: GestureEngineOptions = {}) {
     const handleCancel = () => {
       if (!isDragging.current) return;
       isDragging.current = false;
-      resetViewportTransition(activeSpace);
+      resetViewportTransition(useAppStore.getState().activeSpace);
       animateCardVerticalSwitch(null);
       lockedAxis.current = null;
     };
@@ -530,5 +547,5 @@ export function useGestureEngine(options: GestureEngineOptions = {}) {
       docEl.removeEventListener('mouseleave', handleCancel, false);
       window.removeEventListener('click', handleCaptureClick, true);
     };
-  }, [handleTouchStart, handleTouchMove, handleTouchEnd, refreshDomCache, activeSpace, resetViewportTransition, animateCardVerticalSwitch]);
+  }, [handleTouchStart, handleTouchMove, handleTouchEnd, refreshDomCache, resetViewportTransition, animateCardVerticalSwitch]);
 }

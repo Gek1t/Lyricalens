@@ -239,7 +239,7 @@ export const IELTSArchivesTab: React.FC<IELTSArchivesTabProps> = ({ onOpenReview
   return (
     <div className="space-y-4 pb-8 animate-in fade-in duration-300">
       {/* 1. IELTS Academic Analytics Hero Capsule */}
-      <div className="rounded-3xl bg-white/45 dark:bg-white/[0.04] backdrop-blur-xl border border-stone-900/[0.06] dark:border-white/[0.07] p-5 shadow-[0_4px_24px_-4px_rgba(0,0,0,0.03)] dark:shadow-[0_4px_24px_-4px_rgba(0,0,0,0.3)] space-y-4">
+      <div className="rounded-3xl bg-white/80 dark:bg-[#151C28]/88 border border-stone-900/[0.06] dark:border-white/[0.07] p-5 shadow-[0_4px_24px_-4px_rgba(0,0,0,0.03)] dark:shadow-[0_4px_24px_-4px_rgba(0,0,0,0.3)] space-y-4">
         {/* Header Title & Total Count */}
         <div className="flex items-center justify-between">
           <h3 className="text-base font-semibold text-stone-800 dark:text-stone-100">
@@ -335,7 +335,7 @@ export const IELTSArchivesTab: React.FC<IELTSArchivesTabProps> = ({ onOpenReview
             value={searchQuery}
             onChange={e => setSearchQuery(e.target.value)}
             placeholder="搜索篇目、真题来源、核心考点词..."
-            className="w-full pl-10 pr-9 py-2.5 rounded-2xl bg-white/45 dark:bg-white/[0.04] backdrop-blur-xl border border-stone-900/[0.06] dark:border-white/[0.07] text-xs font-sans text-stone-800 dark:text-stone-100 placeholder-stone-400 focus:outline-none focus:ring-2 focus:ring-stone-400/30 shadow-[0_2px_12px_-4px_rgba(0,0,0,0.03)]"
+            className="w-full pl-10 pr-9 py-2.5 rounded-2xl bg-white/80 dark:bg-[#151C28]/88 border border-stone-900/[0.06] dark:border-white/[0.07] text-xs font-sans text-stone-800 dark:text-stone-100 placeholder-stone-400 focus:outline-none focus:ring-2 focus:ring-stone-400/30 shadow-[0_2px_12px_-4px_rgba(0,0,0,0.03)]"
           />
           {searchQuery && (
             <button
@@ -382,7 +382,7 @@ export const IELTSArchivesTab: React.FC<IELTSArchivesTabProps> = ({ onOpenReview
 
       {/* 3. Test Records List (Report Cards) */}
       {filteredTests.length === 0 ? (
-        <div className="p-8 text-center rounded-3xl bg-white/45 dark:bg-white/[0.04] backdrop-blur-xl border border-dashed border-stone-900/[0.08] dark:border-white/10 space-y-3">
+        <div className="p-8 text-center rounded-3xl bg-white/80 dark:bg-[#151C28]/88 border border-dashed border-stone-900/[0.08] dark:border-white/10 space-y-3">
           <BookOpen className="w-9 h-9 text-stone-400 mx-auto opacity-50" />
           <div>
             <p className="text-xs font-semibold text-stone-700 dark:text-stone-300">
@@ -430,7 +430,7 @@ export const IELTSArchivesTab: React.FC<IELTSArchivesTabProps> = ({ onOpenReview
               <div
                 key={record.id || index}
                 onClick={() => handleOpenReview(record)}
-                className="group p-4.5 rounded-3xl bg-white/50 dark:bg-white/[0.04] backdrop-blur-xl border border-stone-900/[0.06] dark:border-white/[0.07] transition-all space-y-3 shadow-[0_2px_16px_-4px_rgba(0,0,0,0.03)] dark:shadow-[0_4px_24px_-4px_rgba(0,0,0,0.4)] hover:bg-white/70 dark:hover:bg-white/[0.06] hover:border-stone-900/12 dark:hover:border-white/15 cursor-pointer"
+                className="group p-4.5 rounded-3xl bg-white/80 dark:bg-[#151C28]/88 border border-stone-900/[0.06] dark:border-white/[0.07] transition-all space-y-3 shadow-[0_2px_16px_-4px_rgba(0,0,0,0.03)] dark:shadow-[0_4px_24px_-4px_rgba(0,0,0,0.4)] hover:bg-white/70 dark:hover:bg-white/[0.06] hover:border-stone-900/12 dark:hover:border-white/15 cursor-pointer"
               >
                 {/* Header Section: Top Kicker + Compact Band Tag, followed by full-width Passage Title */}
                 <div className="space-y-1">
