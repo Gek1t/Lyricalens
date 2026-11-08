@@ -1,10 +1,11 @@
 import React, { useState, useRef, useEffect, useMemo, useCallback } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
-import { useLiveQuery } from 'dexie-react-hooks';
-import { LyricLine, SongItem } from '../../types';
+import { LyricLine, SongItem, WordItem } from '../../types';
 import { useAppStore } from '../../store/useAppStore';
 import { lookupLyricTerm, cleanWordText, getLyricLineTranslation } from '../../utils/lyricDictionary';
-import { collectWord, db } from '../../db';
+import { withColorAlpha } from '../../utils/colorExtractor';
+import { triggerHighRefreshBoost } from '../../utils/displayRefreshRate';
+import { collectWord } from '../../db';
 import { ChevronLeft, Type, MoveVertical, X, RotateCcw, SlidersHorizontal, Clock, Sparkles, Play } from 'lucide-react';
 
 const formatTime = (timeSec: number) => {
@@ -21,6 +22,7 @@ interface FullscreenLyricsViewProps {
   onSeek: (timeSec: number) => void;
   albumArtUrl: string;
   palette?: string[];
+  savedWords?: WordItem[];
 }
 
 interface GestureState {
@@ -47,7 +49,8 @@ export const FullscreenLyricsView: React.FC<FullscreenLyricsViewProps> = React.m
   activeLyricIndex,
   onClose,
   onSeek,
-  palette = ['#E6DFD5', '#CBD5C8', '#C3B8A8']
+  palette = ['#E6DFD5', '#CBD5C8', '#C3B8A8'],
+  savedWords = []
 }) => {
   const containerRef = useRef<HTMLDivElement>(null);
   const activeLineRef = useRef<HTMLDivElement>(null);
@@ -153,21 +156,18 @@ export const FullscreenLyricsView: React.FC<FullscreenLyricsViewProps> = React.m
     return Math.max(11, Math.min(15, Math.round(fontSize * 0.62)));
   }, [fontSize]);
 
-  // Live query for collected words in vocabulary book
-  const collectedWords = useLiveQuery(() => db.words.toArray(), []);
-
-  // Set of lowercase, cleaned saved words & phrases in the vault
+  // Set of lowercase, cleaned saved words & phrases in the vault (synchronously received from parent dbWords to avoid mid-animation IndexedDB re-render)
   const savedWordsSet = useMemo(() => {
-    if (!collectedWords) return new Set<string>();
+    if (!savedWords || savedWords.length === 0) return new Set<string>();
     const set = new Set<string>();
-    for (const item of collectedWords) {
+    for (const item of savedWords) {
       if (item.word && (item.isStarred || (typeof item.masteryLevel === 'number' && item.masteryLevel > 0))) {
         const clean = cleanWordText(item.word).toLowerCase();
         if (clean) set.add(clean);
       }
     }
     return set;
-  }, [collectedWords]);
+  }, [savedWords]);
 
   // Precompute saved vocabulary span lookup table once per song/vault update instead of on every render frame
   const savedSpanLookup = useMemo(() => {
@@ -377,14 +377,23 @@ export const FullscreenLyricsView: React.FC<FullscreenLyricsViewProps> = React.m
       clearTimeout(programmaticScrollTimerRef.current);
     }
 
-    const targetScroll =
-      lineEl.offsetTop -
-      container.clientHeight * 0.42 +
-      lineEl.offsetHeight / 2;
+    const targetScroll = Math.max(
+      0,
+      lineEl.offsetTop - container.clientHeight * 0.42 + lineEl.offsetHeight / 2
+    );
+
+    if (!smooth) {
+      container.scrollTop = targetScroll;
+      programmaticScrollTimerRef.current = window.setTimeout(() => {
+        programmaticScrollTimerRef.current = null;
+        isProgrammaticScrollingRef.current = false;
+      }, 120);
+      return;
+    }
 
     container.scrollTo({
-      top: Math.max(0, targetScroll),
-      behavior: smooth ? 'smooth' : 'auto'
+      top: targetScroll,
+      behavior: 'smooth'
     });
 
     programmaticScrollTimerRef.current = window.setTimeout(() => {
@@ -393,25 +402,31 @@ export const FullscreenLyricsView: React.FC<FullscreenLyricsViewProps> = React.m
     }, 450);
   };
 
-  // Auto-scroll follow active lyric line (only when user is not manually scrubbing)
+  const hasInitialPositionedRef = useRef(false);
+
+  // Initial instantaneous jump to current playing line on mount Frame 0 (avoids 80ms mid-animation forced reflow)
   useEffect(() => {
+    triggerHighRefreshBoost(1200);
+    const raf = requestAnimationFrame(() => {
+      scrollToLine(activeLyricIndexRef.current, false);
+      hasInitialPositionedRef.current = true;
+    });
+    return () => cancelAnimationFrame(raf);
+  }, []);
+
+  // Auto-scroll follow active lyric line (only when user is not manually scrubbing and after initial instant positioning)
+  useEffect(() => {
+    if (!hasInitialPositionedRef.current) return;
     if (!isScrubbing) {
       scrollToLine(activeLyricIndex, true);
     }
   }, [activeLyricIndex, isScrubbing, fontSize, lineSpacing]);
 
-  // Initial jump to current playing line on mount
-  useEffect(() => {
-    const t = setTimeout(() => {
-      scrollToLine(activeLyricIndexRef.current, false);
-    }, 80);
-    return () => clearTimeout(t);
-  }, []);
-
   // User manual scroll/drag detection (Apple Music / Netease aim timeline mode, VSync rAF throttled for 90/120Hz)
   const handleScroll = () => {
     if (isProgrammaticScrollingRef.current || gestureStateRef.current.isLongPressing) return;
     if (scrollRafRef.current !== null) return;
+    triggerHighRefreshBoost(1000);
 
     scrollRafRef.current = requestAnimationFrame(() => {
       scrollRafRef.current = null;
@@ -910,10 +925,10 @@ export const FullscreenLyricsView: React.FC<FullscreenLyricsViewProps> = React.m
   return (
     <motion.div
       id="fullscreen-flowing-lyrics-view"
-      initial={{ opacity: 0, scale: 0.95, y: 20 }}
-      animate={{ opacity: 1, scale: 1, y: 0 }}
-      exit={{ opacity: 0, scale: 0.96, y: 20 }}
-      transition={{ duration: 0.32, ease: [0.22, 1, 0.36, 1] }}
+      initial={{ opacity: 0, y: 18 }}
+      animate={{ opacity: 1, y: 0 }}
+      exit={{ opacity: 0, y: 18 }}
+      transition={{ duration: 0.24, ease: [0.22, 1, 0.36, 1] }}
       style={{
         willChange: 'transform, opacity',
         backfaceVisibility: 'hidden',
@@ -929,19 +944,25 @@ export const FullscreenLyricsView: React.FC<FullscreenLyricsViewProps> = React.m
       onMouseUp={handlePointerUp}
       onTouchCancel={handlePointerUp}
     >
-      {/* Full-bleed Ambient Fluid Mesh Glow */}
-      <div className="absolute inset-0 pointer-events-none overflow-hidden" style={{ contain: 'paint' }}>
+      {/* Full-bleed Ambient Fluid Mesh Glow (Pre-feathered Radial Gradients — Zero GPU Gaussian Blur Cost) */}
+      <div className="absolute inset-0 pointer-events-none overflow-hidden" style={{ contain: 'strict' }}>
         <div
-          className="absolute -top-16 -left-16 w-80 h-80 rounded-full blur-[90px] opacity-40 dark:opacity-20"
-          style={{ backgroundColor: palette[0] || '#CBD5C8', transform: 'translate3d(0, 0, 0)' }}
+          className="absolute -top-24 -left-24 w-[420px] h-[420px] rounded-full opacity-45 dark:opacity-22"
+          style={{
+            background: `radial-gradient(circle, ${withColorAlpha(palette[0] || '#CBD5C8', 0.65, '#CBD5C8')} 0%, ${withColorAlpha(palette[0] || '#CBD5C8', 0.22, '#CBD5C8')} 45%, transparent 72%)`
+          }}
         />
         <div
-          className="absolute top-1/3 -right-16 w-72 h-72 rounded-full blur-[85px] opacity-35 dark:opacity-15"
-          style={{ backgroundColor: palette[1] || '#E6DFD5', transform: 'translate3d(0, 0, 0)' }}
+          className="absolute top-1/4 -right-24 w-[380px] h-[380px] rounded-full opacity-40 dark:opacity-18"
+          style={{
+            background: `radial-gradient(circle, ${withColorAlpha(palette[1] || '#E6DFD5', 0.6, '#E6DFD5')} 0%, ${withColorAlpha(palette[1] || '#E6DFD5', 0.2, '#E6DFD5')} 45%, transparent 72%)`
+          }}
         />
         <div
-          className="absolute -bottom-16 left-1/4 w-80 h-80 rounded-full blur-[95px] opacity-30 dark:opacity-20"
-          style={{ backgroundColor: palette[2] || '#C3B8A8', transform: 'translate3d(0, 0, 0)' }}
+          className="absolute -bottom-24 left-1/6 w-[420px] h-[420px] rounded-full opacity-35 dark:opacity-22"
+          style={{
+            background: `radial-gradient(circle, ${withColorAlpha(palette[2] || '#C3B8A8', 0.6, '#C3B8A8')} 0%, ${withColorAlpha(palette[2] || '#C3B8A8', 0.2, '#C3B8A8')} 45%, transparent 72%)`
+          }}
         />
       </div>
 
@@ -1108,16 +1129,19 @@ export const FullscreenLyricsView: React.FC<FullscreenLyricsViewProps> = React.m
           )}
         </AnimatePresence>
 
-        {/* Main Flowing Lyrics Canvas (Safe horizontal gutters px-16 sm:px-20 and vertical fade mask ensure zero boundary bleed) */}
+        {/* Lightweight Top & Bottom Gradient Fade Overlays (Replaces expensive CSS mask-image so Android WebView uses 120Hz hardware fast-scroll tiles) */}
+        <div className="pointer-events-none absolute top-0 left-0 right-0 h-8 bg-gradient-to-b from-[#FAF8F5] dark:from-[#0D1117] to-transparent z-30" />
+        <div className="pointer-events-none absolute bottom-0 left-0 right-0 h-14 bg-gradient-to-t from-[#FAF8F5] dark:from-[#0D1117] to-transparent z-30" />
+
+        {/* Main Flowing Lyrics Canvas (Safe horizontal gutters px-16 sm:px-20 ensure zero boundary bleed) */}
         <div
           ref={containerRef}
           onScroll={handleScroll}
           style={{
             gap: `${lineSpacing}px`,
-            maskImage: 'linear-gradient(to bottom, transparent 0%, black 7%, black 88%, transparent 100%)',
-            WebkitMaskImage: 'linear-gradient(to bottom, transparent 0%, black 7%, black 88%, transparent 100%)'
+            contain: 'layout paint'
           }}
-          className="flex-1 w-full overflow-y-auto no-scrollbar px-16 sm:px-20 pt-8 pb-[160px] flex flex-col text-center select-none z-20 transition-[gap] duration-150"
+          className="flex-1 w-full overflow-y-auto no-scrollbar px-16 sm:px-20 pt-8 pb-[160px] flex flex-col text-center select-none z-20"
         >
           {/* Top Spacer */}
           <div className="h-12 flex-shrink-0" />
@@ -1144,20 +1168,25 @@ export const FullscreenLyricsView: React.FC<FullscreenLyricsViewProps> = React.m
             const translation = showTranslation ? (line.translation || getLyricLineTranslation(line.rawText)) : '';
 
             const lineOpacity = isDimmed ? 0.18 : isAimed ? 1 : isActive ? 1 : isScrubbing ? 0.45 : 0.38;
-            const lineScale = isAimed ? 1.02 : isActive ? activeScaleFactor : 0.97;
+            const isHighlightedLine = isActive || isAimed;
+            const lineScale = isAimed ? 1.02 : isActive ? activeScaleFactor : 1;
 
             return (
               <div
                 key={`${line.timeMs}-${lIdx}`}
                 data-line-index={lIdx}
                 ref={isActive ? activeLineRef : null}
-                style={{
-                  opacity: lineOpacity,
-                  transform: `translate3d(0, 0, 0) scale(${lineScale})`,
-                  WebkitTransform: `translate3d(0, 0, 0) scale(${lineScale})`,
-                  transition: 'transform 240ms cubic-bezier(0.22, 1, 0.36, 1), opacity 240ms ease-out',
-                  willChange: isActive || isAimed ? 'transform, opacity' : 'auto'
-                }}
+                style={
+                  isHighlightedLine
+                    ? {
+                        opacity: lineOpacity,
+                        transform: `scale(${lineScale})`,
+                        transition: 'transform 220ms cubic-bezier(0.22, 1, 0.36, 1), opacity 220ms ease-out',
+                      }
+                    : {
+                        opacity: lineOpacity,
+                      }
+                }
                 className="py-1 cursor-pointer"
                 onClick={() => {
                   if (isScrubbing && !gestureState.isLongPressing) {

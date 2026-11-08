@@ -4,7 +4,8 @@ import { motion, AnimatePresence } from 'motion/react';
 import { useLiveQuery } from 'dexie-react-hooks';
 import { useAppStore } from '../../store/useAppStore';
 import { parseLRC, findActiveLyricIndex } from '../../utils/lrcParser';
-import { extractDominantPalette, applyAmbientGlowColors } from '../../utils/colorExtractor';
+import { extractDominantPalette, applyAmbientGlowColors, withColorAlpha } from '../../utils/colorExtractor';
+import { triggerHighRefreshBoost } from '../../utils/displayRefreshRate';
 import { ambientSynth, speakWord } from '../../utils/audioEngine';
 import { db, collectWord, cycleWordMastery } from '../../db';
 import { SEED_WORDS } from '../../db/seedData';
@@ -121,11 +122,20 @@ export const MusicPlayerPanel: React.FC<MusicPlayerPanelProps> = ({ onOpenNotebo
 
   const currentSong: SongItem = songs[currentSongIndex] || songs[0] || fallbackSong;
 
+  // Defer heavy vocabulary regex scanning by 260ms on song switch so Frame 0 of vertical/button swipe is 100% jank-free
+  const [deferredVocabSong, setDeferredVocabSong] = useState<SongItem>(currentSong);
+  useEffect(() => {
+    const t = window.setTimeout(() => {
+      setDeferredVocabSong(currentSong);
+    }, 260);
+    return () => window.clearTimeout(t);
+  }, [currentSong]);
+
   // Resolved list of genuine vocabulary words for this song (Notebook words prioritized first)
   const songVocabList: WordItem[] = useMemo(() => {
-    if (!currentSong) return [];
-    const analysis = analyzeSongVocab(currentSong, dbWords);
-    const keyVocabs = analysis.allKeyVocab.length > 0 ? analysis.allKeyVocab : (currentSong.keyVocab || []);
+    if (!deferredVocabSong) return [];
+    const analysis = analyzeSongVocab(deferredVocabSong, dbWords);
+    const keyVocabs = analysis.allKeyVocab.length > 0 ? analysis.allKeyVocab : (deferredVocabSong.keyVocab || []);
     
     return keyVocabs.map((vocabStr) => {
       const matchDb = dbWords.find(w => w.word.toLowerCase() === vocabStr.toLowerCase());
@@ -141,17 +151,17 @@ export const MusicPlayerPanel: React.FC<MusicPlayerPanelProps> = ({ onOpenNotebo
         phoneticUk: `/${vocabStr}/`,
         phoneticUs: `/${vocabStr}/`,
         partOfSpeech: 'VOCAB',
-        definition: `Target key vocabulary in ${currentSong.title}`,
+        definition: `Target key vocabulary in ${deferredVocabSong.title}`,
         definitionCn: '雅思核心高频词汇',
         examples: [{
-          en: `Featured in the song "${currentSong.title}"`,
+          en: `Featured in the song "${deferredVocabSong.title}"`,
           cn: `收录于本曲核心意境`
         }],
         isStarred: false,
         addedTimestamp: Date.now()
       } as WordItem;
     });
-  }, [currentSong, dbWords]);
+  }, [deferredVocabSong, dbWords]);
 
   const [colorTheme, setColorTheme] = useState<{
     mattingBg: string;
@@ -182,6 +192,7 @@ export const MusicPlayerPanel: React.FC<MusicPlayerPanelProps> = ({ onOpenNotebo
     // Only open fullscreen lyrics if it was a genuine, non-moving stationary tap
     // (less than 8px movement and completed within 350ms, not a vertical or horizontal swipe)
     if (dx < 8 && dy < 8 && dt < 350) {
+      triggerHighRefreshBoost(1200);
       setIsFullscreenLyricsOpen(true);
     }
   };
@@ -247,6 +258,7 @@ export const MusicPlayerPanel: React.FC<MusicPlayerPanelProps> = ({ onOpenNotebo
 
   const handleNext = useCallback(() => {
     if (songs.length === 0) return;
+    triggerHighRefreshBoost(1000);
 
     if (playMode === 'shuffle' && songs.length > 1) {
       if (shuffledOrder.length !== songs.length || shuffledOrder.length === 0) {
@@ -275,6 +287,7 @@ export const MusicPlayerPanel: React.FC<MusicPlayerPanelProps> = ({ onOpenNotebo
 
   const handlePrev = useCallback(() => {
     if (songs.length === 0) return;
+    triggerHighRefreshBoost(1000);
 
     // 如果播放超过 3 秒，先回到歌曲开头
     if (currentTimeRef.current > 3 && audioRef.current) {
@@ -391,7 +404,7 @@ export const MusicPlayerPanel: React.FC<MusicPlayerPanelProps> = ({ onOpenNotebo
   }, [activeLyricLine, currentSong]);
 
   // Extract dynamic album palette and Morandi/contrast tones on song switch
-  // Deferred slightly so the initial card slide/spring animation starts at a locked 60/120fps without main-thread canvas readback stalls
+  // Deferred until after the 300ms card entry spring settles so main-thread canvas readback never competes with swipe frames
   useEffect(() => {
     if (!currentSong?.albumArtUrl) return;
     let isCancelled = false;
@@ -409,7 +422,7 @@ export const MusicPlayerPanel: React.FC<MusicPlayerPanelProps> = ({ onOpenNotebo
           });
         }
       });
-    }, 180);
+    }, 320);
 
     return () => {
       isCancelled = true;
@@ -574,6 +587,7 @@ export const MusicPlayerPanel: React.FC<MusicPlayerPanelProps> = ({ onOpenNotebo
 
     // Only trigger if useGestureEngine didn't already set up the vertical entry transform on this frame
     if (songTransitionDirection === 'left' || songTransitionDirection === 'right') {
+      triggerHighRefreshBoost(1000);
       if (btnSwitchRafRef.current !== null) {
         cancelAnimationFrame(btnSwitchRafRef.current);
         btnSwitchRafRef.current = null;
@@ -586,7 +600,6 @@ export const MusicPlayerPanel: React.FC<MusicPlayerPanelProps> = ({ onOpenNotebo
       (wrapper.style as any).webkitTransition = 'none';
       wrapper.style.transform = `translate3d(${entryX}px, 0, 0) scale(0.94)`;
       (wrapper.style as any).webkitTransform = `translate3d(${entryX}px, 0, 0) scale(0.94)`;
-      wrapper.style.opacity = '0.25';
 
       if (titleStage) {
         titleStage.style.transition = 'none';
@@ -602,20 +615,20 @@ export const MusicPlayerPanel: React.FC<MusicPlayerPanelProps> = ({ onOpenNotebo
       btnSwitchRafRef.current = requestAnimationFrame(() => {
         btnSwitchRafRef.current = requestAnimationFrame(() => {
           btnSwitchRafRef.current = null;
-          const enterSpring = 'transform var(--spring-duration-card, 340ms) cubic-bezier(0.16, 1, 0.3, 1), opacity 250ms cubic-bezier(0.16, 1, 0.3, 1)';
-          wrapper.style.transition = enterSpring;
-          (wrapper.style as any).webkitTransition = enterSpring;
+          const cardEnterSpring = 'transform var(--spring-duration-card, 340ms) cubic-bezier(0.16, 1, 0.3, 1)';
+          const textEnterSpring = 'transform var(--spring-duration-card, 340ms) cubic-bezier(0.16, 1, 0.3, 1), opacity 240ms cubic-bezier(0.16, 1, 0.3, 1)';
+          wrapper.style.transition = cardEnterSpring;
+          (wrapper.style as any).webkitTransition = '-webkit-transform var(--spring-duration-card, 340ms) cubic-bezier(0.16, 1, 0.3, 1)';
           wrapper.style.transform = 'translate3d(0, 0, 0) scale(1)';
           (wrapper.style as any).webkitTransform = 'translate3d(0, 0, 0) scale(1)';
-          wrapper.style.opacity = '1';
 
           if (titleStage) {
-            titleStage.style.transition = enterSpring;
+            titleStage.style.transition = textEnterSpring;
             titleStage.style.transform = 'translate3d(0, 0, 0)';
             titleStage.style.opacity = '1';
           }
           if (quoteStage) {
-            quoteStage.style.transition = enterSpring;
+            quoteStage.style.transition = textEnterSpring;
             quoteStage.style.transform = 'translate3d(0, 0, 0)';
             quoteStage.style.opacity = '1';
           }
@@ -937,7 +950,8 @@ export const MusicPlayerPanel: React.FC<MusicPlayerPanelProps> = ({ onOpenNotebo
       {/* Top Header: keyboard_arrow_down | NOW PLAYING | more_horiz */}
       {/* Smoothly fades out & disables pointer events when FullscreenLyricsView is open to prevent header overlap */}
       <div
-        className={`relative z-40 w-full shrink-0 transition-all duration-300 ease-out ${
+        style={{ willChange: 'transform, opacity' }}
+        className={`relative z-40 w-full shrink-0 transition-[transform,opacity] duration-250 ease-out ${
           isFullscreenLyricsOpen ? 'opacity-0 -translate-y-2 pointer-events-none' : 'opacity-100'
         }`}
       >
@@ -949,7 +963,8 @@ export const MusicPlayerPanel: React.FC<MusicPlayerPanelProps> = ({ onOpenNotebo
 
       {/* Center Gallery Art Frame Area (Fluid Golden Ratio & Adaptive Vertical Rhythm across all mobile heights) */}
       <div
-        className={`relative flex-1 min-h-0 flex flex-col items-center justify-center px-4 z-10 my-auto py-1 gap-y-2.5 sm:gap-y-4 overflow-hidden transition-all duration-300 ease-out ${
+        style={{ willChange: 'transform, opacity' }}
+        className={`relative flex-1 min-h-0 flex flex-col items-center justify-center px-4 z-10 my-auto py-1 gap-y-2.5 sm:gap-y-4 overflow-hidden transition-[transform,opacity] duration-250 ease-out ${
           isFullscreenLyricsOpen ? 'opacity-0 scale-[0.95] pointer-events-none' : 'opacity-100 scale-100'
         }`}
       >
@@ -1013,28 +1028,15 @@ export const MusicPlayerPanel: React.FC<MusicPlayerPanelProps> = ({ onOpenNotebo
             }}
             className="relative w-[min(264px,68vw,35dvh)] p-[11px] pb-[38px] sm:p-[12px] sm:pb-[42px] rounded-[4px] bg-white dark:bg-[#1E242C] shadow-[0_20px_45px_-10px_rgba(0,0,0,0.18),0_6px_18px_-4px_rgba(0,0,0,0.08)] dark:shadow-[0_25px_55px_-12px_rgba(0,0,0,0.8)] select-none border border-stone-100/90 dark:border-white/5 cursor-pointer active:scale-[0.99] transition-transform hardware-accelerated"
           >
-            {/* Inner Matting Layer with Soft Color Wash */}
+            {/* Inner Matting Layer with Soft Color Wash (Zero GPU Gaussian Blur Re-Sampling) */}
             <div
               className="relative w-full aspect-[4/4.5] rounded-[2px] flex items-center justify-center overflow-hidden p-3.5 sm:p-4 transition-colors duration-500"
               style={{
                 backgroundColor: isDark ? colorTheme.mattingBgDark : colorTheme.mattingBg,
+                backgroundImage: `radial-gradient(circle at 22% 24%, ${withColorAlpha(currentSong?.palette?.[0] || '#7C8F6E', isDark ? 0.36 : 0.45)} 0%, transparent 72%), radial-gradient(circle at 78% 76%, ${withColorAlpha(currentSong?.palette?.[1] || '#C4AC82', isDark ? 0.32 : 0.42)} 0%, transparent 72%)`,
                 contain: 'paint'
               }}
             >
-              {/* Blur Bleed Extension Layer (GPU-isolated static layer) */}
-              <img
-                src={currentSong.albumArtUrl}
-                alt=""
-                aria-hidden="true"
-                decoding="async"
-                className="absolute inset-0 w-full h-full object-cover scale-125 pointer-events-none"
-                style={{
-                  filter: 'blur(16px) saturate(1.25)',
-                  opacity: 0.52,
-                  transform: 'translate3d(0, 0, 0) scale(1.25)',
-                  backfaceVisibility: 'hidden'
-                }}
-              />
 
               {/* Upper 1:1 Album Artwork Tile with Soft Natural Shadow */}
               <div
@@ -1106,7 +1108,8 @@ export const MusicPlayerPanel: React.FC<MusicPlayerPanelProps> = ({ onOpenNotebo
 
       {/* 4. Bottom Playback Controls Bar with timeline */}
       <div
-        className={`relative w-full max-w-[356px] mx-auto px-6 z-20 pb-2 shrink-0 transition-all duration-300 ease-out ${
+        style={{ willChange: 'transform, opacity' }}
+        className={`relative w-full max-w-[356px] mx-auto px-6 z-20 pb-2 shrink-0 transition-[transform,opacity] duration-250 ease-out ${
           isFullscreenLyricsOpen ? 'opacity-0 translate-y-2 pointer-events-none' : 'opacity-100 translate-y-0'
         }`}
       >
@@ -1249,6 +1252,7 @@ export const MusicPlayerPanel: React.FC<MusicPlayerPanelProps> = ({ onOpenNotebo
             onSeek={handleSeekFromLyrics}
             albumArtUrl={currentSong?.albumArtUrl || ''}
             palette={currentSong?.palette || fallbackPalette}
+            savedWords={dbWords}
           />
         )}
       </AnimatePresence>

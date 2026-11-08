@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef, useLayoutEffect } from 'react';
+import React, { useState, useEffect, useRef, useLayoutEffect, useMemo, useCallback } from 'react';
 import { motion, AnimatePresence, useMotionValue, animate } from 'motion/react';
 import { Volume2, Music2, Layers, Sparkles, Compass } from 'lucide-react';
 import { WordItem, MasteryLevel, SubWordItem } from '../types';
@@ -8,6 +8,7 @@ import { HighlightedText } from './HighlightedText';
 import { getCollocationsForWord, parseStructuredDefinitions, CollocationItem } from '../utils/collocationDictionary';
 import { findSongContextInPlaylist, findIELTSAcademicContext } from '../utils/contextFinder';
 import { lookupWord, formatPartOfSpeech } from '../utils/lyricDictionary';
+import { triggerHighRefreshBoost } from '../utils/displayRefreshRate';
 
 interface WordDrawerProps {
   wordItem: WordItem | null;
@@ -37,12 +38,13 @@ interface DrawerCardViewProps {
   onPushWord: (word: string, sentence?: string) => void;
   onSelectSubWord: (sub: SubWordItem | null) => void;
   onToggleMastery: (e: React.MouseEvent) => void;
-  onScrollUpdate?: (scrollTop: number) => void;
+  onScrollUpdate?: (cardIdx: number, scrollTop: number) => void;
+  getSavedScrollTop?: (cardIdx: number) => number;
   peekContentRef?: React.RefObject<HTMLDivElement>;
   onDragStart?: (e: React.PointerEvent<HTMLDivElement>) => void;
 }
 
-const DrawerCardView: React.FC<DrawerCardViewProps> = ({
+const DrawerCardView: React.FC<DrawerCardViewProps> = React.memo(({
   stackItem,
   stackLength,
   cardIndex,
@@ -56,6 +58,7 @@ const DrawerCardView: React.FC<DrawerCardViewProps> = ({
   onSelectSubWord,
   onToggleMastery,
   onScrollUpdate,
+  getSavedScrollTop,
   peekContentRef,
   onDragStart
 }) => {
@@ -63,24 +66,37 @@ const DrawerCardView: React.FC<DrawerCardViewProps> = ({
   const [playingUs, setPlayingUs] = useState(false);
   const scrollContainerRef = useRef<HTMLDivElement>(null);
 
+  const currentItem = stackItem.activeSubWord || stackItem.wordItem;
+  const isViewingSubWord = Boolean(stackItem.activeSubWord);
+  const currentMastery = (currentItem.masteryLevel ?? (currentItem.isStarred ? 1 : 0)) as MasteryLevel;
+
   useLayoutEffect(() => {
     if (scrollContainerRef.current) {
-      scrollContainerRef.current.scrollTop = stackItem.scrollTop || 0;
+      const savedTop = getSavedScrollTop ? getSavedScrollTop(cardIndex) : (stackItem.scrollTop || 0);
+      scrollContainerRef.current.scrollTop = savedTop;
     }
     if (isTopCard && isAutoPronounceEnabled() && !currentItem.word.includes(' ')) {
       const preferredAccent = getStoredAccentPreference();
       speakWord(currentItem.word, preferredAccent);
     }
-  }, [stackItem.wordItem.word, stackItem.activeSubWord?.word, currentStackIndex, isTopCard]);
+  }, [stackItem.wordItem.word, stackItem.activeSubWord?.word, cardIndex, currentStackIndex, isTopCard, getSavedScrollTop]);
 
-  const currentItem = stackItem.activeSubWord || stackItem.wordItem;
-  const isViewingSubWord = Boolean(stackItem.activeSubWord);
-  const currentMastery = (currentItem.masteryLevel ?? (currentItem.isStarred ? 1 : 0)) as MasteryLevel;
-
-  const songContext = findSongContextInPlaylist(currentItem.word);
-  const ieltsContext = findIELTSAcademicContext(currentItem.word);
-  const structuredDefs = parseStructuredDefinitions(currentItem.definitionCn, currentItem.partOfSpeech);
-  const collocations: CollocationItem[] = getCollocationsForWord(currentItem.word);
+  const songContext = useMemo(
+    () => findSongContextInPlaylist(currentItem.word),
+    [currentItem.word]
+  );
+  const ieltsContext = useMemo(
+    () => findIELTSAcademicContext(currentItem.word),
+    [currentItem.word]
+  );
+  const structuredDefs = useMemo(
+    () => parseStructuredDefinitions(currentItem.definitionCn, currentItem.partOfSpeech),
+    [currentItem.definitionCn, currentItem.partOfSpeech]
+  );
+  const collocations: CollocationItem[] = useMemo(
+    () => getCollocationsForWord(currentItem.word),
+    [currentItem.word]
+  );
 
   const handleSpeak = (type: 'uk' | 'us', e?: React.MouseEvent) => {
     e?.stopPropagation();
@@ -113,7 +129,7 @@ const DrawerCardView: React.FC<DrawerCardViewProps> = ({
         ref={scrollContainerRef}
         onScroll={(e) => {
           if (isTopCard && onScrollUpdate) {
-            onScrollUpdate(e.currentTarget.scrollTop);
+            onScrollUpdate(cardIndex, e.currentTarget.scrollTop);
           }
         }}
         className={`flex-1 overflow-y-auto no-scrollbar px-6 pt-1 pb-10 ${!isTopCard ? 'pointer-events-none' : ''}`}
@@ -428,7 +444,7 @@ const DrawerCardView: React.FC<DrawerCardViewProps> = ({
       </div>
     </div>
   );
-};
+});
 
 export const WordDrawer: React.FC<WordDrawerProps> = ({
   wordItem,
@@ -446,6 +462,9 @@ export const WordDrawer: React.FC<WordDrawerProps> = ({
   const containerRef = useRef<HTMLDivElement>(null);
   const sheetRef = useRef<HTMLDivElement>(null);
   const peekContentRef = useRef<HTMLDivElement>(null);
+  const scrollTopMapRef = useRef<Map<number, number>>(new Map());
+  const isEntryAnimatingRef = useRef<boolean>(false);
+  const peekOffsetPxRef = useRef<number>(360);
 
   // 物理 Motion Value：顶层抽屉从完全展开状态 (y=0) 向下平移的像素距离
   const y = useMotionValue(600);
@@ -466,7 +485,7 @@ export const WordDrawer: React.FC<WordDrawerProps> = ({
   const STACK_STEP_PX = 12;
 
   // 根据内容高度计算精确的 PEEK 态向下偏移值，以横线上方的释义内容为界，严丝合缝不露下方内容
-  const calculateOffsetFromContentHeight = (contentH: number) => {
+  const calculateOffsetFromContentHeight = useCallback((contentH: number) => {
     if (!containerRef.current) return 360;
     const containerH = containerRef.current.offsetHeight || 800;
     const expandedH = containerH * EXPANDED_HEIGHT_RATIO;
@@ -475,10 +494,10 @@ export const WordDrawer: React.FC<WordDrawerProps> = ({
     const desiredPeekH = Math.min(contentH + topChromeH, expandedH - 50);
     const offset = Math.max(expandedH - desiredPeekH, 60);
     return offset;
-  };
+  }, []);
 
   // 精确测量 PEEK 态高度差
-  const measureOffsets = () => {
+  const measureOffsets = useCallback(() => {
     let peekContentH = 270;
     if (peekContentRef.current) {
       peekContentH = Math.max(
@@ -488,9 +507,10 @@ export const WordDrawer: React.FC<WordDrawerProps> = ({
       );
     }
     const offset = calculateOffsetFromContentHeight(peekContentH);
+    peekOffsetPxRef.current = offset;
     setPeekOffsetPx(offset);
     return offset;
-  };
+  }, [calculateOffsetFromContentHeight]);
 
   // 通过 ResizeObserver 动态感知任意单词（短词、长多音标词、多行释义词如 micro-habitat）的真实 DOM 高度
   useEffect(() => {
@@ -502,10 +522,14 @@ export const WordDrawer: React.FC<WordDrawerProps> = ({
         const h = Math.max(entry.contentRect.height, el.scrollHeight || 0);
         if (h > 40) {
           const exactOffset = calculateOffsetFromContentHeight(h);
-          setPeekOffsetPx(exactOffset);
-          if (!isExpanded && !isDraggingRef.current) {
-            // 平滑跟随微调，不突兀硬设
-            animate(y, exactOffset, { duration: 0.15, ease: 'easeOut' });
+          const diff = Math.abs(exactOffset - peekOffsetPxRef.current);
+          if (diff >= 1.5) {
+            peekOffsetPxRef.current = exactOffset;
+            setPeekOffsetPx(exactOffset);
+            if (!isExpanded && !isDraggingRef.current && !isEntryAnimatingRef.current) {
+              // 仅在非入场动画期间微调，避免首帧打断 280ms 弹簧入场曲线
+              animate(y, exactOffset, { duration: 0.15, ease: 'easeOut' });
+            }
           }
         }
       }
@@ -513,29 +537,47 @@ export const WordDrawer: React.FC<WordDrawerProps> = ({
 
     ro.observe(el);
     return () => ro.disconnect();
-  }, [isOpen, isExpanded, drawerStack.length, drawerStack[drawerStack.length - 1]?.wordItem.word, drawerStack[drawerStack.length - 1]?.activeSubWord?.word]);
+  }, [isOpen, isExpanded, drawerStack.length, drawerStack[drawerStack.length - 1]?.wordItem.word, drawerStack[drawerStack.length - 1]?.activeSubWord?.word, calculateOffsetFromContentHeight, y]);
 
   // 当外部 wordItem 改变或打开时，初始化抽屉并以与二级抽屉完全一致的轻柔丝滑无过冲动画弹出
   useLayoutEffect(() => {
     if (wordItem && isOpen) {
+      triggerHighRefreshBoost(1000);
+      scrollTopMapRef.current.clear();
       setDrawerStack([{ wordItem, activeSubWord: null, wasExpanded: false, scrollTop: 0 }]);
       setIsExpanded(false);
       
       const offset = measureOffsets() || 360;
+      isEntryAnimatingRef.current = true;
       y.set(offset + 140);
-      animate(y, offset, {
+      const controls = animate(y, offset, {
         duration: 0.28,
         ease: [0.22, 1, 0.36, 1]
       });
+      controls.then(() => {
+        isEntryAnimatingRef.current = false;
+        const latestOffset = measureOffsets();
+        if (Math.abs(latestOffset - offset) >= 2 && !isDraggingRef.current) {
+          animate(y, latestOffset, { duration: 0.14, ease: 'easeOut' });
+        }
+      });
     } else if (!isOpen) {
+      isEntryAnimatingRef.current = false;
+      scrollTopMapRef.current.clear();
       setDrawerStack([]);
       setIsExpanded(false);
     }
-  }, [wordItem?.word, isOpen]);
+  }, [wordItem?.word, isOpen, measureOffsets, y]);
 
-  // 阻尼状态切换（完全展开 / 半展开收起）
-  const animateToState = (expanded: boolean, velocity: number = 0) => {
-    const targetY = expanded ? 0 : peekOffsetPx;
+  const stackLength = drawerStack.length;
+  const currentStackIndex = Math.max(0, stackLength - 1);
+  const currentStackItem = drawerStack[currentStackIndex] || (wordItem ? { wordItem, activeSubWord: null } : null);
+
+  // 阻尼状态切换（完全展开 / 半展开收起），将阶梯偏移合并入 GPU y 变换，零 marginTop 重排
+  const animateToState = useCallback((expanded: boolean, velocity: number = 0) => {
+    triggerHighRefreshBoost(1000);
+    const expandedTargetY = currentStackIndex * STACK_STEP_PX;
+    const targetY = expanded ? expandedTargetY : peekOffsetPxRef.current;
     setIsExpanded(expanded);
     
     if (expanded) {
@@ -555,11 +597,15 @@ export const WordDrawer: React.FC<WordDrawerProps> = ({
         velocity: Math.min(Math.max(velocity * 1000, -600), 600)
       });
     }
-  };
+  }, [currentStackIndex, y]);
 
-  const stackLength = drawerStack.length;
-  const currentStackIndex = Math.max(0, stackLength - 1);
-  const currentStackItem = drawerStack[currentStackIndex] || (wordItem ? { wordItem, activeSubWord: null } : null);
+  const handleScrollUpdate = useCallback((cardIdx: number, scrollTop: number) => {
+    scrollTopMapRef.current.set(cardIdx, scrollTop);
+  }, []);
+
+  const getSavedScrollTop = useCallback((cardIdx: number) => {
+    return scrollTopMapRef.current.get(cardIdx) || 0;
+  }, []);
 
   if (!isOpen || !currentStackItem) return null;
 
@@ -581,29 +627,26 @@ export const WordDrawer: React.FC<WordDrawerProps> = ({
     });
   };
 
-  const handleScrollUpdate = (scrollTop: number) => {
-    setDrawerStack(prev => {
-      if (!prev[currentStackIndex]) return prev;
-      const copy = [...prev];
-      copy[currentStackIndex] = { ...copy[currentStackIndex], scrollTop };
-      return copy;
-    });
-  };
-
   // 点击例句/搭配/成分中的单词：推入新的一级抽屉（上一级抽屉保持并在底层停留，新抽屉以半展开 Peek 态轻柔滑入）
   const handlePushNewDrawer = async (clickedWord: string, sentence?: string) => {
+    triggerHighRefreshBoost(1000);
     const item = await lookupWord(clickedWord, sentence || '');
     if (item) {
+      const nextIdx = drawerStack.length;
+      scrollTopMapRef.current.set(nextIdx, 0);
       setDrawerStack(prev => [
         ...prev.map((it, i) => (i === prev.length - 1 ? { ...it, wasExpanded: isExpanded } : it)),
         { wordItem: item, activeSubWord: null, wasExpanded: false, scrollTop: 0 }
       ]);
       setIsExpanded(false);
       const offset = measureOffsets() || 360;
+      isEntryAnimatingRef.current = true;
       y.set(offset + 140);
       animate(y, offset, {
         duration: 0.28,
         ease: [0.22, 1, 0.36, 1]
+      }).then(() => {
+        isEntryAnimatingRef.current = false;
       });
     }
   };
@@ -611,38 +654,43 @@ export const WordDrawer: React.FC<WordDrawerProps> = ({
   // 返回上一级抽屉（上一级抽屉恢复其原本的展开状态）
   const handlePopDrawer = (e?: React.MouseEvent) => {
     e?.stopPropagation();
+    triggerHighRefreshBoost(1000);
     if (drawerStack.length > 1) {
-      const prevTarget = drawerStack[drawerStack.length - 2];
+      const prevIdx = drawerStack.length - 2;
+      const prevTarget = drawerStack[prevIdx];
       const shouldExpand = prevTarget?.wasExpanded !== false;
-      const targetY = shouldExpand ? 0 : (measureOffsets() || 360);
+      const targetY = shouldExpand ? prevIdx * STACK_STEP_PX : (measureOffsets() || 360);
 
-      animate(y, peekOffsetPx + 260, { duration: 0.2, ease: [0.32, 0, 0.67, 0] }).then(() => {
+      animate(y, peekOffsetPxRef.current + 260, { duration: 0.2, ease: [0.32, 0, 0.67, 0] }).then(() => {
+        scrollTopMapRef.current.delete(drawerStack.length - 1);
         setDrawerStack(prev => prev.slice(0, prev.length - 1));
         setIsExpanded(shouldExpand);
         y.set(targetY);
       });
     } else {
-      animate(y, peekOffsetPx + 360, { duration: 0.22, ease: [0.32, 0, 0.67, 0] }).then(onClose);
+      animate(y, peekOffsetPxRef.current + 360, { duration: 0.22, ease: [0.32, 0, 0.67, 0] }).then(onClose);
     }
   };
 
   // 点击背景遮罩空白区域：多层时返回上一级，单层时关闭抽屉
   const handleBackdropClick = () => {
+    triggerHighRefreshBoost(1000);
     if (drawerStack.length > 1) {
       handlePopDrawer();
     } else {
-      animate(y, peekOffsetPx + 360, { duration: 0.22, ease: [0.32, 0, 0.67, 0] }).then(onClose);
+      animate(y, peekOffsetPxRef.current + 360, { duration: 0.22, ease: [0.32, 0, 0.67, 0] }).then(onClose);
     }
   };
 
   // 点击底层露出的堆叠卡片边缘，直接快速回退到该层
   const handleJumpToLayer = (targetIndex: number) => {
     if (targetIndex >= 0 && targetIndex < drawerStack.length - 1) {
+      triggerHighRefreshBoost(1000);
       const targetItem = drawerStack[targetIndex];
       const shouldExpand = targetItem?.wasExpanded !== false;
-      const targetY = shouldExpand ? 0 : (measureOffsets() || 360);
+      const targetY = shouldExpand ? targetIndex * STACK_STEP_PX : (measureOffsets() || 360);
 
-      animate(y, peekOffsetPx + 260, { duration: 0.2, ease: [0.32, 0, 0.67, 0] }).then(() => {
+      animate(y, peekOffsetPxRef.current + 260, { duration: 0.2, ease: [0.32, 0, 0.67, 0] }).then(() => {
         setDrawerStack(prev => prev.slice(0, targetIndex + 1));
         setIsExpanded(shouldExpand);
         y.set(targetY);
@@ -653,6 +701,7 @@ export const WordDrawer: React.FC<WordDrawerProps> = ({
   // 手势引擎：把手与顶部安全区拖拽
   const handleDragStart = (e: React.PointerEvent<HTMLDivElement>) => {
     e.preventDefault();
+    triggerHighRefreshBoost(1200);
     isDraggingRef.current = true;
     hasDraggedRef.current = false;
     dragStartYRef.current = e.clientY;
@@ -741,7 +790,7 @@ export const WordDrawer: React.FC<WordDrawerProps> = ({
         animate={{ opacity: 1 }}
         exit={{ opacity: 0 }}
         onClick={handleBackdropClick}
-        className="absolute inset-0 bg-stone-900/45 dark:bg-black/75 backdrop-blur-[2px] pointer-events-auto"
+        className="absolute inset-0 bg-stone-900/50 dark:bg-black/75 pointer-events-auto"
       />
 
       {/* 
@@ -803,6 +852,7 @@ export const WordDrawer: React.FC<WordDrawerProps> = ({
                 });
               }}
               onToggleMastery={handleToggleMastery}
+              getSavedScrollTop={getSavedScrollTop}
             />
 
             {/* 半透明压暗遮罩（暗化背景卡片，聚焦前景），点击可退回 */}
@@ -820,8 +870,8 @@ export const WordDrawer: React.FC<WordDrawerProps> = ({
         style={{
           height: `${EXPANDED_HEIGHT_RATIO * 100}%`,
           top: `${(1 - EXPANDED_HEIGHT_RATIO) * 100}%`,
-          marginTop: `${isExpanded ? currentStackIndex * STACK_STEP_PX : 0}px`,
           y: y,
+          contain: 'layout style paint',
           transformOrigin: 'top center'
         }}
         className="absolute inset-x-0 mx-auto rounded-t-[28px] bg-[#FAF8F5] dark:bg-[#121622] shadow-[0_-16px_44px_rgba(0,0,0,0.28)] flex flex-col overflow-hidden pointer-events-auto select-none text-stone-900 dark:text-stone-100 will-change-transform border-t border-white/80 dark:border-white/10 z-[65]"
@@ -849,6 +899,7 @@ export const WordDrawer: React.FC<WordDrawerProps> = ({
           }}
           onToggleMastery={handleToggleMastery}
           onScrollUpdate={handleScrollUpdate}
+          getSavedScrollTop={getSavedScrollTop}
           peekContentRef={peekContentRef}
           onDragStart={handleDragStart}
         />

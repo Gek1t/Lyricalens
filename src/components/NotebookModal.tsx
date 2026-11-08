@@ -8,6 +8,7 @@ import { speakWord, speakWordIfAutoEnabled } from '../utils/audioEngine';
 import { MasteryBadge, MASTERY_CONFIG } from './MasteryBadge';
 import { formatPartOfSpeech } from '../utils/lyricDictionary';
 import { calculateEbbinghausRetention } from '../utils/vocabEngine';
+import { triggerHighRefreshBoost } from '../utils/displayRefreshRate';
 import {
   Search,
   Volume2,
@@ -42,11 +43,19 @@ export const NotebookModal: React.FC<NotebookModalProps> = ({ isOpen, onClose })
   const [activeFilter, setActiveFilter] = useState<
     'ALL' | 'DUE_REVIEW' | 'UNMASTERED' | 'MASTERED' | 'LEVEL_1' | 'LEVEL_0' | 'IELTS' | 'MUSIC' | 'AR'
   >('ALL');
+  const [isFullListMounted, setIsFullListMounted] = useState(false);
   
-  // Sync initial filter from store when opened
+  // Sync initial filter from store when opened & defer offscreen list items by 1 rAF so Frame 0 of slide-up is < 2ms
   useEffect(() => {
     if (isOpen) {
+      triggerHighRefreshBoost(1200);
       setActiveFilter(notebookInitialFilter || 'ALL');
+      const raf = requestAnimationFrame(() => {
+        setIsFullListMounted(true);
+      });
+      return () => cancelAnimationFrame(raf);
+    } else {
+      setIsFullListMounted(false);
     }
   }, [isOpen, notebookInitialFilter]);
 
@@ -85,22 +94,29 @@ export const NotebookModal: React.FC<NotebookModalProps> = ({ isOpen, onClose })
   const generateIELTSTestFromWords = useAppStore(s => s.generateIELTSTestFromWords);
   const showToast = useAppStore(s => s.showToast);
 
-  // Live Dexie database query
+  // Live Dexie database query (suspended sorting & Ebbinghaus math when modal is closed)
   const rawAllWords = useLiveQuery(
     () => db.words.toArray(),
     []
   );
   const allWords = useMemo(
-    () => (rawAllWords ? [...rawAllWords].sort((a, b) => (b.addedTimestamp || 0) - (a.addedTimestamp || 0)) : undefined),
-    [rawAllWords]
+    () => (isOpen && rawAllWords ? [...rawAllWords].sort((a, b) => (b.addedTimestamp || 0) - (a.addedTimestamp || 0)) : undefined),
+    [isOpen, rawAllWords]
   );
 
-  // Spaced Repetition Due Words Calculation
-  const dueWordsCount = useMemo(() => {
-    if (!allWords) return 0;
+  // Precompute Ebbinghaus retention once per word in a single O(N) pass
+  const { retentionMap, dueWordsCount } = useMemo(() => {
+    const map = new Map<string, ReturnType<typeof calculateEbbinghausRetention>>();
+    let dueCount = 0;
+    if (!isOpen || !allWords) return { retentionMap: map, dueWordsCount: 0 };
     const now = Date.now();
-    return allWords.filter(w => calculateEbbinghausRetention(w, now).isDue).length;
-  }, [allWords]);
+    for (const w of allWords) {
+      const info = calculateEbbinghausRetention(w, now);
+      map.set(w.word, info);
+      if (info.isDue) dueCount++;
+    }
+    return { retentionMap: map, dueWordsCount: dueCount };
+  }, [isOpen, allWords]);
 
   const [sessionReviewedWords, setSessionReviewedWords] = useState<Set<string>>(new Set());
   const [sessionModifiedWords, setSessionModifiedWords] = useState<Set<string>>(new Set());
@@ -139,8 +155,7 @@ export const NotebookModal: React.FC<NotebookModalProps> = ({ isOpen, onClose })
 
   // Filtered words list (maintains session stability so clicked/reviewed items don't suddenly vanish)
   const filteredWords = useMemo(() => {
-    if (!allWords) return [];
-    const now = Date.now();
+    if (!isOpen || !allWords) return [];
     return allWords.filter(w => {
       const term = searchTerm.toLowerCase().trim();
       const matchesSearch =
@@ -156,7 +171,7 @@ export const NotebookModal: React.FC<NotebookModalProps> = ({ isOpen, onClose })
       const isModifiedInSession = sessionModifiedWords.has(w.word);
 
       if (activeFilter === 'DUE_REVIEW') {
-        const retention = calculateEbbinghausRetention(w, now);
+        const retention = retentionMap.get(w.word) || calculateEbbinghausRetention(w);
         return retention.isDue || isReviewedInSession || isModifiedInSession;
       }
 
@@ -174,7 +189,12 @@ export const NotebookModal: React.FC<NotebookModalProps> = ({ isOpen, onClose })
       if (activeFilter === 'AR') return isWordFromSource(w, 'AR');
       return true;
     });
-  }, [allWords, searchTerm, activeFilter, sessionReviewedWords, sessionModifiedWords]);
+  }, [isOpen, allWords, searchTerm, activeFilter, sessionReviewedWords, sessionModifiedWords, retentionMap]);
+
+  const visibleWords = useMemo(
+    () => (isFullListMounted ? filteredWords : filteredWords.slice(0, 12)),
+    [filteredWords, isFullListMounted]
+  );
 
   // Quick mark single word as reviewed today
   const handleMarkReviewed = async (e: React.MouseEvent, item: WordItem) => {
@@ -538,21 +558,24 @@ export const NotebookModal: React.FC<NotebookModalProps> = ({ isOpen, onClose })
       {isOpen && (
         <motion.div
           key="notebook-vault-modal"
-          initial={{ y: '100%', opacity: 0.6 }}
+          initial={{ y: '100%' }}
           animate={{
             y: 0,
-            opacity: 1,
-            transition: { type: 'spring', damping: 30, stiffness: 320, mass: 0.85 }
+            transition: { type: 'spring', damping: 30, stiffness: 320, mass: 0.8 }
           }}
           exit={{
             y: '100%',
-            opacity: 0,
-            transition: { duration: 0.24, ease: [0.32, 0.72, 0, 1] }
+            transition: { duration: 0.22, ease: [0.32, 0.72, 0, 1] }
           }}
-          className="absolute inset-0 z-50 flex flex-col bg-[#FAF8F5] dark:bg-[#0F1523] text-stone-900 dark:text-stone-100 select-none overflow-hidden"
+          style={{
+            willChange: 'transform',
+            backfaceVisibility: 'hidden',
+            WebkitBackfaceVisibility: 'hidden',
+          }}
+          className="absolute inset-0 z-50 flex flex-col bg-[#FAF8F5] dark:bg-[#0F1523] text-stone-900 dark:text-stone-100 select-none overflow-hidden hardware-accelerated"
         >
           {/* Top Header Bar */}
-          <div className="relative w-full px-5 pt-11 pb-3.5 border-b border-stone-200/70 dark:border-slate-800/80 flex items-center justify-between bg-white/80 dark:bg-[#151D2E]/80 backdrop-blur-md z-30">
+          <div className="relative w-full px-5 pt-11 pb-3.5 border-b border-stone-200/70 dark:border-slate-800/80 flex items-center justify-between bg-white/95 dark:bg-[#151D2E]/95 z-30">
             {!isBatchMode ? (
               // Normal Header
               <>
@@ -733,229 +756,193 @@ export const NotebookModal: React.FC<NotebookModalProps> = ({ isOpen, onClose })
 
           {/* Vocabulary Word Cards Scroll List */}
           <div className="flex-1 overflow-y-auto no-scrollbar p-4 sm:p-5 space-y-2.5 pb-32">
-            <AnimatePresence mode="popLayout">
-              {filteredWords.length > 0 ? (
-                filteredWords.map((item) => {
-                  const isSelected = selectedWords.has(item.word);
-                  const isElevated = elevatedWord === item.word;
-                  const mastery = (item.masteryLevel ?? (item.isStarred ? 1 : 0)) as MasteryLevel;
-                  const ebbinghaus = calculateEbbinghausRetention(item);
-                  const isReviewedInSession = sessionReviewedWords.has(item.word);
+            {visibleWords.length > 0 ? (
+              visibleWords.map((item) => {
+                const isSelected = selectedWords.has(item.word);
+                const isElevated = elevatedWord === item.word;
+                const mastery = (item.masteryLevel ?? (item.isStarred ? 1 : 0)) as MasteryLevel;
+                const ebbinghaus = retentionMap.get(item.word) || calculateEbbinghausRetention(item);
+                const isReviewedInSession = sessionReviewedWords.has(item.word);
 
-                  return (
-                    <motion.div
-                      layout
-                      initial={{ opacity: 0, y: 10, scale: 0.98 }}
-                      animate={{ opacity: 1, y: 0, scale: 1 }}
-                      exit={{
-                        opacity: 0,
-                        scale: 0.92,
-                        y: -8,
-                        transition: { duration: 0.24, ease: [0.32, 0.72, 0, 1] }
-                      }}
-                      transition={{
-                        layout: { duration: 0.28, ease: [0.32, 0.72, 0, 1] },
-                        duration: 0.2
-                      }}
-                      key={item.id || item.word}
-                      onMouseDown={(e) => handleTouchStart(item, e)}
-                      onMouseMove={handleTouchMove}
-                      onMouseUp={(e) => handleTouchEnd(item, e)}
-                      onMouseLeave={() => {
-                        if (longPressTimerRef.current) {
-                          clearTimeout(longPressTimerRef.current);
-                          longPressTimerRef.current = null;
-                        }
-                      }}
-                      onTouchStart={(e) => handleTouchStart(item, e)}
-                      onTouchMove={handleTouchMove}
-                      onTouchEnd={(e) => handleTouchEnd(item, e)}
-                      onContextMenu={(e) => e.preventDefault()}
-                      className={`relative p-3.5 sm:p-4 rounded-2xl transition-colors duration-200 cursor-pointer select-none flex items-center justify-between gap-3 ${
-                        isSelected
-                          ? 'bg-[#516050]/[0.05] dark:bg-[#8FB996]/[0.08] border border-[#516050]/60 dark:border-[#8FB996]/50 shadow-xs ring-1 ring-[#516050]/20 dark:ring-[#8FB996]/20'
-                          : 'bg-white dark:bg-[#151D2E] border border-stone-200/80 dark:border-slate-800/90 hover:border-stone-300 dark:hover:border-slate-700 shadow-2xs'
-                      } ${isElevated ? 'scale-[1.015] shadow-lg ring-2 ring-[#516050]' : 'active:scale-[0.99]'}`}
-                    >
-                      {/* Left: Refined Apple-Style Circular Checkbox for Batch Mode */}
-                      {isBatchMode && (
-                        <div
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            toggleSelectWord(item.word);
-                          }}
-                          onMouseDown={(e) => e.stopPropagation()}
-                          onTouchStart={(e) => e.stopPropagation()}
-                          className="shrink-0 animate-in zoom-in-75 duration-150 py-0.5"
-                        >
-                          <div
-                            className={`w-5 h-5 rounded-full border flex items-center justify-center transition-all duration-200 ${
-                              isSelected
-                                ? 'bg-[#516050] dark:bg-[#8FB996] border-[#516050] dark:border-[#8FB996] text-white dark:text-stone-950 shadow-xs scale-105'
-                                : 'border-stone-300 dark:border-slate-600 bg-stone-100/60 dark:bg-slate-800/60 hover:border-stone-400'
-                            }`}
-                          >
-                            {isSelected && <Check className="w-3 h-3 stroke-[3]" />}
-                          </div>
-                        </div>
-                      )}
-
-                      {/* Card Center Info */}
-                      <div className="flex-1 min-w-0">
-                        <div className="flex items-center gap-2 flex-wrap">
-                          <h4 className="font-serif-luxury text-lg sm:text-[19px] font-medium text-stone-900 dark:text-stone-100 capitalize truncate">
-                            {item.word}
-                          </h4>
-                          <span className="font-mono text-[11px] text-stone-400 dark:text-stone-500">
-                            {item.phoneticUk || `/${item.word}/`}
-                          </span>
-                          <span className="px-2 py-0.5 rounded-full text-[10px] font-medium bg-[#516050]/10 dark:bg-[#8FB996]/15 text-[#516050] dark:text-[#8FB996] border border-[#516050]/20 dark:border-[#8FB996]/30">
-                            {formatPartOfSpeech(item.partOfSpeech, item.word)}
-                          </span>
-
-                          {/* Ebbinghaus Spaced Repetition Retention Badge */}
-                          {isReviewedInSession ? (
-                            <motion.span
-                              initial={{ scale: 0.85, opacity: 0 }}
-                              animate={{ scale: 1, opacity: 1 }}
-                              className="px-2 py-0.5 rounded-full text-[9px] font-mono font-semibold bg-emerald-500/15 text-emerald-700 dark:text-emerald-400 border border-emerald-500/30 flex items-center gap-1"
-                            >
-                              <Check className="w-2.5 h-2.5" />
-                              <span>已打卡 100%</span>
-                            </motion.span>
-                          ) : ebbinghaus.isDue ? (
-                            <span className="px-2 py-0.5 rounded-full text-[9px] font-mono font-semibold bg-amber-500/15 text-amber-700 dark:text-amber-400 border border-amber-500/30 flex items-center gap-1">
-                              <Clock className="w-2.5 h-2.5" />
-                              <span>需复习 {ebbinghaus.retentionScore}%</span>
-                            </span>
-                          ) : mastery === 3 ? (
-                            <span className="px-2 py-0.5 rounded-full text-[9px] font-mono font-medium bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border border-emerald-500/20">
-                              稳固 {ebbinghaus.retentionScore}%
-                            </span>
-                          ) : (
-                            <span className="px-2 py-0.5 rounded-full text-[9px] font-mono font-medium bg-sky-500/10 text-sky-600 dark:text-sky-400 border border-sky-500/20">
-                              留存 {ebbinghaus.retentionScore}%
-                            </span>
-                          )}
-                        </div>
-
-                        <p className="text-xs text-stone-700 dark:text-stone-300 mt-1 font-normal line-clamp-1">
-                          {item.definitionCn}
-                        </p>
-
-                        {/* Context & Tag Badges */}
-                        <div className="flex items-center gap-1.5 mt-2 flex-wrap">
-                          {item.sourceContext && (
-                            <span className="text-[9px] uppercase tracking-wider text-stone-400 dark:text-stone-500 bg-stone-100/80 dark:bg-slate-800/80 px-2 py-0.5 rounded-md truncate max-w-[140px]">
-                              {item.sourceContext}
-                            </span>
-                          )}
-                          {item.categories?.slice(0, 2).map((cat) => (
-                            <span
-                              key={cat}
-                              className="text-[9px] font-medium text-[#516050] dark:text-[#8FB996] bg-[#516050]/10 dark:bg-[#8FB996]/15 px-2 py-0.5 rounded-md"
-                            >
-                              {cat}
-                            </span>
-                          ))}
-                        </div>
-                      </div>
-
-                      {/* Card Right Action Strip (Audio Pronounce + Quick Review Button + 4-Tier Mastery Indicator) */}
-                      <div 
-                        className="flex items-center gap-1.5 sm:gap-2 shrink-0"
-                        onClick={(e) => e.stopPropagation()}
+                return (
+                  <div
+                    key={item.id || item.word}
+                    style={{ contentVisibility: 'auto', containIntrinsicSize: '0 88px' }}
+                    onMouseDown={(e) => handleTouchStart(item, e)}
+                    onMouseMove={handleTouchMove}
+                    onMouseUp={(e) => handleTouchEnd(item, e)}
+                    onMouseLeave={() => {
+                      if (longPressTimerRef.current) {
+                        clearTimeout(longPressTimerRef.current);
+                        longPressTimerRef.current = null;
+                      }
+                    }}
+                    onTouchStart={(e) => handleTouchStart(item, e)}
+                    onTouchMove={handleTouchMove}
+                    onTouchEnd={(e) => handleTouchEnd(item, e)}
+                    onContextMenu={(e) => e.preventDefault()}
+                    className={`relative p-3.5 sm:p-4 rounded-2xl transition-[transform,background-color,border-color] duration-150 cursor-pointer select-none flex items-center justify-between gap-3 ${
+                      isSelected
+                        ? 'bg-[#516050]/[0.05] dark:bg-[#8FB996]/[0.08] border border-[#516050]/60 dark:border-[#8FB996]/50 shadow-xs ring-1 ring-[#516050]/20 dark:ring-[#8FB996]/20'
+                        : 'bg-white dark:bg-[#151D2E] border border-stone-200/80 dark:border-slate-800/90 hover:border-stone-300 dark:hover:border-slate-700 shadow-2xs'
+                    } ${isElevated ? 'scale-[1.015] shadow-lg ring-2 ring-[#516050]' : 'active:scale-[0.99]'}`}
+                  >
+                    {/* Left: Refined Apple-Style Circular Checkbox for Batch Mode */}
+                    {isBatchMode && (
+                      <div
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          toggleSelectWord(item.word);
+                        }}
                         onMouseDown={(e) => e.stopPropagation()}
                         onTouchStart={(e) => e.stopPropagation()}
+                        className="shrink-0 animate-in zoom-in-75 duration-150 py-0.5"
                       >
-                        {/* One-Tap Spaced Review Checkoff Button (if Due) or Checked State */}
-                        <AnimatePresence mode="wait">
-                          {isReviewedInSession ? (
-                            <motion.div
-                              key="done"
-                              initial={{ scale: 0.85, opacity: 0 }}
-                              animate={{ scale: 1, opacity: 1 }}
-                              exit={{ scale: 0.85, opacity: 0 }}
-                              transition={{ duration: 0.18 }}
-                              className="px-2 py-1 rounded-lg bg-emerald-500/15 text-emerald-700 dark:text-emerald-300 border border-emerald-500/30 text-[10px] font-medium flex items-center gap-1 shadow-2xs"
-                              title="今日已完成艾宾浩斯打卡"
-                            >
-                              <Check className="w-3 h-3 text-emerald-600 dark:text-emerald-400" />
-                              <span className="hidden sm:inline">已打卡</span>
-                            </motion.div>
-                          ) : ebbinghaus.isDue ? (
-                            <motion.button
-                              key="due-btn"
-                              initial={{ scale: 0.85, opacity: 0 }}
-                              animate={{ scale: 1, opacity: 1 }}
-                              exit={{ scale: 0.85, opacity: 0 }}
-                              transition={{ duration: 0.18 }}
-                              type="button"
-                              onClick={(e) => handleMarkReviewed(e, item)}
-                              onMouseDown={(e) => e.stopPropagation()}
-                              onTouchStart={(e) => e.stopPropagation()}
-                              className="px-2 py-1 rounded-lg bg-amber-500/15 hover:bg-amber-500 text-amber-700 dark:text-amber-300 hover:text-white border border-amber-500/30 text-[10px] font-medium flex items-center gap-1 transition-all active:scale-95 cursor-pointer shadow-2xs"
-                              title="记录今日艾宾浩斯复现打卡"
-                            >
-                              <CheckCheck className="w-3 h-3" />
-                              <span className="hidden sm:inline">打卡</span>
-                            </motion.button>
-                          ) : null}
-                        </AnimatePresence>
-
-                        {/* Audio Pronunciation Button */}
-                        <button
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            speakWord(item.word, 'en-GB');
-                          }}
-                          onMouseDown={(e) => e.stopPropagation()}
-                          onTouchStart={(e) => e.stopPropagation()}
-                          className="p-2 rounded-full hover:bg-stone-100 dark:hover:bg-slate-800 text-stone-400 hover:text-[#516050] dark:hover:text-[#8FB996] active:scale-95 transition-all"
-                          title="朗读发音 (UK)"
+                        <div
+                          className={`w-5 h-5 rounded-full border flex items-center justify-center transition-all duration-200 ${
+                            isSelected
+                              ? 'bg-[#516050] dark:bg-[#8FB996] border-[#516050] dark:border-[#8FB996] text-white dark:text-stone-950 shadow-xs scale-105'
+                              : 'border-stone-300 dark:border-slate-600 bg-stone-100/60 dark:bg-slate-800/60 hover:border-stone-400'
+                          }`}
                         >
-                          <Volume2 className="w-4 h-4" />
-                        </button>
-
-                        {/* 4-Tier Scenario-Driven Mastery Ring Indicator */}
-                        <div 
-                          className="relative flex items-center justify-center p-1"
-                          onClick={(e) => e.stopPropagation()}
-                          onMouseDown={(e) => e.stopPropagation()}
-                          onMouseUp={(e) => e.stopPropagation()}
-                          onTouchStart={(e) => e.stopPropagation()}
-                          onTouchEnd={(e) => e.stopPropagation()}
-                        >
-                          <MasteryBadge
-                            level={mastery}
-                            size={28}
-                            interactive={true}
-                            onClick={(e) => {
-                              e?.stopPropagation();
-                              handleToggleMastery(item);
-                            }}
-                          />
+                          {isSelected && <Check className="w-3 h-3 stroke-[3]" />}
                         </div>
                       </div>
-                    </motion.div>
-                  );
-                })
-              ) : (
-                <motion.div
-                  initial={{ opacity: 0, y: 10 }}
-                  animate={{ opacity: 1, y: 0 }}
-                  exit={{ opacity: 0 }}
-                  transition={{ duration: 0.2 }}
-                  className="text-center py-16 px-4 text-stone-400 dark:text-stone-500"
-                >
-                  <BookOpen className="w-10 h-10 mx-auto stroke-1 text-stone-300 dark:text-stone-600 mb-2" />
-                  <p className="text-sm font-medium">未找到符合条件的词汇</p>
-                  <p className="text-xs mt-1">
-                    可在听歌歌词、AR 空间或雅思阅读中点击生词即刻收录
-                  </p>
-                </motion.div>
-              )}
-            </AnimatePresence>
+                    )}
+
+                    {/* Card Center Info */}
+                    <div className="flex-1 min-w-0">
+                      <div className="flex items-center gap-2 flex-wrap">
+                        <h4 className="font-serif-luxury text-lg sm:text-[19px] font-medium text-stone-900 dark:text-stone-100 capitalize truncate">
+                          {item.word}
+                        </h4>
+                        <span className="font-mono text-[11px] text-stone-400 dark:text-stone-500">
+                          {item.phoneticUk || `/${item.word}/`}
+                        </span>
+                        <span className="px-2 py-0.5 rounded-full text-[10px] font-medium bg-[#516050]/10 dark:bg-[#8FB996]/15 text-[#516050] dark:text-[#8FB996] border border-[#516050]/20 dark:border-[#8FB996]/30">
+                          {formatPartOfSpeech(item.partOfSpeech, item.word)}
+                        </span>
+
+                        {/* Ebbinghaus Spaced Repetition Retention Badge */}
+                        {isReviewedInSession ? (
+                          <span className="px-2 py-0.5 rounded-full text-[9px] font-mono font-semibold bg-emerald-500/15 text-emerald-700 dark:text-emerald-400 border border-emerald-500/30 flex items-center gap-1">
+                            <Check className="w-2.5 h-2.5" />
+                            <span>已打卡 100%</span>
+                          </span>
+                        ) : ebbinghaus.isDue ? (
+                          <span className="px-2 py-0.5 rounded-full text-[9px] font-mono font-semibold bg-amber-500/15 text-amber-700 dark:text-amber-400 border border-amber-500/30 flex items-center gap-1">
+                            <Clock className="w-2.5 h-2.5" />
+                            <span>需复习 {ebbinghaus.retentionScore}%</span>
+                          </span>
+                        ) : mastery === 3 ? (
+                          <span className="px-2 py-0.5 rounded-full text-[9px] font-mono font-medium bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border border-emerald-500/20">
+                            稳固 {ebbinghaus.retentionScore}%
+                          </span>
+                        ) : (
+                          <span className="px-2 py-0.5 rounded-full text-[9px] font-mono font-medium bg-sky-500/10 text-sky-600 dark:text-sky-400 border border-sky-500/20">
+                            留存 {ebbinghaus.retentionScore}%
+                          </span>
+                        )}
+                      </div>
+
+                      <p className="text-xs text-stone-700 dark:text-stone-300 mt-1 font-normal line-clamp-1">
+                        {item.definitionCn}
+                      </p>
+
+                      {/* Context & Tag Badges */}
+                      <div className="flex items-center gap-1.5 mt-2 flex-wrap">
+                        {item.sourceContext && (
+                          <span className="text-[9px] uppercase tracking-wider text-stone-400 dark:text-stone-500 bg-stone-100/80 dark:bg-slate-800/80 px-2 py-0.5 rounded-md truncate max-w-[140px]">
+                            {item.sourceContext}
+                          </span>
+                        )}
+                        {item.categories?.slice(0, 2).map((cat) => (
+                          <span
+                            key={cat}
+                            className="text-[9px] font-medium text-[#516050] dark:text-[#8FB996] bg-[#516050]/10 dark:bg-[#8FB996]/15 px-2 py-0.5 rounded-md"
+                          >
+                            {cat}
+                          </span>
+                        ))}
+                      </div>
+                    </div>
+
+                    {/* Card Right Action Strip (Audio Pronounce + Quick Review Button + 4-Tier Mastery Indicator) */}
+                    <div 
+                      className="flex items-center gap-1.5 sm:gap-2 shrink-0"
+                      onClick={(e) => e.stopPropagation()}
+                      onMouseDown={(e) => e.stopPropagation()}
+                      onTouchStart={(e) => e.stopPropagation()}
+                    >
+                      {/* One-Tap Spaced Review Checkoff Button (if Due) or Checked State */}
+                      {isReviewedInSession ? (
+                        <div
+                          className="px-2 py-1 rounded-lg bg-emerald-500/15 text-emerald-700 dark:text-emerald-300 border border-emerald-500/30 text-[10px] font-medium flex items-center gap-1 shadow-2xs"
+                          title="今日已完成艾宾浩斯打卡"
+                        >
+                          <Check className="w-3 h-3 text-emerald-600 dark:text-emerald-400" />
+                          <span className="hidden sm:inline">已打卡</span>
+                        </div>
+                      ) : ebbinghaus.isDue ? (
+                        <button
+                          type="button"
+                          onClick={(e) => handleMarkReviewed(e, item)}
+                          onMouseDown={(e) => e.stopPropagation()}
+                          onTouchStart={(e) => e.stopPropagation()}
+                          className="px-2 py-1 rounded-lg bg-amber-500/15 hover:bg-amber-500 text-amber-700 dark:text-amber-300 hover:text-white border border-amber-500/30 text-[10px] font-medium flex items-center gap-1 transition-all active:scale-95 cursor-pointer shadow-2xs"
+                          title="记录今日艾宾浩斯复现打卡"
+                        >
+                          <CheckCheck className="w-3 h-3" />
+                          <span className="hidden sm:inline">打卡</span>
+                        </button>
+                      ) : null}
+
+                      {/* Audio Pronunciation Button */}
+                      <button
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          speakWord(item.word, 'en-GB');
+                        }}
+                        onMouseDown={(e) => e.stopPropagation()}
+                        onTouchStart={(e) => e.stopPropagation()}
+                        className="p-2 rounded-full hover:bg-stone-100 dark:hover:bg-slate-800 text-stone-400 hover:text-[#516050] dark:hover:text-[#8FB996] active:scale-95 transition-all"
+                        title="朗读发音 (UK)"
+                      >
+                        <Volume2 className="w-4 h-4" />
+                      </button>
+
+                      {/* 4-Tier Scenario-Driven Mastery Ring Indicator */}
+                      <div 
+                        className="relative flex items-center justify-center p-1"
+                        onClick={(e) => e.stopPropagation()}
+                        onMouseDown={(e) => e.stopPropagation()}
+                        onMouseUp={(e) => e.stopPropagation()}
+                        onTouchStart={(e) => e.stopPropagation()}
+                        onTouchEnd={(e) => e.stopPropagation()}
+                      >
+                        <MasteryBadge
+                          level={mastery}
+                          size={28}
+                          interactive={true}
+                          onClick={(e) => {
+                            e?.stopPropagation();
+                            handleToggleMastery(item);
+                          }}
+                        />
+                      </div>
+                    </div>
+                  </div>
+                );
+              })
+            ) : (
+              <div className="text-center py-16 px-4 text-stone-400 dark:text-stone-500">
+                <BookOpen className="w-10 h-10 mx-auto stroke-1 text-stone-300 dark:text-stone-600 mb-2" />
+                <p className="text-sm font-medium">未找到符合条件的词汇</p>
+                <p className="text-xs mt-1">
+                  可在听歌歌词、AR 空间或雅思阅读中点击生词即刻收录
+                </p>
+              </div>
+            )}
           </div>
 
           {/* Floating Aesthetic Glass Batch Action Dock */}
@@ -965,7 +952,7 @@ export const NotebookModal: React.FC<NotebookModalProps> = ({ isOpen, onClose })
                 initial={{ y: 80, opacity: 0, scale: 0.95 }}
                 animate={{ y: 0, opacity: 1, scale: 1, transition: { type: 'spring', damping: 25, stiffness: 350 } }}
                 exit={{ y: 80, opacity: 0, scale: 0.95, transition: { duration: 0.18 } }}
-                className="absolute bottom-5 left-3.5 right-3.5 z-40 bg-white/95 dark:bg-[#151D2E]/95 backdrop-blur-2xl border border-stone-200/90 dark:border-white/10 rounded-2xl p-2.5 sm:p-3 shadow-[0_16px_36px_-6px_rgba(0,0,0,0.18)] dark:shadow-[0_20px_40px_-10px_rgba(0,0,0,0.7)] flex flex-col gap-2"
+                className="absolute bottom-5 left-3.5 right-3.5 z-40 bg-white/[0.98] dark:bg-[#151D2E]/[0.98] border border-stone-200/90 dark:border-white/10 rounded-2xl p-2.5 sm:p-3 shadow-[0_16px_36px_-6px_rgba(0,0,0,0.18)] dark:shadow-[0_20px_40px_-10px_rgba(0,0,0,0.7)] flex flex-col gap-2"
               >
                 {/* Micro Status Hint */}
                 <div className="flex items-center px-1 text-[11px] text-stone-500 dark:text-stone-400">
@@ -1045,7 +1032,7 @@ export const NotebookModal: React.FC<NotebookModalProps> = ({ isOpen, onClose })
 
           {/* Sub-modal: Batch Tag Selector Popover */}
           {isTagModalOpen && (
-            <div className="absolute inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm animate-in fade-in duration-150">
+            <div className="absolute inset-0 z-50 flex items-center justify-center p-4 bg-black/65 animate-in fade-in duration-150">
               <div className="w-full max-w-sm rounded-2xl bg-white dark:bg-[#151D2E] border border-stone-200 dark:border-slate-700 p-5 shadow-2xl space-y-4">
                 <div className="flex items-center justify-between">
                   <div className="flex items-center gap-2">

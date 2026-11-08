@@ -12,8 +12,8 @@
     --ambient-glow-3: #D0C5B4;
 
     --color-cream-bg: #F8F6F0;
-    --color-cream-surface: rgba(255, 255, 255, 0.78);
-    --color-cream-card: rgba(255, 255, 255, 0.88);
+    --color-cream-surface: rgba(255, 255, 255, 0.94);
+    --color-cream-card: rgba(255, 255, 255, 0.96);
     --color-sage: #516050;
     --color-sage-dark: #3F4C3E;
     --color-sage-light: #7E927D;
@@ -34,8 +34,8 @@
     --ambient-glow-3: #2A1F3D;
 
     --color-cream-bg: #0B0F17;
-    --color-cream-surface: rgba(18, 24, 38, 0.72);
-    --color-cream-card: rgba(26, 34, 52, 0.85);
+    --color-cream-surface: rgba(18, 24, 38, 0.92);
+    --color-cream-card: rgba(26, 34, 52, 0.94);
     --color-sage: #6B8F71;
     --color-sage-dark: #4A6B50;
     --color-sage-light: #8FB996;
@@ -82,9 +82,7 @@
 
 .glass-panel {
   background: var(--color-cream-surface);
-  backdrop-filter: blur(28px) saturate(180%);
-  -webkit-backdrop-filter: blur(28px) saturate(180%);
-  border: 1px solid rgba(255, 255, 255, 0.55);
+  border: 1px solid rgba(255, 255, 255, 0.65);
 }
 
 .dark .glass-panel {
@@ -93,16 +91,26 @@
 }
 
 .glass-tag {
-  background: rgba(28, 25, 23, 0.78);
-  backdrop-filter: blur(16px);
-  -webkit-backdrop-filter: blur(16px);
-  border: 1px solid rgba(255, 255, 255, 0.12);
+  background: rgba(28, 25, 23, 0.88);
+  border: 1px solid rgba(255, 255, 255, 0.14);
   color: #FFFFFF;
 }
 
 .dark .glass-tag {
-  background: rgba(18, 24, 38, 0.85);
+  background: rgba(18, 24, 38, 0.92);
   border: 1px solid rgba(255, 255, 255, 0.18);
+}
+
+/* Eliminate expensive multi-pass Gaussian backdrop readbacks inside mobile viewport during 90/120Hz animations */
+#mobile-app-frame .backdrop-blur-xs,
+#mobile-app-frame .backdrop-blur-sm,
+#mobile-app-frame .backdrop-blur-md,
+#mobile-app-frame .backdrop-blur-lg,
+#mobile-app-frame .backdrop-blur-xl,
+#mobile-app-frame .backdrop-blur-2xl,
+#mobile-app-frame .backdrop-blur-3xl {
+  -webkit-backdrop-filter: none !important;
+  backdrop-filter: none !important;
 }
 
 /* Ambient breathing animations - Pure GPU compositor 3D translation without texture re-rasterization */

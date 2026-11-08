@@ -11,6 +11,7 @@ import {
   prioritizeSongsByNotebookAndSpacedRepetition
 } from '../../utils/vocabEngine';
 import { VocabDifficultyTag, SongItem } from '../../types';
+import { triggerHighRefreshBoost } from '../../utils/displayRefreshRate';
 import { Sparkles, ArrowUpDown, Filter, RotateCcw, Volume2, Check } from 'lucide-react';
 
 // Mastery status circle indicator matching the app design system (0: hollow, 1: needle-dot, 2: mid-dot, 3: solid)
@@ -89,8 +90,9 @@ export const PlaylistDrawer: React.FC = () => {
     return map;
   }, [words]);
 
-  // Evaluated songs with difficulties and due-word matches
+  // Evaluated songs with difficulties and due-word matches (suspended when drawer is closed so background vault updates never stall main thread)
   const analyzedSongs = useMemo(() => {
+    if (!isPlaylistOpen) return [];
     return songs.map((song, originalIdx) => {
       const evalResult = evaluateSongVocabDifficulty(song, words, dueWordStrs);
       const analysis = analyzeSongVocab(song, words, dueWordStrs);
@@ -129,7 +131,20 @@ export const PlaylistDrawer: React.FC = () => {
         hasNotebookWords: (evalResult.stats.matchedNotebookCount || 0) > 0
       };
     });
-  }, [songs, words, dueWordStrs, notebookWordMap]);
+  }, [isPlaylistOpen, songs, words, dueWordStrs, notebookWordMap]);
+
+  // Precompute filter counts in a single O(N) pass
+  const filterCounts = useMemo(() => {
+    let dueCount = 0;
+    let notebookCount = 0;
+    let chineseCount = 0;
+    for (const item of analyzedSongs) {
+      if (item.hasDueWords) dueCount++;
+      if (item.hasNotebookWords) notebookCount++;
+      if (item.isChinese) chineseCount++;
+    }
+    return { dueCount, notebookCount, chineseCount };
+  }, [analyzedSongs]);
 
   // Filtered song list
   const filteredList = useMemo(() => {
@@ -143,34 +158,46 @@ export const PlaylistDrawer: React.FC = () => {
   }, [analyzedSongs, activeFilter]);
 
   // Auto-scroll to currently playing track whenever drawer opens or active song changes
-  const scrollToActiveSong = useCallback(() => {
+  const scrollToActiveSong = useCallback((smooth: boolean = true) => {
     if (activeSongItemRef.current && playlistContainerRef.current) {
       const container = playlistContainerRef.current;
       const activeEl = activeSongItemRef.current;
-      const targetScroll =
-        activeEl.offsetTop - container.offsetTop - (container.clientHeight / 2 - activeEl.clientHeight / 2);
+      const targetScroll = Math.max(
+        0,
+        activeEl.offsetTop - container.offsetTop - (container.clientHeight / 2 - activeEl.clientHeight / 2)
+      );
+
+      if (!smooth) {
+        container.scrollTop = targetScroll;
+        return;
+      }
 
       container.scrollTo({
-        top: Math.max(0, targetScroll),
+        top: targetScroll,
         behavior: 'smooth'
       });
     }
   }, []);
 
+  const hasInitialScrolledRef = useRef(false);
+
   useEffect(() => {
     if (isPlaylistOpen) {
-      const timer = setTimeout(() => {
-        scrollToActiveSong();
-      }, 80);
-      return () => clearTimeout(timer);
+      triggerHighRefreshBoost(1200);
+      const raf = requestAnimationFrame(() => {
+        scrollToActiveSong(false);
+        hasInitialScrolledRef.current = true;
+      });
+      return () => cancelAnimationFrame(raf);
     } else {
+      hasInitialScrolledRef.current = false;
       setIsExpanded(false);
     }
   }, [isPlaylistOpen, scrollToActiveSong]);
 
   useEffect(() => {
-    if (isPlaylistOpen) {
-      scrollToActiveSong();
+    if (isPlaylistOpen && hasInitialScrolledRef.current) {
+      scrollToActiveSong(true);
     }
   }, [currentSongIndex, isPlaylistOpen, scrollToActiveSong]);
 
@@ -212,33 +239,35 @@ export const PlaylistDrawer: React.FC = () => {
           onTouchMove={(e) => e.stopPropagation()}
           onTouchEnd={(e) => e.stopPropagation()}
         >
-          {/* Gaussian Blur Backdrop with Silky Fade */}
+          {/* Backdrop with Silky Fade (Zero GPU Readback) */}
           <motion.div
             key="playlist-backdrop"
             initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}
             exit={{ opacity: 0 }}
             transition={{ duration: 0.35, ease: [0.22, 1, 0.36, 1] }}
-            className="absolute inset-0 bg-stone-950/45 dark:bg-black/75 backdrop-blur-xs cursor-pointer"
+            className="absolute inset-0 bg-stone-950/50 dark:bg-black/75 cursor-pointer"
             onClick={() => {
               setIsPlaylistOpen(false);
               setIsExpanded(false);
             }}
           />
 
-          {/* Bottom Drawer Sheet */}
+          {/* Bottom Drawer Sheet (Pure GPU Transform Expansion without CSS Height Reflow) */}
           <motion.div
             id="music-playlist-sheet"
             key="playlist-sheet"
             data-no-swipe="true"
             data-no-gesture="true"
             initial={{ y: '100%' }}
-            animate={{ y: 0 }}
+            animate={{ y: isExpanded ? '0%' : '20%' }}
             exit={{ y: '100%' }}
             drag="y"
             dragConstraints={{ top: 0, bottom: 0 }}
             dragElastic={{ top: 0.08, bottom: 0.5 }}
+            onDragStart={() => triggerHighRefreshBoost(1000)}
             onDragEnd={(_, info) => {
+              triggerHighRefreshBoost(1000);
               if (info.offset.y < -30 || info.velocity.y < -200) {
                 setIsExpanded(true);
               } else if (info.offset.y > 50 || info.velocity.y > 220) {
@@ -257,21 +286,25 @@ export const PlaylistDrawer: React.FC = () => {
               mass: 0.8
             }}
             style={{
-              height: isExpanded ? '92%' : '72%',
-              transition: 'height 280ms cubic-bezier(0.22, 1, 0.36, 1)',
+              height: '92%',
+              paddingBottom: isExpanded ? '2rem' : '22%',
               willChange: 'transform',
+              contain: 'layout style paint',
               backfaceVisibility: 'hidden',
               WebkitBackfaceVisibility: 'hidden'
             }}
             onTouchStart={(e) => e.stopPropagation()}
             onTouchMove={(e) => e.stopPropagation()}
             onTouchEnd={(e) => e.stopPropagation()}
-            className="relative w-full flex flex-col rounded-t-[32px] sm:rounded-t-[36px] bg-[#FAF7F2] dark:bg-[#121826] border-t border-white/90 dark:border-white/10 shadow-[0_-20px_50px_rgba(0,0,0,0.35)] px-5 pt-3 pb-8 z-10 overflow-hidden hardware-accelerated"
+            className="relative w-full flex flex-col rounded-t-[32px] sm:rounded-t-[36px] bg-[#FAF7F2] dark:bg-[#121826] border-t border-white/90 dark:border-white/10 shadow-[0_-20px_50px_rgba(0,0,0,0.35)] px-5 pt-3 z-10 overflow-hidden hardware-accelerated"
           >
             {/* Drag Pill Handle */}
             <div
               className="w-full flex flex-col items-center justify-center py-2.5 cursor-grab active:cursor-grabbing touch-none select-none group"
-              onClick={() => setIsExpanded(prev => !prev)}
+              onClick={() => {
+                triggerHighRefreshBoost(1000);
+                setIsExpanded(prev => !prev);
+              }}
               title={isExpanded ? "下滑或点击收起为半屏" : "上滑或点击展开全屏 / 下滑收起"}
             >
               <div className="w-12 h-1.5 rounded-full bg-stone-300 dark:bg-stone-600/80 group-hover:bg-stone-400 dark:group-hover:bg-stone-500 transition-all duration-200" />
@@ -306,19 +339,19 @@ export const PlaylistDrawer: React.FC = () => {
                 { id: 'ALL', label: '全部' },
                 {
                   id: 'DUE_REVIEW',
-                  label: `待复习 (${analyzedSongs.filter(s => s.hasDueWords).length})`,
-                  highlight: analyzedSongs.some(s => s.hasDueWords),
-                  hide: analyzedSongs.filter(s => s.hasDueWords).length === 0
+                  label: `待复习 (${filterCounts.dueCount})`,
+                  highlight: filterCounts.dueCount > 0,
+                  hide: filterCounts.dueCount === 0
                 },
                 {
                   id: 'NOTEBOOK',
-                  label: `生词 (${analyzedSongs.filter(s => s.hasNotebookWords).length})`,
-                  hide: analyzedSongs.filter(s => s.hasNotebookWords).length === 0
+                  label: `生词 (${filterCounts.notebookCount})`,
+                  hide: filterCounts.notebookCount === 0
                 },
                 {
                   id: 'CHINESE',
-                  label: `中文 (${analyzedSongs.filter(s => s.isChinese).length})`,
-                  hide: analyzedSongs.filter(s => s.isChinese).length === 0
+                  label: `中文 (${filterCounts.chineseCount})`,
+                  hide: filterCounts.chineseCount === 0
                 }
               ].filter(t => !t.hide).map(tab => {
                 const isActive = activeFilter === tab.id;
@@ -345,7 +378,7 @@ export const PlaylistDrawer: React.FC = () => {
             {/* Track list with smooth scrolling & auto-scroll support */}
             <div
               ref={playlistContainerRef}
-              className="flex-1 overflow-y-auto space-y-2.5 mt-3 min-h-0 select-none scroll-smooth no-scrollbar"
+              className="flex-1 overflow-y-auto space-y-2.5 mt-3 min-h-0 select-none no-scrollbar"
               onTouchStart={(e) => e.stopPropagation()}
               onTouchMove={(e) => e.stopPropagation()}
             >
