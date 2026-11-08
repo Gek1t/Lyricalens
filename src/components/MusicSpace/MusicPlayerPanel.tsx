@@ -5,7 +5,7 @@ import { useLiveQuery } from 'dexie-react-hooks';
 import { useAppStore } from '../../store/useAppStore';
 import { parseLRC, findActiveLyricIndex } from '../../utils/lrcParser';
 import { extractDominantPalette, applyAmbientGlowColors, withColorAlpha } from '../../utils/colorExtractor';
-import { triggerHighRefreshBoost } from '../../utils/displayRefreshRate';
+import { getDisplayRefreshRateState, triggerHighRefreshBoost } from '../../utils/displayRefreshRate';
 import { ambientSynth, speakWord } from '../../utils/audioEngine';
 import { db, collectWord, cycleWordMastery } from '../../db';
 import { SEED_WORDS } from '../../db/seedData';
@@ -593,47 +593,65 @@ export const MusicPlayerPanel: React.FC<MusicPlayerPanelProps> = ({ onOpenNotebo
         btnSwitchRafRef.current = null;
       }
 
+      const { fps } = getDisplayRefreshRateState();
+      const settleMs = fps >= 120 ? 310 : fps >= 90 ? 325 : 340;
       const entryX = songTransitionDirection === 'right' ? 48 : -48;
       const textEntryX = songTransitionDirection === 'right' ? 18 : -18;
 
+      wrapper.getAnimations?.().forEach(a => a.cancel());
       wrapper.style.transition = 'none';
       (wrapper.style as any).webkitTransition = 'none';
-      wrapper.style.transform = `translate3d(${entryX}px, 0, 0) scale(0.94)`;
-      (wrapper.style as any).webkitTransform = `translate3d(${entryX}px, 0, 0) scale(0.94)`;
+      wrapper.style.transform = 'translate3d(0, 0, 0) scale(1)';
+      (wrapper.style as any).webkitTransform = 'translate3d(0, 0, 0) scale(1)';
+      if (typeof wrapper.animate === 'function') {
+        wrapper.animate(
+          [
+            { transform: `translate3d(${entryX}px, 0, 0) scale(0.94)` },
+            { transform: 'translate3d(0, 0, 0) scale(1)' },
+          ],
+          {
+            duration: settleMs,
+            easing: 'cubic-bezier(0.16, 1, 0.3, 1)',
+          }
+        );
+      }
 
       if (titleStage) {
+        titleStage.getAnimations?.().forEach(a => a.cancel());
         titleStage.style.transition = 'none';
-        titleStage.style.transform = `translate3d(${textEntryX}px, 0, 0)`;
-        titleStage.style.opacity = '0';
+        titleStage.style.transform = 'translate3d(0, 0, 0)';
+        titleStage.style.opacity = '1';
+        if (typeof titleStage.animate === 'function') {
+          titleStage.animate(
+            [
+              { transform: `translate3d(${textEntryX}px, 0, 0)`, opacity: 0 },
+              { transform: 'translate3d(0, 0, 0)', opacity: 1 },
+            ],
+            {
+              duration: settleMs,
+              easing: 'cubic-bezier(0.16, 1, 0.3, 1)',
+            }
+          );
+        }
       }
       if (quoteStage) {
+        quoteStage.getAnimations?.().forEach(a => a.cancel());
         quoteStage.style.transition = 'none';
-        quoteStage.style.transform = `translate3d(${textEntryX}px, 0, 0)`;
-        quoteStage.style.opacity = '0';
+        quoteStage.style.transform = 'translate3d(0, 0, 0)';
+        quoteStage.style.opacity = '1';
+        if (typeof quoteStage.animate === 'function') {
+          quoteStage.animate(
+            [
+              { transform: `translate3d(${textEntryX}px, 0, 0)`, opacity: 0 },
+              { transform: 'translate3d(0, 0, 0)', opacity: 1 },
+            ],
+            {
+              duration: settleMs,
+              easing: 'cubic-bezier(0.16, 1, 0.3, 1)',
+            }
+          );
+        }
       }
-
-      btnSwitchRafRef.current = requestAnimationFrame(() => {
-        btnSwitchRafRef.current = requestAnimationFrame(() => {
-          btnSwitchRafRef.current = null;
-          const cardEnterSpring = 'transform var(--spring-duration-card, 340ms) cubic-bezier(0.16, 1, 0.3, 1)';
-          const textEnterSpring = 'transform var(--spring-duration-card, 340ms) cubic-bezier(0.16, 1, 0.3, 1), opacity 240ms cubic-bezier(0.16, 1, 0.3, 1)';
-          wrapper.style.transition = cardEnterSpring;
-          (wrapper.style as any).webkitTransition = '-webkit-transform var(--spring-duration-card, 340ms) cubic-bezier(0.16, 1, 0.3, 1)';
-          wrapper.style.transform = 'translate3d(0, 0, 0) scale(1)';
-          (wrapper.style as any).webkitTransform = 'translate3d(0, 0, 0) scale(1)';
-
-          if (titleStage) {
-            titleStage.style.transition = textEnterSpring;
-            titleStage.style.transform = 'translate3d(0, 0, 0)';
-            titleStage.style.opacity = '1';
-          }
-          if (quoteStage) {
-            quoteStage.style.transition = textEnterSpring;
-            quoteStage.style.transform = 'translate3d(0, 0, 0)';
-            quoteStage.style.opacity = '1';
-          }
-        });
-      });
     }
 
     return () => {
@@ -950,7 +968,6 @@ export const MusicPlayerPanel: React.FC<MusicPlayerPanelProps> = ({ onOpenNotebo
       {/* Top Header: keyboard_arrow_down | NOW PLAYING | more_horiz */}
       {/* Smoothly fades out & disables pointer events when FullscreenLyricsView is open to prevent header overlap */}
       <div
-        style={{ willChange: 'transform, opacity' }}
         className={`relative z-40 w-full shrink-0 transition-[transform,opacity] duration-250 ease-out ${
           isFullscreenLyricsOpen ? 'opacity-0 -translate-y-2 pointer-events-none' : 'opacity-100'
         }`}
@@ -963,7 +980,6 @@ export const MusicPlayerPanel: React.FC<MusicPlayerPanelProps> = ({ onOpenNotebo
 
       {/* Center Gallery Art Frame Area (Fluid Golden Ratio & Adaptive Vertical Rhythm across all mobile heights) */}
       <div
-        style={{ willChange: 'transform, opacity' }}
         className={`relative flex-1 min-h-0 flex flex-col items-center justify-center px-4 z-10 my-auto py-1 gap-y-2.5 sm:gap-y-4 overflow-hidden transition-[transform,opacity] duration-250 ease-out ${
           isFullscreenLyricsOpen ? 'opacity-0 scale-[0.95] pointer-events-none' : 'opacity-100 scale-100'
         }`}
@@ -1000,7 +1016,7 @@ export const MusicPlayerPanel: React.FC<MusicPlayerPanelProps> = ({ onOpenNotebo
           style={{
             transform: 'translate3d(0, 0, 0) scale(1)',
             WebkitTransform: 'translate3d(0, 0, 0) scale(1)',
-            willChange: 'transform, opacity',
+            willChange: 'transform',
             backfaceVisibility: 'hidden',
             WebkitBackfaceVisibility: 'hidden'
           }}
@@ -1022,7 +1038,6 @@ export const MusicPlayerPanel: React.FC<MusicPlayerPanelProps> = ({ onOpenNotebo
             onPointerDown={handleCardPointerDown}
             onClick={handleCardClick}
             style={{
-              willChange: 'transform, opacity',
               backfaceVisibility: 'hidden',
               WebkitBackfaceVisibility: 'hidden'
             }}
@@ -1108,7 +1123,6 @@ export const MusicPlayerPanel: React.FC<MusicPlayerPanelProps> = ({ onOpenNotebo
 
       {/* 4. Bottom Playback Controls Bar with timeline */}
       <div
-        style={{ willChange: 'transform, opacity' }}
         className={`relative w-full max-w-[356px] mx-auto px-6 z-20 pb-2 shrink-0 transition-[transform,opacity] duration-250 ease-out ${
           isFullscreenLyricsOpen ? 'opacity-0 translate-y-2 pointer-events-none' : 'opacity-100 translate-y-0'
         }`}
@@ -1276,7 +1290,7 @@ export const MusicPlayerPanel: React.FC<MusicPlayerPanelProps> = ({ onOpenNotebo
               exit={{ opacity: 0 }}
               transition={{ duration: 0.32, ease: [0.22, 1, 0.36, 1] }}
               onClick={() => setIsVocabRadarOpen(false)}
-              className="absolute inset-0 bg-black/45 dark:bg-black/70 backdrop-blur-sm"
+              className="absolute inset-0 bg-black/45 dark:bg-black/70"
             />
 
             {/* Bottom Drawer Sheet */}
@@ -1461,7 +1475,7 @@ export const MusicPlayerPanel: React.FC<MusicPlayerPanelProps> = ({ onOpenNotebo
               animate={{ opacity: 1 }}
               exit={{ opacity: 0 }}
               transition={{ duration: 0.32, ease: [0.22, 1, 0.36, 1] }}
-              className="absolute inset-0 bg-stone-950/45 dark:bg-black/75 backdrop-blur-xs"
+              className="absolute inset-0 bg-stone-950/45 dark:bg-black/75"
               onClick={() => setIsQualityModalOpen(false)}
             />
 

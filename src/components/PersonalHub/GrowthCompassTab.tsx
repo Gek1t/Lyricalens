@@ -345,7 +345,7 @@ export const GrowthCompassTab: React.FC = () => {
   return (
     <div className="space-y-3.5 pb-6 animate-in fade-in duration-300">
       {/* 1. Streak Activity Widget */}
-      <div className="relative overflow-hidden rounded-3xl bg-white/45 dark:bg-white/[0.04] backdrop-blur-xl border border-stone-900/[0.06] dark:border-white/[0.07] p-5 shadow-[0_4px_24px_-4px_rgba(0,0,0,0.03)] dark:shadow-[0_4px_24px_-4px_rgba(0,0,0,0.3)]">
+      <div className="relative overflow-hidden rounded-3xl bg-white/80 dark:bg-[#151C28]/88 border border-stone-900/[0.06] dark:border-white/[0.07] p-5 shadow-[0_4px_24px_-4px_rgba(0,0,0,0.03)] dark:shadow-[0_4px_24px_-4px_rgba(0,0,0,0.3)]">
         {/* Floating Sparkles Burst on Check-in */}
         <AnimatePresence>
           {isSparkling && (
@@ -474,7 +474,7 @@ export const GrowthCompassTab: React.FC = () => {
       </div>
 
       {/* 2. Apple Health Activity Rings (Vocabulary Mastery + Integrated Review Entry) */}
-      <div className="rounded-3xl bg-white/45 dark:bg-white/[0.04] backdrop-blur-xl border border-stone-900/[0.06] dark:border-white/[0.07] p-5 shadow-[0_4px_24px_-4px_rgba(0,0,0,0.03)] dark:shadow-[0_4px_24px_-4px_rgba(0,0,0,0.3)] space-y-4">
+      <div className="rounded-3xl bg-white/80 dark:bg-[#151C28]/88 border border-stone-900/[0.06] dark:border-white/[0.07] p-5 shadow-[0_4px_24px_-4px_rgba(0,0,0,0.03)] dark:shadow-[0_4px_24px_-4px_rgba(0,0,0,0.3)] space-y-4">
         <div className="flex items-center justify-between">
           <h3 className="text-base font-semibold text-stone-800 dark:text-stone-100">
             生词掌握度
@@ -595,7 +595,7 @@ export const GrowthCompassTab: React.FC = () => {
       </div>
 
       {/* 3. IELTS Academic Performance Widget */}
-      <div className="rounded-3xl bg-white/45 dark:bg-white/[0.04] backdrop-blur-xl border border-stone-900/[0.06] dark:border-white/[0.07] p-5 shadow-[0_4px_24px_-4px_rgba(0,0,0,0.03)] dark:shadow-[0_4px_24px_-4px_rgba(0,0,0,0.3)] space-y-4">
+      <div className="rounded-3xl bg-white/80 dark:bg-[#151C28]/88 border border-stone-900/[0.06] dark:border-white/[0.07] p-5 shadow-[0_4px_24px_-4px_rgba(0,0,0,0.03)] dark:shadow-[0_4px_24px_-4px_rgba(0,0,0,0.3)] space-y-4">
         <div className="flex items-center justify-between">
           <h3 className="text-base font-semibold text-stone-800 dark:text-stone-100">
             雅思模考表现
@@ -651,7 +651,7 @@ export const GrowthCompassTab: React.FC = () => {
       </div>
 
       {/* 4. Dynamic Word Acquisition Sources Gauge */}
-      <div className="rounded-3xl bg-white/45 dark:bg-white/[0.04] backdrop-blur-xl border border-stone-900/[0.06] dark:border-white/[0.07] p-5 shadow-[0_4px_24px_-4px_rgba(0,0,0,0.03)] dark:shadow-[0_4px_24px_-4px_rgba(0,0,0,0.3)] space-y-3.5">
+      <div className="rounded-3xl bg-white/80 dark:bg-[#151C28]/88 border border-stone-900/[0.06] dark:border-white/[0.07] p-5 shadow-[0_4px_24px_-4px_rgba(0,0,0,0.03)] dark:shadow-[0_4px_24px_-4px_rgba(0,0,0,0.3)] space-y-3.5">
         <div className="flex items-center justify-between">
           <h3 className="text-base font-semibold text-stone-800 dark:text-stone-100">
             单词来源

@@ -43,19 +43,22 @@ export const NotebookModal: React.FC<NotebookModalProps> = ({ isOpen, onClose })
   const [activeFilter, setActiveFilter] = useState<
     'ALL' | 'DUE_REVIEW' | 'UNMASTERED' | 'MASTERED' | 'LEVEL_1' | 'LEVEL_0' | 'IELTS' | 'MUSIC' | 'AR'
   >('ALL');
-  const [isFullListMounted, setIsFullListMounted] = useState(false);
-  
-  // Sync initial filter from store when opened & defer offscreen list items by 1 rAF so Frame 0 of slide-up is < 2ms
+  const [isPrewarmed, setIsPrewarmed] = useState(false);
+
+  // Pre-warm NotebookModal DOM in background after startup idle so opening has 0ms mount stall
+  useEffect(() => {
+    const t = window.setTimeout(() => {
+      setIsPrewarmed(true);
+    }, 750);
+    return () => window.clearTimeout(t);
+  }, []);
+
+  // Sync initial filter from store when opened
   useEffect(() => {
     if (isOpen) {
+      setIsPrewarmed(true);
       triggerHighRefreshBoost(1200);
       setActiveFilter(notebookInitialFilter || 'ALL');
-      const raf = requestAnimationFrame(() => {
-        setIsFullListMounted(true);
-      });
-      return () => cancelAnimationFrame(raf);
-    } else {
-      setIsFullListMounted(false);
     }
   }, [isOpen, notebookInitialFilter]);
 
@@ -100,15 +103,15 @@ export const NotebookModal: React.FC<NotebookModalProps> = ({ isOpen, onClose })
     []
   );
   const allWords = useMemo(
-    () => (isOpen && rawAllWords ? [...rawAllWords].sort((a, b) => (b.addedTimestamp || 0) - (a.addedTimestamp || 0)) : undefined),
-    [isOpen, rawAllWords]
+    () => (isPrewarmed && rawAllWords ? [...rawAllWords].sort((a, b) => (b.addedTimestamp || 0) - (a.addedTimestamp || 0)) : undefined),
+    [isPrewarmed, rawAllWords]
   );
 
   // Precompute Ebbinghaus retention once per word in a single O(N) pass
   const { retentionMap, dueWordsCount } = useMemo(() => {
     const map = new Map<string, ReturnType<typeof calculateEbbinghausRetention>>();
     let dueCount = 0;
-    if (!isOpen || !allWords) return { retentionMap: map, dueWordsCount: 0 };
+    if (!isPrewarmed || !allWords) return { retentionMap: map, dueWordsCount: 0 };
     const now = Date.now();
     for (const w of allWords) {
       const info = calculateEbbinghausRetention(w, now);
@@ -116,7 +119,7 @@ export const NotebookModal: React.FC<NotebookModalProps> = ({ isOpen, onClose })
       if (info.isDue) dueCount++;
     }
     return { retentionMap: map, dueWordsCount: dueCount };
-  }, [isOpen, allWords]);
+  }, [isPrewarmed, allWords]);
 
   const [sessionReviewedWords, setSessionReviewedWords] = useState<Set<string>>(new Set());
   const [sessionModifiedWords, setSessionModifiedWords] = useState<Set<string>>(new Set());
@@ -155,7 +158,7 @@ export const NotebookModal: React.FC<NotebookModalProps> = ({ isOpen, onClose })
 
   // Filtered words list (maintains session stability so clicked/reviewed items don't suddenly vanish)
   const filteredWords = useMemo(() => {
-    if (!isOpen || !allWords) return [];
+    if (!isPrewarmed || !allWords) return [];
     return allWords.filter(w => {
       const term = searchTerm.toLowerCase().trim();
       const matchesSearch =
@@ -189,12 +192,9 @@ export const NotebookModal: React.FC<NotebookModalProps> = ({ isOpen, onClose })
       if (activeFilter === 'AR') return isWordFromSource(w, 'AR');
       return true;
     });
-  }, [isOpen, allWords, searchTerm, activeFilter, sessionReviewedWords, sessionModifiedWords, retentionMap]);
+  }, [isPrewarmed, allWords, searchTerm, activeFilter, sessionReviewedWords, sessionModifiedWords, retentionMap]);
 
-  const visibleWords = useMemo(
-    () => (isFullListMounted ? filteredWords : filteredWords.slice(0, 12)),
-    [filteredWords, isFullListMounted]
-  );
+  const visibleWords = isOpen ? filteredWords : filteredWords.slice(0, 12);
 
   // Quick mark single word as reviewed today
   const handleMarkReviewed = async (e: React.MouseEvent, item: WordItem) => {
@@ -554,26 +554,26 @@ export const NotebookModal: React.FC<NotebookModalProps> = ({ isOpen, onClose })
   };
 
   return (
-    <AnimatePresence>
-      {isOpen && (
-        <motion.div
-          key="notebook-vault-modal"
-          initial={{ y: '100%' }}
-          animate={{
-            y: 0,
-            transition: { type: 'spring', damping: 30, stiffness: 320, mass: 0.8 }
-          }}
-          exit={{
-            y: '100%',
-            transition: { duration: 0.22, ease: [0.32, 0.72, 0, 1] }
-          }}
-          style={{
-            willChange: 'transform',
-            backfaceVisibility: 'hidden',
-            WebkitBackfaceVisibility: 'hidden',
-          }}
-          className="absolute inset-0 z-50 flex flex-col bg-[#FAF8F5] dark:bg-[#0F1523] text-stone-900 dark:text-stone-100 select-none overflow-hidden hardware-accelerated"
-        >
+    <div
+      aria-hidden={!isOpen}
+      style={{
+        visibility: isOpen ? 'visible' : 'hidden',
+        transform: isOpen ? 'translate3d(0, 0%, 0)' : 'translate3d(0, 102%, 0)',
+        WebkitTransform: isOpen ? 'translate3d(0, 0%, 0)' : 'translate3d(0, 102%, 0)',
+        transition: isOpen
+          ? 'transform var(--spring-duration-modal, 280ms) cubic-bezier(0.22, 1, 0.36, 1), visibility 0s linear 0s'
+          : 'transform var(--spring-duration-modal, 280ms) cubic-bezier(0.22, 1, 0.36, 1), visibility 0s linear 280ms',
+        WebkitTransition: isOpen
+          ? '-webkit-transform var(--spring-duration-modal, 280ms) cubic-bezier(0.22, 1, 0.36, 1), visibility 0s linear 0s'
+          : '-webkit-transform var(--spring-duration-modal, 280ms) cubic-bezier(0.22, 1, 0.36, 1), visibility 0s linear 280ms',
+        pointerEvents: isOpen ? 'auto' : 'none',
+        willChange: 'transform',
+        backfaceVisibility: 'hidden',
+        WebkitBackfaceVisibility: 'hidden',
+        contain: 'layout paint style',
+      }}
+      className="absolute inset-0 z-50 flex flex-col bg-[#FAF8F5] dark:bg-[#0F1523] text-stone-900 dark:text-stone-100 select-none overflow-hidden hardware-accelerated"
+    >
           {/* Top Header Bar */}
           <div className="relative w-full px-5 pt-11 pb-3.5 border-b border-stone-200/70 dark:border-slate-800/80 flex items-center justify-between bg-white/95 dark:bg-[#151D2E]/95 z-30">
             {!isBatchMode ? (
@@ -1419,8 +1419,6 @@ export const NotebookModal: React.FC<NotebookModalProps> = ({ isOpen, onClose })
               </motion.div>
             )}
           </AnimatePresence>
-        </motion.div>
-      )}
-    </AnimatePresence>
+    </div>
   );
 };

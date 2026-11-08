@@ -6,7 +6,6 @@ import android.content.Intent;
 import android.content.res.Configuration;
 import android.graphics.Canvas;
 import android.graphics.Color;
-import android.graphics.Paint;
 import android.hardware.display.DisplayManager;
 import android.net.Uri;
 import android.os.Build;
@@ -40,61 +39,55 @@ import androidx.core.view.WindowInsetsCompat;
 import com.getcapacitor.Bridge;
 import com.getcapacitor.BridgeActivity;
 import com.getcapacitor.BridgeWebViewClient;
+import java.io.BufferedReader;
+import java.io.ByteArrayOutputStream;
+import java.io.DataOutputStream;
+import java.io.InputStream;
+import java.io.InputStreamReader;
 import java.io.OutputStream;
 import java.lang.reflect.Method;
+import java.net.HttpURLConnection;
+import java.net.URL;
+import java.net.URLEncoder;
+import java.nio.charset.StandardCharsets;
+import java.security.MessageDigest;
+import java.util.LinkedHashMap;
+import java.util.List;
+import java.util.Locale;
+import java.util.Map;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
+import javax.crypto.Cipher;
+import javax.crypto.spec.SecretKeySpec;
+import org.json.JSONObject;
 
 public class MainActivity extends BridgeActivity {
     private volatile int detectedRefreshRate = 60;
     private volatile int lastSafeTopDp = 48;
+    private volatile int lastInjectedFps = -1;
+    private volatile int lastInjectedTopDp = -1;
     private boolean isWebViewConfigured = false;
+    private HighFpsKeepAliveView keepAliveView = null;
     private DisplayManager.DisplayListener displayListener = null;
-    private HighFpsKeepAliveView highFpsKeepAliveView = null;
+    private AndroidNativeMediaBridge nativeMediaBridge = null;
 
-    /**
-     * 1x1px Hardware RenderNode VSync Keep-Alive View.
-     * Defeats Xiaomi (HyperOS/MIUI), OPPO/OnePlus (ColorOS), and vivo/iQOO (OriginOS) 60Hz WebView whitelist throttling
-     * by keeping Android's native ViewRootImpl & RenderThread actively voting for 90Hz/120Hz/144Hz VSync during all touch & animation windows.
-     */
-    private static final class HighFpsKeepAliveView extends View {
-        private final Paint paint = new Paint();
-        private boolean toggle = false;
-        private long boostUntilMs = 0L;
+    // Session-level QR auth caches so if a background poll receives 803 while user is inside NetEase/QQ App,
+    // returning to Lyricalens immediately resolves with 803 + full cookie + profile
+    private static volatile String lastCapturedNcmKey = "";
+    private static volatile int lastCapturedNcmKeyType = 3;
+    private static volatile String lastCapturedNcmCookie = "";
+    private static volatile String lastCapturedNcmResultJson = "";
+    private static volatile String latestNcmKeyJson = "";
+    private static volatile String latestNcmPollJson = "{\"success\":true,\"code\":801,\"message\":\"等待扫码中...\"}";
+    private static volatile boolean ncmCheckInFlight = false;
 
-        public HighFpsKeepAliveView(Context context) {
-            super(context);
-            setClickable(false);
-            setFocusable(false);
-            setAlpha(0.004f);
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.JELLY_BEAN) {
-                setImportantForAccessibility(View.IMPORTANT_FOR_ACCESSIBILITY_NO);
-            }
-        }
-
-        public void triggerBoost(long durationMs) {
-            long target = SystemClock.uptimeMillis() + Math.min(Math.max(durationMs, 300L), 10000L);
-            if (target > boostUntilMs) {
-                boostUntilMs = target;
-            }
-            postInvalidateOnAnimation();
-        }
-
-        public void stopBoost() {
-            boostUntilMs = 0L;
-            setTranslationX(0.0f);
-        }
-
-        @Override
-        protected void onDraw(Canvas canvas) {
-            super.onDraw(canvas);
-            toggle = !toggle;
-            setTranslationX(toggle ? 0.05f : 0.0f);
-            paint.setColor(toggle ? 0x01FFFFFF : 0x01FEFEFE);
-            canvas.drawRect(0, 0, 1, 1, paint);
-            if (SystemClock.uptimeMillis() < boostUntilMs) {
-                postInvalidateOnAnimation();
-            }
-        }
-    }
+    private static volatile String lastCapturedQqSig = "";
+    private static volatile String lastCapturedQqResultJson = "";
+    private static volatile String latestQqKeyJson = "";
+    private static volatile String latestQqPollJson = "{\"success\":true,\"code\":801,\"message\":\"等待手机 QQ 扫码中...\"}";
+    private static volatile boolean qqCheckInFlight = false;
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -120,14 +113,11 @@ public class MainActivity extends BridgeActivity {
             window.setAttributes(lp);
         }
 
-        // 3. Attach 1x1px native RenderThread VSync Keep-Alive View for Chinese OEM ROMs (HyperOS/ColorOS/OriginOS)
-        attachHighFpsKeepAliveView();
-
-        // 4. Unlock 90Hz / 120Hz / 144Hz native display refresh rate matching active physical resolution
-        applyHighRefreshRateMode();
+        // 3. Unlock 90Hz / 120Hz / 144Hz native display refresh rate matching active physical resolution
+        applyHighRefreshRateMode(false);
         registerDynamicDisplayListener();
 
-        // 5. Accurately measure punch-hole / cutout depth and inject CSS safe-area & refresh rate variables
+        // 4. Accurately measure punch-hole / cutout depth and inject CSS safe-area & refresh rate variables
         ViewCompat.setOnApplyWindowInsetsListener(window.getDecorView(), (v, windowInsets) -> {
             int topInsetPx = 0;
             DisplayCutoutCompat cutout = windowInsets.getDisplayCutout();
@@ -140,63 +130,45 @@ public class MainActivity extends BridgeActivity {
             topInsetPx = Math.max(topInsetPx, barInsets.top);
 
             float density = getResources().getDisplayMetrics().density;
-            lastSafeTopDp = Math.max((int) (topInsetPx / density), 48);
-            injectMetricsToWebView();
+            int computedTopDp = Math.max((int) (topInsetPx / density), 48);
+            if (computedTopDp != lastSafeTopDp) {
+                lastSafeTopDp = computedTopDp;
+                injectMetricsToWebView(false);
+            }
             return windowInsets;
         });
 
-        // 6. Hardware acceleration, external scheme handling & WebView optimizations
+        // 5. Hardware acceleration, external scheme handling & WebView optimizations
+        installHighFpsKeepAlivePulse();
         setupWebViewAndBridge();
         window.getDecorView().post(this::setupWebViewAndBridge);
     }
 
-    private void attachHighFpsKeepAliveView() {
-        try {
-            if (highFpsKeepAliveView != null) return;
-            ViewGroup contentParent = findViewById(android.R.id.content);
-            if (contentParent != null) {
-                highFpsKeepAliveView = new HighFpsKeepAliveView(this);
-                FrameLayout.LayoutParams params = new FrameLayout.LayoutParams(1, 1, Gravity.TOP | Gravity.START);
-                contentParent.addView(highFpsKeepAliveView, params);
-                highFpsKeepAliveView.triggerBoost(3500L);
-            }
-        } catch (Exception ignored) {}
-    }
-
     @Override
     public boolean dispatchTouchEvent(MotionEvent ev) {
-        if (highFpsKeepAliveView != null && ev != null) {
+        if (ev != null) {
             int action = ev.getActionMasked();
-            if (action == MotionEvent.ACTION_DOWN
-                || action == MotionEvent.ACTION_MOVE
-                || action == MotionEvent.ACTION_POINTER_DOWN
-                || action == MotionEvent.ACTION_UP
-                || action == MotionEvent.ACTION_CANCEL) {
-                highFpsKeepAliveView.triggerBoost(2800L);
+            if (action == MotionEvent.ACTION_DOWN || action == MotionEvent.ACTION_MOVE) {
+                triggerKeepAliveBoost(2600);
+            } else if (action == MotionEvent.ACTION_UP || action == MotionEvent.ACTION_CANCEL) {
+                triggerKeepAliveBoost(1600);
             }
         }
         return super.dispatchTouchEvent(ev);
     }
 
-    public void boostNativeFrameRate(long durationMs) {
-        if (highFpsKeepAliveView != null) {
-            highFpsKeepAliveView.post(() -> highFpsKeepAliveView.triggerBoost(durationMs));
-        }
-    }
-
     @Override
     public void onResume() {
         super.onResume();
-        applyHighRefreshRateMode();
-        if (highFpsKeepAliveView != null) {
-            highFpsKeepAliveView.triggerBoost(3000L);
-        }
+        applyHighRefreshRateMode(false);
+        triggerKeepAliveBoost(2000);
+        notifyWebViewAppResumed();
     }
 
     @Override
     public void onPause() {
-        if (highFpsKeepAliveView != null) {
-            highFpsKeepAliveView.stopBoost();
+        if (keepAliveView != null) {
+            keepAliveView.stopBoost();
         }
         super.onPause();
     }
@@ -205,19 +177,18 @@ public class MainActivity extends BridgeActivity {
     public void onWindowFocusChanged(boolean hasFocus) {
         super.onWindowFocusChanged(hasFocus);
         if (hasFocus) {
-            applyHighRefreshRateMode();
-            if (highFpsKeepAliveView != null) {
-                highFpsKeepAliveView.triggerBoost(2500L);
-            }
-        } else if (highFpsKeepAliveView != null) {
-            highFpsKeepAliveView.stopBoost();
+            applyHighRefreshRateMode(false);
+            triggerKeepAliveBoost(1600);
+            notifyWebViewAppResumed();
+        } else if (keepAliveView != null) {
+            keepAliveView.stopBoost();
         }
     }
 
     @Override
     public void onConfigurationChanged(Configuration newConfig) {
         super.onConfigurationChanged(newConfig);
-        applyHighRefreshRateMode();
+        applyHighRefreshRateMode(false);
     }
 
     @Override
@@ -232,6 +203,64 @@ public class MainActivity extends BridgeActivity {
             displayListener = null;
         }
         super.onDestroy();
+    }
+
+    private void installHighFpsKeepAlivePulse() {
+        try {
+            ViewGroup content = findViewById(android.R.id.content);
+            if (content != null && keepAliveView == null) {
+                keepAliveView = new HighFpsKeepAliveView(this);
+                FrameLayout.LayoutParams params = new FrameLayout.LayoutParams(1, 1, Gravity.TOP | Gravity.START);
+                keepAliveView.setLayoutParams(params);
+                keepAliveView.setClickable(false);
+                keepAliveView.setFocusable(false);
+                keepAliveView.setAlpha(0.004f);
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP) {
+                    keepAliveView.setZ(-100f);
+                }
+                content.addView(keepAliveView);
+            }
+        } catch (Exception ignored) {}
+    }
+
+    public void triggerKeepAliveBoost(long durationMs) {
+        if (keepAliveView != null) {
+            keepAliveView.triggerBoost(durationMs);
+        }
+    }
+
+    private void notifyWebViewAppResumed() {
+        // Trigger immediate background QR check on native executor when returning from NetEase / QQ Music App
+        if (nativeMediaBridge != null) {
+            nativeMediaBridge.onAppResumed();
+        }
+        try {
+            WebView webView = getBridge() != null ? getBridge().getWebView() : null;
+            if (webView == null) return;
+            webView.post(() -> {
+                try {
+                    webView.evaluateJavascript(
+                        "window.dispatchEvent(new CustomEvent('lyricalens:native-resume'));",
+                        null
+                    );
+                } catch (Exception ignored) {}
+            });
+        } catch (Exception ignored) {}
+    }
+
+    public void dispatchQrEventToWebView(final String eventName, final String jsonPayload) {
+        try {
+            WebView webView = getBridge() != null ? getBridge().getWebView() : null;
+            if (webView == null || jsonPayload == null) return;
+            webView.post(() -> {
+                try {
+                    webView.evaluateJavascript(
+                        "window.dispatchEvent(new CustomEvent('" + eventName + "', { detail: " + jsonPayload + " }));",
+                        null
+                    );
+                } catch (Exception ignored) {}
+            });
+        } catch (Exception ignored) {}
     }
 
     private void registerDynamicDisplayListener() {
@@ -250,7 +279,7 @@ public class MainActivity extends BridgeActivity {
 
                     @Override
                     public void onDisplayChanged(int displayId) {
-                        applyHighRefreshRateMode();
+                        applyHighRefreshRateMode(false);
                     }
                 };
                 dm.registerDisplayListener(displayListener, new Handler(Looper.getMainLooper()));
@@ -258,23 +287,28 @@ public class MainActivity extends BridgeActivity {
         } catch (Exception ignored) {}
     }
 
-    private void injectMetricsToWebView() {
+    private void injectMetricsToWebView(boolean force) {
         try {
             WebView webView = getBridge() != null ? getBridge().getWebView() : null;
             if (webView == null) return;
             final int fps = detectedRefreshRate;
             final int topDp = lastSafeTopDp;
-            final String budgetMs = String.format(java.util.Locale.US, "%.2fms", 1000.0f / Math.max(60, fps));
+            if (!force && fps == lastInjectedFps && topDp == lastInjectedTopDp) {
+                return;
+            }
+            lastInjectedFps = fps;
+            lastInjectedTopDp = topDp;
+            final String budgetMs = String.format(Locale.US, "%.2fms", 1000.0f / Math.max(60, fps));
             webView.post(() -> {
                 try {
                     webView.evaluateJavascript(
                         "window.__DEVICE_REFRESH_RATE__ = " + fps + ";" +
                         "if (window.document && window.document.documentElement) {" +
                         "  var r = window.document.documentElement;" +
-                        "  r.style.setProperty('--android-safe-top', '" + topDp + "px');" +
-                        "  r.style.setProperty('--device-fps', '" + fps + "');" +
-                        "  r.style.setProperty('--frame-budget-ms', '" + budgetMs + "');" +
-                        "  r.dataset.refreshRate = '" + fps + "';" +
+                        "  if (r.style.getPropertyValue('--android-safe-top') !== '" + topDp + "px') r.style.setProperty('--android-safe-top', '" + topDp + "px');" +
+                        "  if (r.style.getPropertyValue('--device-fps') !== '" + fps + "') r.style.setProperty('--device-fps', '" + fps + "');" +
+                        "  if (r.style.getPropertyValue('--frame-budget-ms') !== '" + budgetMs + "') r.style.setProperty('--frame-budget-ms', '" + budgetMs + "');" +
+                        "  if (r.dataset.refreshRate !== '" + fps + "') r.dataset.refreshRate = '" + fps + "';" +
                         "}",
                         null
                     );
@@ -283,7 +317,7 @@ public class MainActivity extends BridgeActivity {
         } catch (Exception ignored) {}
     }
 
-    private void applyHighRefreshRateMode() {
+    private void applyHighRefreshRateMode(boolean forceInject) {
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.M) {
             return;
         }
@@ -348,18 +382,24 @@ public class MainActivity extends BridgeActivity {
             }
 
             int roundedFps = Math.round(targetRate);
+            int nextDetected;
             if (roundedFps >= 132) {
-                detectedRefreshRate = 144;
+                nextDetected = 144;
             } else if (roundedFps >= 105) {
-                detectedRefreshRate = 120;
+                nextDetected = 120;
             } else if (roundedFps >= 75) {
-                detectedRefreshRate = 90;
+                nextDetected = 90;
             } else {
-                detectedRefreshRate = 60;
+                nextDetected = 60;
             }
 
-            applyRequestedFrameRateOnViews(preferredRateHint);
-            injectMetricsToWebView();
+            boolean fpsChanged = (nextDetected != detectedRefreshRate);
+            detectedRefreshRate = nextDetected;
+
+            if (changed || fpsChanged || forceInject) {
+                applyRequestedFrameRateOnViews(preferredRateHint);
+                injectMetricsToWebView(forceInject);
+            }
         } catch (Exception e) {
             // Ignore fallback
         }
@@ -377,7 +417,6 @@ public class MainActivity extends BridgeActivity {
                     Method setReqRate = View.class.getMethod("setRequestedFrameRate", float.class);
                     if (decorView != null) setReqRate.invoke(decorView, targetFrameRate);
                     if (webView != null) setReqRate.invoke(webView, targetFrameRate);
-                    if (highFpsKeepAliveView != null) setReqRate.invoke(highFpsKeepAliveView, targetFrameRate);
                 } catch (Exception ignored) {}
             }
 
@@ -439,21 +478,22 @@ public class MainActivity extends BridgeActivity {
                     cookieManager.setAcceptThirdPartyCookies(webView, true);
                 }
 
-                // Register Native MediaStore Image Saver Bridge for seamless QR saving to Gallery & App Scheme Invocation
-                webView.addJavascriptInterface(new AndroidNativeMediaBridge(MainActivity.this), "AndroidNativeMedia");
+                // Register Native MediaStore Image Saver & Direct Auth Bridge
+                nativeMediaBridge = new AndroidNativeMediaBridge(MainActivity.this);
+                webView.addJavascriptInterface(nativeMediaBridge, "AndroidNativeMedia");
 
                 // Register custom BridgeWebViewClient to reliably intercept external schemes and replay DOM metrics after navigation commit
                 bridge.setWebViewClient(new BridgeWebViewClient(bridge) {
                     @Override
                     public void onPageCommitVisible(WebView view, String url) {
                         super.onPageCommitVisible(view, url);
-                        injectMetricsToWebView();
+                        injectMetricsToWebView(true);
                     }
 
                     @Override
                     public void onPageFinished(WebView view, String url) {
                         super.onPageFinished(view, url);
-                        injectMetricsToWebView();
+                        injectMetricsToWebView(true);
                     }
 
                     @Override
@@ -462,7 +502,7 @@ public class MainActivity extends BridgeActivity {
                             Uri reqUri = request.getUrl();
                             if (isExternalScheme(reqUri)) {
                                 handleExternalUri(reqUri);
-                                return true; // Crucial: absorb external scheme so WebView never displays net::ERR_UNKNOWN_URL_SCHEME
+                                return true;
                             }
                         }
                         return super.shouldOverrideUrlLoading(view, request);
@@ -481,7 +521,7 @@ public class MainActivity extends BridgeActivity {
                     }
                 });
 
-                injectMetricsToWebView();
+                injectMetricsToWebView(true);
             }
         } catch (Exception e) {
             // Ignore
@@ -505,7 +545,6 @@ public class MainActivity extends BridgeActivity {
         if (scheme == null) return false;
         String schemeLower = scheme.toLowerCase();
 
-        // Pass standard web and internal navigations to webview
         if (!isExternalScheme(uri)) {
             return false;
         }
@@ -532,7 +571,6 @@ public class MainActivity extends BridgeActivity {
 
             // 2. Fallbacks for Mobile QQ / TIM
             if (schemeLower.startsWith("mqq") || schemeLower.equals("wtloginmqq") || schemeLower.equals("tim")) {
-                // Fallback A: Explicitly target Mobile QQ package
                 try {
                     Intent qqExplicitIntent = new Intent(Intent.ACTION_VIEW, uri);
                     qqExplicitIntent.setPackage("com.tencent.mobileqq");
@@ -542,7 +580,6 @@ public class MainActivity extends BridgeActivity {
                     return true;
                 } catch (Exception ignored) {}
 
-                // Fallback B: Toggle alternative QQ scan scheme (scan_qr <-> scan_qrcode)
                 try {
                     String uriStr = uri.toString();
                     String altUriStr = uriStr.contains("scan_qr")
@@ -555,7 +592,6 @@ public class MainActivity extends BridgeActivity {
                     return true;
                 } catch (Exception ignored) {}
 
-                // Fallback C: Launch Mobile QQ package main activity
                 try {
                     Intent qqIntent = getPackageManager().getLaunchIntentForPackage("com.tencent.mobileqq");
                     if (qqIntent != null) {
@@ -565,7 +601,6 @@ public class MainActivity extends BridgeActivity {
                     }
                 } catch (Exception ignored) {}
 
-                // Fallback D: Try TIM package main activity
                 try {
                     Intent timIntent = getPackageManager().getLaunchIntentForPackage("com.tencent.tim");
                     if (timIntent != null) {
@@ -575,7 +610,6 @@ public class MainActivity extends BridgeActivity {
                     }
                 } catch (Exception ignored) {}
 
-                // Fallback E: Base mqq:// view intent
                 try {
                     Intent fallbackIntent = new Intent(Intent.ACTION_VIEW, Uri.parse("mqq://"));
                     fallbackIntent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
@@ -607,11 +641,157 @@ public class MainActivity extends BridgeActivity {
         return false;
     }
 
+    // Helper: NetEase EAPI AES-128-ECB + MD5 Encryption (identical to NeteaseCloudMusicApi util/crypto.js)
+    private static String encryptNetEaseEapi(String uri, String jsonText) throws Exception {
+        String message = "nobody" + uri + "use" + jsonText + "md5forencrypt";
+        MessageDigest md = MessageDigest.getInstance("MD5");
+        byte[] mdBytes = md.digest(message.getBytes(StandardCharsets.UTF_8));
+        StringBuilder digestHex = new StringBuilder(32);
+        for (byte b : mdBytes) {
+            digestHex.append(String.format("%02x", b & 0xff));
+        }
+        String plain = uri + "-36cd479b6b5-" + jsonText + "-36cd479b6b5-" + digestHex.toString();
+        SecretKeySpec keySpec = new SecretKeySpec("e82ckenh8dichen8".getBytes(StandardCharsets.UTF_8), "AES");
+        Cipher cipher = Cipher.getInstance("AES/ECB/PKCS5Padding");
+        cipher.init(Cipher.ENCRYPT_MODE, keySpec);
+        byte[] encrypted = cipher.doFinal(plain.getBytes(StandardCharsets.UTF_8));
+        StringBuilder outHex = new StringBuilder(encrypted.length * 2);
+        for (byte b : encrypted) {
+            outHex.append(String.format("%02X", b & 0xff));
+        }
+        return outHex.toString();
+    }
+
+    private static JSONObject buildNetEaseEapiHeader() {
+        JSONObject header = new JSONObject();
+        try {
+            long now = System.currentTimeMillis();
+            header.put("osver", "Microsoft-Windows-10-Professional-build-19045-64bit");
+            header.put("deviceId", "52B62F51D4D74D1F8928487EB01157B7");
+            header.put("os", "pc");
+            header.put("appver", "3.1.17.204416");
+            header.put("versioncode", "140");
+            header.put("mobilename", "");
+            header.put("buildver", String.valueOf(now / 1000L));
+            header.put("resolution", "1920x1080");
+            header.put("__csrf", "");
+            header.put("channel", "netease");
+            header.put("requestId", now + "_0258");
+        } catch (Exception ignored) {}
+        return header;
+    }
+
+    private static String buildNetEaseHeaderCookieString(JSONObject header) {
+        StringBuilder sb = new StringBuilder();
+        java.util.Iterator<String> keys = header.keys();
+        while (keys.hasNext()) {
+            String k = keys.next();
+            String v = header.optString(k, "");
+            if (sb.length() > 0) sb.append("; ");
+            try {
+                sb.append(URLEncoder.encode(k, "UTF-8")).append("=").append(URLEncoder.encode(v, "UTF-8"));
+            } catch (Exception ignored) {}
+        }
+        return sb.toString();
+    }
+
+    private static String readConnectionBody(HttpURLConnection conn) throws Exception {
+        InputStream in = conn.getResponseCode() >= 400 ? conn.getErrorStream() : conn.getInputStream();
+        if (in == null) return "";
+        try (BufferedReader reader = new BufferedReader(new InputStreamReader(in, StandardCharsets.UTF_8))) {
+            StringBuilder sb = new StringBuilder();
+            String line;
+            while ((line = reader.readLine()) != null) {
+                sb.append(line);
+            }
+            return sb.toString();
+        }
+    }
+
+    private static void extractSetCookiesFromConnection(HttpURLConnection conn, List<String> outCookies) {
+        if (conn == null || outCookies == null) return;
+        Map<String, List<String>> headers = conn.getHeaderFields();
+        if (headers == null) return;
+        for (Map.Entry<String, List<String>> entry : headers.entrySet()) {
+            String key = entry.getKey();
+            if (key != null && (key.equalsIgnoreCase("Set-Cookie") || key.equalsIgnoreCase("Set-Cookie2"))) {
+                List<String> values = entry.getValue();
+                if (values != null) {
+                    outCookies.addAll(values);
+                }
+            }
+        }
+    }
+
+    private static int calcQqPtQrToken(String qrsig) {
+        int hash = 0;
+        for (int i = 0; i < qrsig.length(); i++) {
+            hash += (hash << 5) + qrsig.charAt(i);
+        }
+        return 2147483647 & hash;
+    }
+
+    private static class HighFpsKeepAliveView extends View {
+        private volatile long activeUntilUptimeMs = 0L;
+        private boolean isPulsing = false;
+        private boolean togglePhase = false;
+
+        public HighFpsKeepAliveView(Context context) {
+            super(context);
+        }
+
+        public void triggerBoost(long durationMs) {
+            long target = SystemClock.uptimeMillis() + Math.max(400L, Math.min(durationMs, 5000L));
+            if (target > activeUntilUptimeMs) {
+                activeUntilUptimeMs = target;
+            }
+            if (!isPulsing) {
+                isPulsing = true;
+                postInvalidateOnAnimation();
+            }
+        }
+
+        public void stopBoost() {
+            activeUntilUptimeMs = 0L;
+            isPulsing = false;
+        }
+
+        @Override
+        protected void onDraw(Canvas canvas) {
+            super.onDraw(canvas);
+            if (SystemClock.uptimeMillis() < activeUntilUptimeMs) {
+                togglePhase = !togglePhase;
+                setTranslationX(togglePhase ? 0.01f : 0.0f);
+                postInvalidateOnAnimation();
+            } else {
+                isPulsing = false;
+            }
+        }
+    }
+
     public static class AndroidNativeMediaBridge {
         private final Context context;
+        private final ExecutorService qrExecutor = Executors.newSingleThreadExecutor();
 
         public AndroidNativeMediaBridge(Context context) {
             this.context = context;
+        }
+
+        public void onAppResumed() {
+            final String activeNcmKey = lastCapturedNcmKey;
+            if (activeNcmKey != null && !activeNcmKey.isEmpty() && lastCapturedNcmResultJson.isEmpty()) {
+                triggerNetEaseQrCheckAsync(activeNcmKey, true);
+            }
+            final String activeQqSig = lastCapturedQqSig;
+            if (activeQqSig != null && !activeQqSig.isEmpty() && lastCapturedQqResultJson.isEmpty()) {
+                triggerQqQrCheckAsync(activeQqSig, true);
+            }
+        }
+
+        private void emitQrEvent(String eventName, String jsonPayload) {
+            if (context instanceof MainActivity) {
+                ((MainActivity) context).dispatchQrEventToWebView(eventName, jsonPayload);
+            }
         }
 
         @JavascriptInterface
@@ -699,10 +879,628 @@ public class MainActivity extends BridgeActivity {
                 if (url == null || url.trim().isEmpty()) {
                     return "";
                 }
-                String cookies = CookieManager.getInstance().getCookie(url);
-                return cookies != null ? cookies : "";
+                StringBuilder sb = new StringBuilder();
+                String c1 = CookieManager.getInstance().getCookie(url);
+                if (c1 != null && !c1.isEmpty()) sb.append(c1);
+                if (url.contains("163.com")) {
+                    String c2 = CookieManager.getInstance().getCookie("https://interface.music.163.com");
+                    if (c2 != null && !c2.isEmpty()) {
+                        if (sb.length() > 0) sb.append("; ");
+                        sb.append(c2);
+                    }
+                    String c3 = CookieManager.getInstance().getCookie("https://localhost");
+                    if (c3 != null && c3.contains("MUSIC_U=")) {
+                        if (sb.length() > 0) sb.append("; ");
+                        sb.append(c3);
+                    }
+                    if (!lastCapturedNcmCookie.isEmpty()) {
+                        if (sb.length() > 0) sb.append("; ");
+                        sb.append(lastCapturedNcmCookie);
+                    }
+                }
+                return sb.toString();
             } catch (Exception e) {
                 return "";
+            }
+        }
+
+        /**
+         * Non-blocking Native NetEase Cloud Music EAPI QR Unikey Generator
+         * Runs HTTP I/O on background qrExecutor and emits 'lyricalens:native-ncm-key' to WebView
+         */
+        @JavascriptInterface
+        public String nativeNetEaseQrKey() {
+            lastCapturedNcmKey = "";
+            lastCapturedNcmKeyType = 3;
+            lastCapturedNcmCookie = "";
+            lastCapturedNcmResultJson = "";
+            latestNcmKeyJson = "";
+            latestNcmPollJson = "{\"success\":true,\"code\":801,\"message\":\"等待扫码中...\"}";
+
+            qrExecutor.execute(() -> {
+                String resJson = performNetEaseQrKeySync();
+                latestNcmKeyJson = resJson;
+                emitQrEvent("lyricalens:native-ncm-key", resJson);
+            });
+            return "{\"success\":true,\"pending\":true}";
+        }
+
+        private String performNetEaseQrKeySync() {
+            try {
+                // Clear any stale MUSIC_U and __csrf across all domain scopes so a fresh scan is cleanly detected
+                try {
+                    CookieManager cm = CookieManager.getInstance();
+                    String[] urls = new String[]{"https://music.163.com", "https://interface.music.163.com", "https://localhost"};
+                    String[] domains = new String[]{"", "; Domain=music.163.com", "; Domain=.163.com"};
+                    for (String u : urls) {
+                        for (String d : domains) {
+                            cm.setCookie(u, "MUSIC_U=; Expires=Wed, 31 Dec 2000 23:59:59 GMT; Path=/" + d);
+                            cm.setCookie(u, "__csrf=; Expires=Wed, 31 Dec 2000 23:59:59 GMT; Path=/" + d);
+                        }
+                    }
+                } catch (Exception ignored) {}
+
+                JSONObject header = buildNetEaseEapiHeader();
+                JSONObject payload = new JSONObject();
+                payload.put("type", 3);
+                payload.put("header", header);
+                payload.put("e_r", false);
+
+                String paramsHex = encryptNetEaseEapi("/api/login/qrcode/unikey", payload.toString());
+                String bodyStr = "params=" + URLEncoder.encode(paramsHex, "UTF-8");
+
+                URL url = new URL("https://interface.music.163.com/eapi/login/qrcode/unikey");
+                HttpURLConnection conn = (HttpURLConnection) url.openConnection();
+                conn.setRequestMethod("POST");
+                conn.setConnectTimeout(5000);
+                conn.setReadTimeout(5000);
+                conn.setUseCaches(false);
+                conn.setDoOutput(true);
+                conn.setRequestProperty("Content-Type", "application/x-www-form-urlencoded");
+                conn.setRequestProperty("Referer", "https://music.163.com/");
+                conn.setRequestProperty("User-Agent", "Mozilla/5.0 (Windows NT 10.0; WOW64) AppleWebKit/537.36 (KHTML, like Gecko) Safari/537.36 Chrome/91.0.4472.164 NeteaseMusicDesktop/3.0.18.203152");
+                conn.setRequestProperty("Cookie", buildNetEaseHeaderCookieString(header));
+
+                try (DataOutputStream os = new DataOutputStream(conn.getOutputStream())) {
+                    os.write(bodyStr.getBytes(StandardCharsets.UTF_8));
+                    os.flush();
+                }
+
+                String respText = readConnectionBody(conn);
+                conn.disconnect();
+
+                JSONObject respJson = new JSONObject(respText);
+                String unikey = respJson.optString("unikey", "");
+                if (!unikey.isEmpty()) {
+                    lastCapturedNcmKey = unikey;
+                    lastCapturedNcmKeyType = 3;
+                    JSONObject out = new JSONObject();
+                    out.put("success", true);
+                    out.put("unikey", unikey);
+                    out.put("qrurl", "https://music.163.com/login?codekey=" + URLEncoder.encode(unikey, "UTF-8"));
+                    return out.toString();
+                }
+            } catch (Exception ignored) {}
+
+            // Fallback to web api (type=1)
+            try {
+                URL url = new URL("https://music.163.com/api/login/qrcode/unikey?type=1&_t=" + System.currentTimeMillis());
+                HttpURLConnection conn = (HttpURLConnection) url.openConnection();
+                conn.setRequestMethod("POST");
+                conn.setConnectTimeout(5000);
+                conn.setReadTimeout(5000);
+                conn.setUseCaches(false);
+                conn.setDoOutput(true);
+                conn.setRequestProperty("Content-Type", "application/x-www-form-urlencoded");
+                conn.setRequestProperty("Referer", "https://music.163.com/");
+                try (DataOutputStream os = new DataOutputStream(conn.getOutputStream())) {
+                    os.write("type=1".getBytes(StandardCharsets.UTF_8));
+                    os.flush();
+                }
+                String respText = readConnectionBody(conn);
+                conn.disconnect();
+                JSONObject respJson = new JSONObject(respText);
+                String unikey = respJson.optString("unikey", "");
+                if (!unikey.isEmpty()) {
+                    lastCapturedNcmKey = unikey;
+                    lastCapturedNcmKeyType = 1;
+                    JSONObject out = new JSONObject();
+                    out.put("success", true);
+                    out.put("unikey", unikey);
+                    out.put("qrurl", "https://music.163.com/login?codekey=" + URLEncoder.encode(unikey, "UTF-8"));
+                    return out.toString();
+                }
+            } catch (Exception ignored) {}
+
+            return "{\"success\":false}";
+        }
+
+        /**
+         * Non-blocking Native NetEase Cloud Music EAPI QR Status Checker
+         * Never stalls V8 main thread: returns cached state immediately and triggers single-flight background check
+         */
+        @JavascriptInterface
+        public String nativeNetEaseQrCheck(String key) {
+            if (key == null || key.trim().isEmpty()) {
+                return "{\"success\":false,\"code\":801,\"message\":\"等待扫码\"}";
+            }
+            String cleanKey = key.trim();
+
+            if (cleanKey.equals(lastCapturedNcmKey) && !lastCapturedNcmResultJson.isEmpty()) {
+                return lastCapturedNcmResultJson;
+            }
+
+            triggerNetEaseQrCheckAsync(cleanKey, false);
+            return latestNcmPollJson;
+        }
+
+        public void triggerNetEaseQrCheckAsync(final String cleanKey, boolean force) {
+            if (ncmCheckInFlight && !force) {
+                return;
+            }
+            ncmCheckInFlight = true;
+            qrExecutor.execute(() -> {
+                try {
+                    String resJson = performNetEaseQrCheckSync(cleanKey);
+                    latestNcmPollJson = resJson;
+                    emitQrEvent("lyricalens:native-qr-status", resJson);
+                } finally {
+                    ncmCheckInFlight = false;
+                }
+            });
+        }
+
+        private String performNetEaseQrCheckSync(String cleanKey) {
+            if (cleanKey.equals(lastCapturedNcmKey) && !lastCapturedNcmResultJson.isEmpty()) {
+                return lastCapturedNcmResultJson;
+            }
+
+            try {
+                List<String> rawCookieSources = new java.util.ArrayList<>();
+                int code = 801;
+                String message = "";
+
+                if (lastCapturedNcmKeyType == 3) {
+                    JSONObject header = buildNetEaseEapiHeader();
+                    JSONObject payload = new JSONObject();
+                    payload.put("key", cleanKey);
+                    payload.put("type", 3);
+                    payload.put("header", header);
+                    payload.put("e_r", false);
+
+                    String paramsHex = encryptNetEaseEapi("/api/login/qrcode/client/login", payload.toString());
+                    String bodyStr = "params=" + URLEncoder.encode(paramsHex, "UTF-8");
+
+                    URL url = new URL("https://interface.music.163.com/eapi/login/qrcode/client/login");
+                    HttpURLConnection conn = (HttpURLConnection) url.openConnection();
+                    conn.setRequestMethod("POST");
+                    conn.setConnectTimeout(5000);
+                    conn.setReadTimeout(5000);
+                    conn.setUseCaches(false);
+                    conn.setDoOutput(true);
+                    conn.setRequestProperty("Content-Type", "application/x-www-form-urlencoded");
+                    conn.setRequestProperty("Referer", "https://music.163.com/");
+                    conn.setRequestProperty("User-Agent", "Mozilla/5.0 (Windows NT 10.0; WOW64) AppleWebKit/537.36 (KHTML, like Gecko) Safari/537.36 Chrome/91.0.4472.164 NeteaseMusicDesktop/3.0.18.203152");
+                    conn.setRequestProperty("Cookie", buildNetEaseHeaderCookieString(header));
+
+                    try (DataOutputStream os = new DataOutputStream(conn.getOutputStream())) {
+                        os.write(bodyStr.getBytes(StandardCharsets.UTF_8));
+                        os.flush();
+                    }
+
+                    extractSetCookiesFromConnection(conn, rawCookieSources);
+                    String respText = readConnectionBody(conn);
+                    conn.disconnect();
+
+                    JSONObject respJson = new JSONObject(respText);
+                    code = respJson.optInt("code", 801);
+                    message = respJson.optString("message", "");
+                    String bodyCookie = respJson.optString("cookie", "");
+                    if (bodyCookie != null && !bodyCookie.isEmpty()) {
+                        rawCookieSources.add(bodyCookie);
+                    }
+                } else {
+                    URL wUrl = new URL("https://music.163.com/api/login/qrcode/client/login?_t=" + System.currentTimeMillis());
+                    HttpURLConnection wConn = (HttpURLConnection) wUrl.openConnection();
+                    wConn.setRequestMethod("POST");
+                    wConn.setConnectTimeout(5000);
+                    wConn.setReadTimeout(5000);
+                    wConn.setUseCaches(false);
+                    wConn.setDoOutput(true);
+                    wConn.setRequestProperty("Content-Type", "application/x-www-form-urlencoded");
+                    wConn.setRequestProperty("Referer", "https://music.163.com/");
+                    wConn.setRequestProperty("Cookie", "os=pc; appver=3.1.17.204416; __remember_me=true");
+                    String wBody = "key=" + URLEncoder.encode(cleanKey, "UTF-8") + "&type=1";
+                    try (DataOutputStream os = new DataOutputStream(wConn.getOutputStream())) {
+                        os.write(wBody.getBytes(StandardCharsets.UTF_8));
+                        os.flush();
+                    }
+                    extractSetCookiesFromConnection(wConn, rawCookieSources);
+                    String wResp = readConnectionBody(wConn);
+                    wConn.disconnect();
+                    JSONObject wJson = new JSONObject(wResp);
+                    code = wJson.optInt("code", 801);
+                    message = wJson.optString("message", "");
+                    String wBodyCookie = wJson.optString("cookie", "");
+                    if (wBodyCookie != null && !wBodyCookie.isEmpty()) {
+                        rawCookieSources.add(wBodyCookie);
+                    }
+                }
+
+                String musicU = "";
+                String csrf = "";
+                Pattern muPattern = Pattern.compile("MUSIC_U=([^;,\\s]+)");
+                Pattern csrfPattern = Pattern.compile("__csrf=([^;,\\s]+)");
+
+                for (String sc : rawCookieSources) {
+                    Matcher m1 = muPattern.matcher(sc);
+                    if (m1.find()) musicU = m1.group(1);
+                    Matcher m2 = csrfPattern.matcher(sc);
+                    if (m2.find()) csrf = m2.group(1);
+                }
+
+                // If current response explicitly delivered a fresh MUSIC_U cookie, mark code = 803
+                if (!musicU.isEmpty()) {
+                    code = 803;
+                } else if (code == 803) {
+                    // Only consult CookieManager or alternate type channel when server returned 803 without header/body MUSIC_U
+                    try {
+                        int altType = (lastCapturedNcmKeyType == 3) ? 1 : 3;
+                        URL altUrl = new URL("https://music.163.com/api/login/qrcode/client/login?_t=" + System.currentTimeMillis());
+                        HttpURLConnection altConn = (HttpURLConnection) altUrl.openConnection();
+                        altConn.setRequestMethod("POST");
+                        altConn.setConnectTimeout(4000);
+                        altConn.setReadTimeout(4000);
+                        altConn.setUseCaches(false);
+                        altConn.setDoOutput(true);
+                        altConn.setRequestProperty("Content-Type", "application/x-www-form-urlencoded");
+                        altConn.setRequestProperty("Referer", "https://music.163.com/");
+                        altConn.setRequestProperty("Cookie", "os=pc; appver=3.1.17.204416; __remember_me=true");
+                        String altBody = "key=" + URLEncoder.encode(cleanKey, "UTF-8") + "&type=" + altType;
+                        try (DataOutputStream os = new DataOutputStream(altConn.getOutputStream())) {
+                            os.write(altBody.getBytes(StandardCharsets.UTF_8));
+                            os.flush();
+                        }
+                        extractSetCookiesFromConnection(altConn, rawCookieSources);
+                        String altResp = readConnectionBody(altConn);
+                        altConn.disconnect();
+                        JSONObject altJson = new JSONObject(altResp);
+                        String altCookie = altJson.optString("cookie", "");
+                        if (altCookie != null && !altCookie.isEmpty()) rawCookieSources.add(altCookie);
+                        for (String sc : rawCookieSources) {
+                            Matcher m1 = muPattern.matcher(sc);
+                            if (m1.find()) musicU = m1.group(1);
+                            Matcher m2 = csrfPattern.matcher(sc);
+                            if (m2.find()) csrf = m2.group(1);
+                        }
+                    } catch (Exception ignored) {}
+
+                    if (musicU.isEmpty()) {
+                        String allCmCookies = getCookiesForUrl("https://music.163.com");
+                        Matcher m1 = muPattern.matcher(allCmCookies);
+                        if (m1.find()) musicU = m1.group(1);
+                        Matcher m2 = csrfPattern.matcher(allCmCookies);
+                        if (m2.find()) csrf = m2.group(1);
+                    }
+                }
+
+                String finalCookie = "";
+                if (!musicU.isEmpty()) {
+                    finalCookie = "MUSIC_U=" + musicU + "; " + (csrf.isEmpty() ? "" : ("__csrf=" + csrf + "; ")) + "os=pc; appver=3.1.17.204416;";
+                    lastCapturedNcmKey = cleanKey;
+                    lastCapturedNcmCookie = finalCookie;
+                    try {
+                        CookieManager cm = CookieManager.getInstance();
+                        cm.setCookie("https://music.163.com", "MUSIC_U=" + musicU + "; Path=/; Domain=.163.com");
+                        if (!csrf.isEmpty()) {
+                            cm.setCookie("https://music.163.com", "__csrf=" + csrf + "; Path=/; Domain=.163.com");
+                        }
+                    } catch (Exception ignored) {}
+                }
+
+                JSONObject out = new JSONObject();
+                out.put("success", true);
+                out.put("code", code);
+                out.put("message", !message.isEmpty() ? message : (code == 803 ? "授权登录成功" : code == 802 ? "扫描成功，请在手机上点击确认" : "等待扫码"));
+                out.put("cookie", finalCookie);
+
+                // When authorized (803), fetch user's NetEase profile right here on qrExecutor so UI updates immediately
+                if (code == 803 && !finalCookie.isEmpty()) {
+                    try {
+                        URL pUrl = new URL("https://music.163.com/api/nuser/account/get?_t=" + System.currentTimeMillis());
+                        HttpURLConnection pConn = (HttpURLConnection) pUrl.openConnection();
+                        pConn.setRequestMethod("POST");
+                        pConn.setConnectTimeout(5000);
+                        pConn.setReadTimeout(5000);
+                        pConn.setRequestProperty("Content-Type", "application/x-www-form-urlencoded");
+                        pConn.setRequestProperty("Referer", "https://music.163.com/");
+                        pConn.setRequestProperty("Cookie", finalCookie);
+                        String pText = readConnectionBody(pConn);
+                        pConn.disconnect();
+                        JSONObject pJson = new JSONObject(pText);
+                        JSONObject profileObj = pJson.optJSONObject("profile");
+                        if (profileObj != null) {
+                            long uid = profileObj.optLong("userId", 0L);
+                            if (uid > 0L) {
+                                JSONObject cleanProfile = new JSONObject();
+                                cleanProfile.put("userId", uid);
+                                cleanProfile.put("nickname", profileObj.optString("nickname", "网易云VIP用户"));
+                                cleanProfile.put("avatarUrl", profileObj.optString("avatarUrl", ""));
+                                cleanProfile.put("vipType", profileObj.optInt("vipType", 1));
+                                out.put("profile", cleanProfile);
+                            }
+                        }
+                    } catch (Exception ignored) {}
+                    lastCapturedNcmKey = cleanKey;
+                    lastCapturedNcmResultJson = out.toString();
+                }
+
+                return out.toString();
+            } catch (Exception e) {
+                return "{\"success\":false,\"code\":801,\"message\":\"等待扫码中...\"}";
+            }
+        }
+
+        /**
+         * Non-blocking Native Tencent QQ Music Official QR Code Generator (ssl.ptlogin2.qq.com/ptqrshow)
+         * Runs HTTP I/O on background qrExecutor and emits 'lyricalens:native-qq-key' to WebView
+         */
+        @JavascriptInterface
+        public String nativeQqQrKey() {
+            lastCapturedQqSig = "";
+            lastCapturedQqResultJson = "";
+            latestQqKeyJson = "";
+            latestQqPollJson = "{\"success\":true,\"code\":801,\"message\":\"等待手机 QQ 扫码中...\"}";
+
+            qrExecutor.execute(() -> {
+                String resJson = performQqQrKeySync();
+                latestQqKeyJson = resJson;
+                emitQrEvent("lyricalens:native-qq-key", resJson);
+            });
+            return "{\"success\":true,\"pending\":true}";
+        }
+
+        private String performQqQrKeySync() {
+            try {
+                String ptqrShowUrl = "https://ssl.ptlogin2.qq.com/ptqrshow?appid=716027609&e=2&l=M&s=3&d=72&v=4&t=" + Math.random() + "&daid=383&pt_3rd_aid=100497308";
+                URL url = new URL(ptqrShowUrl);
+                HttpURLConnection conn = (HttpURLConnection) url.openConnection();
+                conn.setRequestMethod("GET");
+                conn.setConnectTimeout(5000);
+                conn.setReadTimeout(5000);
+                conn.setUseCaches(false);
+                conn.setRequestProperty("Referer", "https://xui.ptlogin2.qq.com/");
+                conn.setRequestProperty("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36");
+
+                int respCode = conn.getResponseCode();
+                List<String> rawCookies = new java.util.ArrayList<>();
+                extractSetCookiesFromConnection(conn, rawCookies);
+
+                String qrsig = "";
+                Pattern sigPattern = Pattern.compile("qrsig=([^;,\\s]+)");
+                for (String sc : rawCookies) {
+                    Matcher m = sigPattern.matcher(sc);
+                    if (m.find()) {
+                        qrsig = m.group(1);
+                        break;
+                    }
+                }
+
+                ByteArrayOutputStream baos = new ByteArrayOutputStream();
+                try (InputStream in = (respCode >= 400 ? conn.getErrorStream() : conn.getInputStream())) {
+                    if (in != null) {
+                        byte[] buf = new byte[2048];
+                        int n;
+                        while ((n = in.read(buf)) != -1) {
+                            baos.write(buf, 0, n);
+                        }
+                    }
+                }
+                conn.disconnect();
+
+                byte[] imgBytes = baos.toByteArray();
+                if (!qrsig.isEmpty() && imgBytes.length > 100) {
+                    lastCapturedQqSig = qrsig;
+                    String base64Img = "data:image/png;base64," + Base64.encodeToString(imgBytes, Base64.NO_WRAP);
+                    JSONObject out = new JSONObject();
+                    out.put("success", true);
+                    out.put("unikey", qrsig);
+                    out.put("qrurl", ptqrShowUrl);
+                    out.put("qrimg", base64Img);
+                    return out.toString();
+                }
+            } catch (Exception ignored) {}
+            return "{\"success\":false}";
+        }
+
+        /**
+         * Non-blocking Native Tencent QQ Music Official QR Status Checker (ssl.ptlogin2.qq.com/ptqrlogin)
+         * Never stalls V8 main thread: returns cached state immediately and triggers single-flight background check
+         */
+        @JavascriptInterface
+        public String nativeQqQrCheck(String qrsig) {
+            if (qrsig == null || qrsig.trim().isEmpty() || qrsig.startsWith("qq-")) {
+                return "{\"success\":true,\"code\":801,\"message\":\"等待手机 QQ 扫码中...\"}";
+            }
+            String cleanSig = qrsig.trim();
+            if (cleanSig.equals(lastCapturedQqSig) && !lastCapturedQqResultJson.isEmpty()) {
+                return lastCapturedQqResultJson;
+            }
+
+            triggerQqQrCheckAsync(cleanSig, false);
+            return latestQqPollJson;
+        }
+
+        public void triggerQqQrCheckAsync(final String cleanSig, boolean force) {
+            if (qqCheckInFlight && !force) {
+                return;
+            }
+            qqCheckInFlight = true;
+            qrExecutor.execute(() -> {
+                try {
+                    String resJson = performQqQrCheckSync(cleanSig);
+                    latestQqPollJson = resJson;
+                    emitQrEvent("lyricalens:native-qr-status", resJson);
+                } finally {
+                    qqCheckInFlight = false;
+                }
+            });
+        }
+
+        private String performQqQrCheckSync(String cleanSig) {
+            if (cleanSig.equals(lastCapturedQqSig) && !lastCapturedQqResultJson.isEmpty()) {
+                return lastCapturedQqResultJson;
+            }
+
+            try {
+                int ptqrtoken = calcQqPtQrToken(cleanSig);
+                String checkUrl =
+                    "https://ssl.ptlogin2.qq.com/ptqrlogin?u1=" + URLEncoder.encode("https://graph.qq.com/oauth2.0/login_jump", "UTF-8") +
+                    "&ptqrtoken=" + ptqrtoken + "&ptredirect=0&h=1&t=1&g=1&from_ui=1&ptlang=2052" +
+                    "&action=0-0-" + System.currentTimeMillis() + "&js_ver=22030810&js_type=1&login_sig=&pt_uistyle=40" +
+                    "&aid=716027609&daid=383&pt_3rd_aid=100497308";
+
+                URL url = new URL(checkUrl);
+                HttpURLConnection conn = (HttpURLConnection) url.openConnection();
+                conn.setRequestMethod("GET");
+                conn.setConnectTimeout(5000);
+                conn.setReadTimeout(5000);
+                conn.setUseCaches(false);
+                conn.setRequestProperty("Referer", "https://xui.ptlogin2.qq.com/");
+                conn.setRequestProperty("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36");
+                conn.setRequestProperty("Cookie", "qrsig=" + cleanSig + ";");
+
+                conn.getResponseCode();
+                List<String> rawSetCookies = new java.util.ArrayList<>();
+                extractSetCookiesFromConnection(conn, rawSetCookies);
+                String text = readConnectionBody(conn);
+                conn.disconnect();
+
+                Pattern cbPattern = Pattern.compile("ptuiCB\\(\\s*'([^']*)'\\s*,\\s*'([^']*)'\\s*,\\s*'([^']*)'\\s*,\\s*'([^']*)'\\s*,\\s*'([^']*)'\\s*,\\s*'([^']*)'");
+                Matcher cbMatcher = cbPattern.matcher(text);
+                if (!cbMatcher.find()) {
+                    return "{\"success\":true,\"code\":801,\"message\":\"等待手机 QQ 扫码中...\"}";
+                }
+
+                String ptCode = cbMatcher.group(1);
+                String redirectUrl = cbMatcher.group(3);
+                String ptMessage = cbMatcher.group(5);
+                String ptNickname = cbMatcher.group(6);
+
+                if ("66".equals(ptCode)) {
+                    return "{\"success\":true,\"code\":801,\"message\":\"等待手机 QQ / QQ 音乐扫一扫中...\"}";
+                }
+                if ("67".equals(ptCode)) {
+                    return "{\"success\":true,\"code\":802,\"message\":\"扫描成功！请在手机上轻触「确认登录」\"}";
+                }
+                if ("65".equals(ptCode)) {
+                    return "{\"success\":true,\"code\":800,\"message\":\"二维码已失效，请点击刷新\"}";
+                }
+                if ("0".equals(ptCode)) {
+                    Map<String, String> cookieMap = new LinkedHashMap<>();
+                    for (String c : rawSetCookies) {
+                        String[] parts = c.split(";");
+                        if (parts.length > 0) {
+                            String pair = parts[0].trim();
+                            int eqIdx = pair.indexOf('=');
+                            if (eqIdx > 0 && !pair.endsWith("=")) {
+                                cookieMap.put(pair.substring(0, eqIdx).trim(), pair);
+                            }
+                        }
+                    }
+
+                    String locationHeader = "";
+                    if (redirectUrl != null && redirectUrl.startsWith("http")) {
+                        try {
+                            URL rUrl = new URL(redirectUrl);
+                            HttpURLConnection rConn = (HttpURLConnection) rUrl.openConnection();
+                            rConn.setInstanceFollowRedirects(false);
+                            rConn.setConnectTimeout(5000);
+                            rConn.setReadTimeout(5000);
+                            rConn.setRequestProperty("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36");
+                            StringBuilder ckSb = new StringBuilder();
+                            for (String v : cookieMap.values()) {
+                                if (ckSb.length() > 0) ckSb.append("; ");
+                                ckSb.append(v);
+                            }
+                            rConn.setRequestProperty("Cookie", ckSb.toString());
+                            // Explicitly trigger connection before extracting headers
+                            rConn.getResponseCode();
+                            locationHeader = rConn.getHeaderField("Location");
+                            List<String> sigCookies = new java.util.ArrayList<>();
+                            extractSetCookiesFromConnection(rConn, sigCookies);
+                            rConn.disconnect();
+                            for (String sc : sigCookies) {
+                                String[] parts = sc.split(";");
+                                if (parts.length > 0) {
+                                    String pair = parts[0].trim();
+                                    int eqIdx = pair.indexOf('=');
+                                    if (eqIdx > 0 && !pair.endsWith("=")) {
+                                        cookieMap.put(pair.substring(0, eqIdx).trim(), pair);
+                                    }
+                                }
+                            }
+                        } catch (Exception ignored) {}
+                    }
+
+                    StringBuilder mergedSb = new StringBuilder();
+                    for (String v : cookieMap.values()) {
+                        if (mergedSb.length() > 0) mergedSb.append("; ");
+                        mergedSb.append(v);
+                    }
+                    String mergedCookieStr = mergedSb.toString();
+
+                    String uin = "";
+                    Pattern uinUrlPattern = Pattern.compile("[?&](?:uin|p_uin|pt2gguin|superuin|qqmusic_uin)=o?0*([1-9][0-9]{4,12})");
+                    Pattern uinCookiePattern = Pattern.compile("(?:pt2gguin|p_uin|uin|superuin|ptui_loginuin|qqmusic_uin)=o?0*([1-9][0-9]{4,12})");
+
+                    Matcher m1 = uinUrlPattern.matcher(redirectUrl != null ? redirectUrl : "");
+                    if (m1.find()) {
+                        uin = m1.group(1);
+                    }
+                    if (uin.isEmpty() && locationHeader != null) {
+                        Matcher mLoc = uinUrlPattern.matcher(locationHeader);
+                        if (mLoc.find()) uin = mLoc.group(1);
+                    }
+                    if (uin.isEmpty()) {
+                        Matcher m2 = uinCookiePattern.matcher(mergedCookieStr);
+                        if (m2.find()) uin = m2.group(1);
+                    }
+
+                    String finalCookie = !mergedCookieStr.isEmpty()
+                        ? (uin.isEmpty() ? mergedCookieStr : (mergedCookieStr + "; uin=" + uin))
+                        : (uin.isEmpty() ? "" : ("uin=" + uin));
+                    String nickname = (ptNickname != null && !ptNickname.trim().isEmpty())
+                        ? ptNickname.trim()
+                        : (!uin.isEmpty() ? ("QQ音乐用户_" + uin.substring(Math.max(0, uin.length() - 4))) : "QQ音乐VIP用户");
+
+                    JSONObject profile = new JSONObject();
+                    if (!uin.isEmpty()) {
+                        profile.put("userId", uin);
+                        profile.put("avatarUrl", "https://q1.qlogo.cn/g?b=qq&nk=" + uin + "&s=100");
+                    }
+                    profile.put("nickname", nickname);
+                    profile.put("vipType", 1);
+
+                    JSONObject out = new JSONObject();
+                    out.put("success", true);
+                    out.put("code", 803);
+                    out.put("message", "授权成功！已绑定 QQ 音乐账号");
+                    out.put("cookie", finalCookie);
+                    out.put("profile", profile);
+
+                    lastCapturedQqSig = cleanSig;
+                    lastCapturedQqResultJson = out.toString();
+                    return out.toString();
+                }
+
+                JSONObject waitOut = new JSONObject();
+                waitOut.put("success", true);
+                waitOut.put("code", 801);
+                waitOut.put("message", (ptMessage != null && !ptMessage.isEmpty()) ? ptMessage : "等待扫码中...");
+                return waitOut.toString();
+            } catch (Exception e) {
+                return "{\"success\":true,\"code\":801,\"message\":\"等待手机端扫码中...\"}";
             }
         }
 
@@ -727,10 +1525,11 @@ public class MainActivity extends BridgeActivity {
         }
 
         @JavascriptInterface
-        public void boostFrameRate(int durationMs) {
+        public void boostFrameRate(final int durationMs) {
             try {
                 if (context instanceof MainActivity) {
-                    ((MainActivity) context).boostNativeFrameRate((long) durationMs);
+                    final MainActivity act = (MainActivity) context;
+                    act.runOnUiThread(() -> act.triggerKeepAliveBoost(durationMs));
                 }
             } catch (Exception ignored) {}
         }

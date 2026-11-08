@@ -141,7 +141,6 @@ export const ViewPager: React.FC = () => {
           {/* Shared Seamless Ambient Backdrop across all 3 spaces (prevents hard vertical color cut between AR, Music, and IELTS spaces) */}
           <AmbientBackground
             intensity={activeSpace === 1 ? 1 : activeSpace === 2 ? 0.28 : 0.34}
-            className="transition-opacity duration-700"
           />
 
           {/* 300% Horizontal Tri-Space ViewPager Container with 60/120fps GPU Composition */}
