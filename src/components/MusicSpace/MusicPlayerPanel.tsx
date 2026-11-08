@@ -11,6 +11,7 @@ import { db, collectWord, cycleWordMastery } from '../../db';
 import { SEED_WORDS } from '../../db/seedData';
 import { WordItem, SongItem, MasteryLevel, AudioQuality, AUDIO_QUALITY_OPTIONS } from '../../types';
 import { analyzeSongVocab } from '../../utils/vocabEngine';
+import { resolveSongAudioClient, fetchSongLyricsClient, SupportedMusicPlatform } from '../../utils/clientMusicSync';
 import { TopHeader } from '../TopHeader';
 import { AmbientBackground } from '../AmbientBackground';
 import { FullscreenLyricsView } from './FullscreenLyricsView';
@@ -433,30 +434,38 @@ export const MusicPlayerPanel: React.FC<MusicPlayerPanelProps> = ({ onOpenNotebo
   // On-demand lyric and translation fetcher if missing or default placeholder
   useEffect(() => {
     if (!currentSong) return;
-    const isDefaultLrc = !currentSong.lrcText || currentSong.lrcText.includes('Listening to the melodic rhythm');
+    const isDefaultLrc =
+      !currentSong.lrcText ||
+      currentSong.lrcText.includes('Listening to the melodic rhythm') ||
+      currentSong.lrcText.includes('LyricaLens Academic Immersion') ||
+      currentSong.lrcText.includes('原声同步') ||
+      currentSong.lrcText.includes('音源同步');
     if (isDefaultLrc || !currentSong.tlyricText) {
       let isCancelled = false;
       const fetchLyric = async () => {
         try {
-          const cleanId = currentSong.id.replace(/^ncm-/, '');
-          const res = await fetch(`/api/music/song-lyric?id=${cleanId}&title=${encodeURIComponent(currentSong.title)}&artist=${encodeURIComponent(currentSong.artist)}`);
-          if (res.ok) {
-            const data = await res.json();
-            if (!isCancelled && (data.lrc || data.tlyric)) {
-              const updatedSongs = songs.map((s, idx) => {
-                if (idx === currentSongIndex) {
-                  return {
-                    ...s,
-                    lrcText: (data.lrc && data.lrc.includes('[')) ? data.lrc : s.lrcText,
-                    tlyricText: data.tlyric || s.tlyricText
-                  };
-                }
-                return s;
-              });
-              setSongs(updatedSongs);
-              if (currentSong.id) {
-                await db.songs.put(updatedSongs[currentSongIndex]);
+          let lrcData = await fetchSongLyricsClient(currentSong.id, currentSong.title, currentSong.artist);
+          if (!lrcData && !Capacitor.isNativePlatform()) {
+            const cleanId = currentSong.id.replace(/^ncm-/, '');
+            const res = await fetch(`/api/music/song-lyric?id=${cleanId}&title=${encodeURIComponent(currentSong.title)}&artist=${encodeURIComponent(currentSong.artist)}`);
+            if (res.ok) {
+              lrcData = await res.json();
+            }
+          }
+          if (!isCancelled && lrcData && (lrcData.lrc || lrcData.tlyric)) {
+            const updatedSongs = songs.map((s, idx) => {
+              if (idx === currentSongIndex) {
+                return {
+                  ...s,
+                  lrcText: (lrcData!.lrc && lrcData!.lrc.includes('[')) ? lrcData!.lrc : s.lrcText,
+                  tlyricText: lrcData!.tlyric || s.tlyricText
+                };
               }
+              return s;
+            });
+            setSongs(updatedSongs);
+            if (currentSong.id) {
+              await db.songs.put(updatedSongs[currentSongIndex]);
             }
           }
         } catch {
@@ -471,13 +480,60 @@ export const MusicPlayerPanel: React.FC<MusicPlayerPanelProps> = ({ onOpenNotebo
   }, [currentSong?.id, currentSongIndex, songs, setSongs]);
 
   const [fallbackStreamUrl, setFallbackStreamUrl] = useState<string>('');
+  const [vipResolvedUrl, setVipResolvedUrl] = useState<string>('');
+
+  // Proactively resolve full VIP / non-trial stream on song or quality change
+  useEffect(() => {
+    setFallbackStreamUrl('');
+    setVipResolvedUrl('');
+    if (!currentSong) return;
+    const rawId = currentSong.id || '';
+    if (!rawId || rawId.startsWith('local-') || rawId.startsWith('song-')) return;
+
+    let songPlatform: SupportedMusicPlatform = 'netease';
+    if (rawId.startsWith('qq-')) songPlatform = 'qq';
+    else if (rawId.startsWith('kugou-')) songPlatform = 'kugou';
+    else if (rawId.startsWith('kuwo-')) songPlatform = 'kuwo';
+    else if (rawId.startsWith('migu-')) songPlatform = 'migu';
+    else if (rawId.startsWith('spotify-')) songPlatform = 'spotify';
+
+    let cancelled = false;
+    const platformCookie = typeof window !== 'undefined'
+      ? (localStorage.getItem(`lyricalens_${songPlatform}_cookie`) || (songPlatform === 'netease' ? localStorage.getItem('lyricalens_ncm_cookie') : '') || '')
+      : '';
+
+    resolveSongAudioClient(
+      rawId,
+      songPlatform,
+      platformCookie,
+      audioQuality || 'exhigh',
+      currentSong.title,
+      currentSong.artist,
+      false
+    ).then((url) => {
+      if (!cancelled) {
+        setVipResolvedUrl(url || currentSong.audioUrl || '');
+      }
+    }).catch(() => {
+      if (!cancelled && currentSong.audioUrl) {
+        setVipResolvedUrl(currentSong.audioUrl);
+      }
+    });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [currentSong?.id, audioQuality]);
 
   const resolvedAudioSrc = useMemo(() => {
     if (!currentSong) return '';
 
-    // If a fallback auto-heal stream was triggered for this song, prioritize it
+    // If a fallback auto-heal stream or VIP full-track stream was resolved for this song, prioritize it
     if (fallbackStreamUrl) {
       return fallbackStreamUrl;
+    }
+    if (vipResolvedUrl) {
+      return vipResolvedUrl;
     }
     
     // 1. Local offline files or blob/data streams: NEVER proxy, return directly
@@ -538,8 +594,11 @@ export const MusicPlayerPanel: React.FC<MusicPlayerPanelProps> = ({ onOpenNotebo
     }
 
     // 3. For Standalone Mobile APK (no local Node server running):
-    // If the song already has a valid direct HTTP/HTTPS URL (Meting, CDN, external outer URL), KEEP IT!
+    // Wait for vipResolvedUrl if audioUrl is an anonymous outer/url or meting placeholder
     if (isNative && currentSong.audioUrl && /^https?:\/\//i.test(currentSong.audioUrl)) {
+      if (currentSong.audioUrl.includes('music.163.com/song/media/outer/url') || currentSong.audioUrl.includes('/meting/')) {
+        return '';
+      }
       return currentSong.audioUrl;
     }
 
@@ -549,12 +608,7 @@ export const MusicPlayerPanel: React.FC<MusicPlayerPanelProps> = ({ onOpenNotebo
     }
     
     return `/api/music/audio-stream?name=${encodeURIComponent(currentSong.title)}&artist=${encodeURIComponent(currentSong.artist)}&id=${encodeURIComponent(rawId)}&platform=${songPlatform}${cookieParam}&level=${encodeURIComponent(targetLevel)}`;
-  }, [currentSong, audioQuality, fallbackStreamUrl]);
-
-  // Reset fallback stream url when switching songs
-  useEffect(() => {
-    setFallbackStreamUrl('');
-  }, [currentSong?.id]);
+  }, [currentSong, audioQuality, fallbackStreamUrl, vipResolvedUrl]);
 
   // Pre-decode adjacent song album covers in background so vertical swipe transitions have 0ms image decode latency
   useEffect(() => {
@@ -885,7 +939,24 @@ export const MusicPlayerPanel: React.FC<MusicPlayerPanelProps> = ({ onOpenNotebo
   const handleAudioLoadedMetadata = (e: React.SyntheticEvent<HTMLAudioElement>) => {
     const el = e.currentTarget;
     el.volume = 0.2;
-    setDuration(el.duration || currentSong.duration);
+    const loadedDur = el.duration;
+    // Detect 30-second trial preview clip (28s~35s) when actual song duration is > 60s, and auto-heal to full track
+    if (loadedDur > 0 && loadedDur <= 35 && currentSong.duration > 60 && !fallbackStreamUrl) {
+      setDuration(currentSong.duration);
+      resolveSongAudioClient(
+        currentSong.id || '',
+        'netease',
+        '',
+        audioQuality || 'exhigh',
+        currentSong.title,
+        currentSong.artist,
+        true
+      ).then((fullUrl) => {
+        if (fullUrl) setFallbackStreamUrl(fullUrl);
+      }).catch(() => {});
+    } else {
+      setDuration(loadedDur || currentSong.duration);
+    }
     tryRestorePlaybackPosition(el);
 
     if (isPlaying) {
@@ -957,8 +1028,23 @@ export const MusicPlayerPanel: React.FC<MusicPlayerPanelProps> = ({ onOpenNotebo
           }
 
           if (cleanId && !fallbackStreamUrl) {
-            const fallbackUrl = `https://api.injahow.cn/meting/?type=url&id=${encodeURIComponent(cleanId)}&server=${platformServer}`;
-            setFallbackStreamUrl(fallbackUrl);
+            resolveSongAudioClient(
+              rawId,
+              platformServer === 'tencent' ? 'qq' : (platformServer as SupportedMusicPlatform),
+              '',
+              audioQuality || 'exhigh',
+              currentSong.title,
+              currentSong.artist,
+              true
+            ).then((fullUrl) => {
+              if (fullUrl) {
+                setFallbackStreamUrl(fullUrl);
+              } else {
+                setFallbackStreamUrl(`https://api.injahow.cn/meting/?type=url&id=${encodeURIComponent(cleanId)}&server=${platformServer}`);
+              }
+            }).catch(() => {
+              setFallbackStreamUrl(`https://api.injahow.cn/meting/?type=url&id=${encodeURIComponent(cleanId)}&server=${platformServer}`);
+            });
           }
         }}
         onEnded={handleSongEnded}

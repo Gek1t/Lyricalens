@@ -1343,69 +1343,216 @@ export function removeStoredPlatformAuth(platform: SupportedMusicPlatform): void
   }
 }
 
+function md5Hex(str: string): string {
+  const utf8 = new TextEncoder().encode(str);
+  const bitLen = utf8.length * 8;
+  const padLen = (((utf8.length + 8) >>> 6) << 4) + 16;
+  const w = new Int32Array(padLen);
+  for (let i = 0; i < utf8.length; i++) w[i >> 2] |= utf8[i] << ((i & 3) * 8);
+  w[utf8.length >> 2] |= 0x80 << ((utf8.length & 3) * 8);
+  w[padLen - 2] = bitLen;
+  let a = 0x67452301, b = -0x10325477, c = -0x67452302, d = 0x10325476;
+  const k = Int32Array.from({ length: 64 }, (_, i) => (Math.abs(Math.sin(i + 1)) * 4294967296) | 0);
+  const s = [7,12,17,22,7,12,17,22,7,12,17,22,7,12,17,22,5,9,14,20,5,9,14,20,5,9,14,20,5,9,14,20,4,11,16,23,4,11,16,23,4,11,16,23,4,11,16,23,6,10,15,21,6,10,15,21,6,10,15,21,6,10,15,21];
+  for (let i = 0; i < padLen; i += 16) {
+    const aa = a, bb = b, cc = c, dd = d;
+    for (let j = 0; j < 64; j++) {
+      let f = 0, g = 0;
+      if (j < 16) { f = (b & c) | (~b & d); g = j; }
+      else if (j < 32) { f = (d & b) | (~d & c); g = (5 * j + 1) % 16; }
+      else if (j < 48) { f = b ^ c ^ d; g = (3 * j + 5) % 16; }
+      else { f = c ^ (b | ~d); g = (7 * j) % 16; }
+      const t = d; d = c; c = b;
+      const x = (a + f + k[j] + w[i + g]) | 0;
+      b = (b + ((x << s[j]) | (x >>> (32 - s[j])))) | 0;
+      a = t;
+    }
+    a = (a + aa) | 0; b = (b + bb) | 0; c = (c + cc) | 0; d = (d + dd) | 0;
+  }
+  return Array.from(new Uint8Array(new Int32Array([a, b, c, d]).buffer), x => x.toString(16).padStart(2, '0')).join('');
+}
+
+async function encryptNetEaseEapi(apiUrl: string, payloadObj: Record<string, any>): Promise<string> {
+  const text = JSON.stringify(payloadObj);
+  const digest = md5Hex(`nobody${apiUrl}use${text}md5forencrypt`);
+  const plainBytes = new TextEncoder().encode(`${apiUrl}-36cd479b6b5-${text}-36cd479b6b5-${digest}`);
+  const padLen = 16 - (plainBytes.length % 16);
+  const padded = new Uint8Array(plainBytes.length + padLen);
+  padded.set(plainBytes);
+  padded.fill(padLen, plainBytes.length);
+  const keyBytes = new TextEncoder().encode('e82ckenh8dichen8');
+  const subtleKey = await crypto.subtle.importKey('raw', keyBytes, { name: 'AES-CBC' }, false, ['encrypt']);
+  const zeroIv = new Uint8Array(16);
+  let outHex = '';
+  for (let i = 0; i < padded.length; i += 16) {
+    const enc = new Uint8Array(await crypto.subtle.encrypt({ name: 'AES-CBC', iv: zeroIv }, subtleKey, padded.subarray(i, i + 16)));
+    for (let j = 0; j < 16; j++) outHex += enc[j].toString(16).padStart(2, '0').toUpperCase();
+  }
+  return outHex;
+}
+
+export async function fetchSongLyricsClient(
+  songId: string,
+  title: string = '',
+  artist: string = ''
+): Promise<{ lrc: string; tlyric: string } | null> {
+  const cleanId = (songId || '').replace(/^(?:ncm|qq|kugou|kuwo|migu|spotify)-/, '').trim();
+  if (/^\d+$/.test(cleanId)) {
+    try {
+      const data = await safeHttpRequest(`https://music.163.com/api/song/lyric?id=${cleanId}&lv=1&kv=1&tv=-1`, {
+        'Referer': 'https://music.163.com/'
+      });
+      if (data?.lrc?.lyric && !data.lrc.lyric.includes('暂无歌词')) {
+        return { lrc: data.lrc.lyric, tlyric: data.tlyric?.lyric || '' };
+      }
+    } catch {}
+  }
+  if (title || artist) {
+    try {
+      const q = `${title} ${artist}`.trim();
+      const sData = await safeHttpRequest(`https://music.163.com/api/search/get?s=${encodeURIComponent(q)}&type=1&limit=2`, {
+        'Referer': 'https://music.163.com/'
+      });
+      const candId = sData?.result?.songs?.[0]?.id;
+      if (candId) {
+        const cData = await safeHttpRequest(`https://music.163.com/api/song/lyric?id=${candId}&lv=1&kv=1&tv=-1`, {
+          'Referer': 'https://music.163.com/'
+        });
+        if (cData?.lrc?.lyric) {
+          return { lrc: cData.lrc.lyric, tlyric: cData.tlyric?.lyric || '' };
+        }
+      }
+    } catch {}
+  }
+  return null;
+}
+
 /**
- * Universal Song Audio Stream Resolver for Client / Mobile Standalone App
+ * Universal VIP & Full-Track Audio Stream Resolver for Client / Mobile Standalone App
  */
 export async function resolveSongAudioClient(
   songId: string,
   platform: SupportedMusicPlatform = 'netease',
-  ncmCookie?: string
+  userCookie?: string,
+  level: string = 'exhigh',
+  title: string = '',
+  artist: string = '',
+  forceUnblock: boolean = false
 ): Promise<string | null> {
   const cleanId = songId.replace(/^(?:ncm|qq|kugou|kuwo|migu|spotify)-/, '').trim();
-  if (!cleanId) return null;
+  if (!cleanId && !title) return null;
 
-  // 1. If NetEase with VIP cookie
-  if (platform === 'netease' && ncmCookie) {
+  // 1. Official NetEase VIP eapi (/eapi/song/enhance/player/url/v1) with trial-clip rejection
+  if (platform === 'netease' && cleanId && !forceUnblock) {
+    const rawCookie =
+      userCookie ||
+      (typeof localStorage !== 'undefined' ? (localStorage.getItem('lyricalens_ncm_cookie') || localStorage.getItem('lyricalens_netease_cookie') || '') : '') ||
+      (typeof window !== 'undefined' && typeof window.AndroidNativeMedia?.getCookiesForUrl === 'function'
+        ? window.AndroidNativeMedia.getCookiesForUrl('https://music.163.com') || ''
+        : '');
+    const mMatch = rawCookie.match(/MUSIC_U=([^;\s]+)/);
+    const musicU = mMatch ? mMatch[1] : (!rawCookie.includes('=') ? rawCookie.trim() : '');
     try {
-      const normalizedCookie = ncmCookie.includes('MUSIC_U=') ? ncmCookie : `MUSIC_U=${ncmCookie}; os=pc;`;
-      const direct = await safeHttpRequest('https://music.163.com/api/song/enhance/player/url', {
-        method: 'POST',
-        headers: {
-          'Cookie': normalizedCookie,
-          'Referer': 'https://music.163.com/'
-        },
-        data: { ids: `[${cleanId}]`, br: '320000' },
-        formUrlEncoded: true
+      const headerObj: Record<string, string> = {
+        os: 'pc',
+        appver: '2.9.7',
+        osver: 'Microsoft-Windows-10-Professional-build-19045-64bit',
+        channel: 'netease',
+        requestId: `${Date.now()}_0123`
+      };
+      if (musicU) headerObj.MUSIC_U = musicU;
+      const paramsHex = await encryptNetEaseEapi('/api/song/enhance/player/url/v1', {
+        ids: `[${cleanId}]`,
+        level: level || 'exhigh',
+        encodeType: 'flac',
+        header: JSON.stringify(headerObj)
       });
-      const url = direct?.data?.[0]?.url;
-      if (url && /^https?:\/\//i.test(url)) {
-        return url;
+      const cookieHeader = musicU ? `MUSIC_U=${musicU}; os=pc; appver=2.9.7` : `os=pc; appver=2.9.7; ${rawCookie}`;
+      for (const host of ['https://interface.music.163.com', 'https://interface3.music.163.com']) {
+        try {
+          const eapiRes = await safeHttpRequest(`${host}/eapi/song/enhance/player/url/v1`, {
+            method: 'POST',
+            headers: { 'Cookie': cookieHeader, 'Referer': 'https://music.163.com/' },
+            data: { params: paramsHex },
+            formUrlEncoded: true
+          });
+          const item = eapiRes?.data?.[0];
+          // Only accept if it is a full track (freeTrialInfo is null/empty and duration > 45s)
+          if (item?.url && /^https?:\/\//i.test(item.url) && !item.freeTrialInfo && (!item.time || item.time > 45000)) {
+            return item.url.replace(/^http:\/\//i, 'https://');
+          }
+        } catch {}
       }
     } catch {}
   }
 
-  // 2. High-speed multi-platform Meting resolver
-  const serverMap: Record<string, string> = {
-    netease: 'netease',
-    qq: 'tencent',
-    kugou: 'kugou',
-    kuwo: 'kuwo',
-    migu: 'migu'
-  };
-  const server = serverMap[platform] || 'netease';
-  const metingUrls = [
-    `https://api.injahow.cn/meting/?type=url&id=${encodeURIComponent(cleanId)}&server=${server}`,
-    `https://meting.iqiq.io/api?type=url&id=${encodeURIComponent(cleanId)}&server=${server}`
-  ];
+  // 2. Official QQ Music VIP GetVkey
+  if (platform === 'qq' && cleanId && !forceUnblock) {
+    const qqCookie =
+      userCookie ||
+      (typeof localStorage !== 'undefined' ? localStorage.getItem('lyricalens_qq_cookie') || '' : '') ||
+      (typeof window !== 'undefined' && typeof window.AndroidNativeMedia?.getCookiesForUrl === 'function'
+        ? window.AndroidNativeMedia.getCookiesForUrl('https://y.qq.com') || ''
+        : '');
+    if (qqCookie) {
+      try {
+        const uinMatch = qqCookie.match(/(?:^|;\s*)(?:p_uin|uin|qqmusic_uin)=o?0*([1-9][0-9]{4,14})/i);
+        const uin = uinMatch ? uinMatch[1] : '0';
+        const reqData = {
+          req_0: {
+            module: 'vkey.GetVkeyServer',
+            method: 'CgiGetVkey',
+            param: { guid: '358840384', songmid: [cleanId], songtype: [0], uin, loginflag: 1, platform: '20' }
+          },
+          comm: { uin, format: 'json', ct: 24, cv: 0 }
+        };
+        const vkeyRes = await safeHttpRequest(
+          `https://u.y.qq.com/cgi-bin/musicu.fcg?data=${encodeURIComponent(JSON.stringify(reqData))}`,
+          { 'Cookie': qqCookie, 'Referer': 'https://y.qq.com/' }
+        );
+        const purl = vkeyRes?.req_0?.data?.midurlinfo?.[0]?.purl;
+        if (purl && purl.length > 10) {
+          return `https://ws.stream.qqmusic.qq.com/${purl}`;
+        }
+      } catch {}
+    }
+  }
 
-  for (const endpoint of metingUrls) {
+  // 3. Full-Track Unblock Resolver (Kuwo >= 60s full song matcher — bypasses 30s VIP trial clips!)
+  if (title) {
     try {
-      const res = await safeHttpRequest(endpoint);
-      if (typeof res === 'string' && /^https?:\/\//i.test(res) && !res.includes('404')) {
-        return res;
-      }
-      if (res && res.url && /^https?:\/\//i.test(res.url)) {
-        return res.url;
+      const cleanQuery = `${title} ${artist}`.replace(/[()[\]\-]/g, ' ').replace(/\s+/g, ' ').trim();
+      const kwRes = await safeHttpRequest(
+        `http://search.kuwo.cn/r.s?client=kt&all=${encodeURIComponent(cleanQuery)}&ft=music&itemset=web_2013&client=kt&pn=0&rn=8&rformat=json&encoding=utf8`
+      );
+      const data = typeof kwRes === 'string' ? JSON.parse(kwRes.replace(/'/g, '"').replace(/&nbsp;/g, ' ')) : kwRes;
+      const list = Array.isArray(data?.abslist) ? data.abslist : [];
+      const candidates = list.filter((s: any) => {
+        const dur = parseInt(s.DURATION, 10) || 0;
+        const name = (s.SONGNAME || '').toLowerCase();
+        return dur >= 60 && !name.includes('片段') && !name.includes('铃声') && !name.includes('伴奏');
+      });
+      for (const item of (candidates.length > 0 ? candidates : list).slice(0, 3)) {
+        if (item?.MUSICRID) {
+          const rid = String(item.MUSICRID).replace('MUSIC_', '');
+          const playRes = await safeHttpRequest(
+            `http://antiserver.kuwo.cn/anti.s?type=convert_url&rid=${rid}&format=mp3&response=url`
+          );
+          if (typeof playRes === 'string' && playRes.trim().startsWith('http')) {
+            return playRes.trim();
+          }
+        }
       }
     } catch {}
   }
 
-  // 3. Kuwo direct fallback
-  if (platform === 'kuwo') {
+  // 4. Kuwo direct by ID if platform is kuwo
+  if (platform === 'kuwo' && cleanId) {
     try {
-      const kwUrl = `http://antiserver.kuwo.cn/anti.s?type=convert_url&rid=${cleanId}&format=mp3&response=url`;
-      const playRes = await safeHttpRequest(kwUrl);
-      if (typeof playRes === 'string' && playRes.startsWith('http')) {
+      const playRes = await safeHttpRequest(
+        `http://antiserver.kuwo.cn/anti.s?type=convert_url&rid=${cleanId}&format=mp3&response=url`
+      );
+      if (typeof playRes === 'string' && playRes.trim().startsWith('http')) {
         return playRes.trim();
       }
     } catch {}
