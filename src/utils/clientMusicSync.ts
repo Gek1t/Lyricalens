@@ -1053,10 +1053,19 @@ export async function fetchPlaylistClient(
   if (platform === 'qq') {
     // Attempt A: Official QQ Music disstid API
     try {
-      const qqUrl = `https://c.y.qq.com/qzone/fcg-bin/fcg_ucc_getcdinfo_byids_cp.fcg?type=1&json=1&utf8=1&onlysong=0&disstid=${playlistId}&format=json`;
-      const data = await safeHttpRequest(qqUrl, {
+      const qqCookie =
+        (typeof localStorage !== 'undefined' ? localStorage.getItem('lyricalens_qq_cookie') || '' : '') ||
+        (typeof window !== 'undefined' && typeof window.AndroidNativeMedia?.getCookiesForUrl === 'function'
+          ? window.AndroidNativeMedia.getCookiesForUrl('https://y.qq.com') || ''
+          : '');
+      const qqHeaders: Record<string, string> = {
         'Referer': 'https://y.qq.com/'
-      });
+      };
+      if (qqCookie) {
+        qqHeaders['Cookie'] = qqCookie;
+      }
+      const qqUrl = `https://c.y.qq.com/qzone/fcg-bin/fcg_ucc_getcdinfo_byids_cp.fcg?type=1&json=1&utf8=1&onlysong=0&song_begin=0&song_num=2000&disstid=${playlistId}&format=json`;
+      const data = await safeHttpRequest(qqUrl, qqHeaders);
       if (data && data.code === 0 && Array.isArray(data.cdlist) && data.cdlist.length > 0) {
         const cd = data.cdlist[0];
         const playlistName = cd.dissname || `QQ音乐歌单 (${playlistId})`;
@@ -1115,17 +1124,81 @@ export async function fetchPlaylistClient(
 
   // 2. 网易云音乐 (NetEase Cloud Music)
   if (platform === 'netease') {
-    // Attempt A: Official NetEase v3 detail API
+    // Attempt A: Official NetEase v3 detail API + full trackIds batch completion (up to 2000 songs)
     try {
-      const ncmUrl = `https://music.163.com/api/v3/playlist/detail?id=${playlistId}`;
-      const data = await safeHttpRequest(ncmUrl, {
-        'Referer': 'https://music.163.com/'
-      });
+      const savedNcmCookie =
+        (typeof localStorage !== 'undefined' ? localStorage.getItem('lyricalens_ncm_cookie') || '' : '') ||
+        (typeof window !== 'undefined' && typeof window.AndroidNativeMedia?.getCookiesForUrl === 'function'
+          ? window.AndroidNativeMedia.getCookiesForUrl('https://music.163.com') || ''
+          : '');
+      const ncmHeaders: Record<string, string> = {
+        'Referer': 'https://music.163.com/',
+        'Cookie': savedNcmCookie ? `os=pc; appver=2.9.7; ${savedNcmCookie}` : 'os=pc; appver=2.9.7'
+      };
+      const ncmUrl = `https://music.163.com/api/v3/playlist/detail?id=${playlistId}&n=10000&s=0`;
+      const data = await safeHttpRequest(ncmUrl, ncmHeaders);
 
       if (data && data.code === 200 && data.playlist) {
         const pl = data.playlist;
         const playlistName = pl.name || `网易云歌单 (${playlistId})`;
-        const rawTracks = pl.tracks || [];
+        let rawTracks: any[] = Array.isArray(pl.tracks) ? pl.tracks : [];
+        const allTrackIds: number[] = Array.isArray(pl.trackIds)
+          ? pl.trackIds.map((t: any) => Number(t.id)).filter(Boolean).slice(0, 2000)
+          : [];
+
+        // NetEase v3 detail API often only populates the first 10~200 tracks in `playlist.tracks` while placing all 800+ IDs in `playlist.trackIds`
+        if (allTrackIds.length > rawTracks.length) {
+          const trackMap = new Map<number, any>();
+          for (const t of rawTracks) {
+            if (t && t.id) trackMap.set(Number(t.id), t);
+          }
+          const missingIds = allTrackIds.filter(id => !trackMap.has(id));
+          const batchSize = 150;
+          const chunks: number[][] = [];
+          for (let i = 0; i < missingIds.length; i += batchSize) {
+            chunks.push(missingIds.slice(i, i + batchSize));
+          }
+          const batchResponses = await Promise.all(
+            chunks.map(async (chunk) => {
+              const cJson = JSON.stringify(chunk.map(id => ({ id })));
+              try {
+                const detailData = await safeHttpRequest('https://music.163.com/api/v3/song/detail', {
+                  method: 'POST',
+                  headers: ncmHeaders,
+                  data: { c: cJson },
+                  formUrlEncoded: true,
+                });
+                if (detailData && detailData.code === 200 && Array.isArray(detailData.songs)) {
+                  return detailData.songs;
+                }
+              } catch {
+                // fallback to GET below
+              }
+              try {
+                const detailDataGet = await safeHttpRequest(
+                  `https://music.163.com/api/v3/song/detail?c=${encodeURIComponent(cJson)}`,
+                  ncmHeaders
+                );
+                if (detailDataGet && detailDataGet.code === 200 && Array.isArray(detailDataGet.songs)) {
+                  return detailDataGet.songs;
+                }
+              } catch {
+                // ignore individual batch failure
+              }
+              return [];
+            })
+          );
+          for (const songList of batchResponses) {
+            for (const s of songList) {
+              if (s && s.id) trackMap.set(Number(s.id), s);
+            }
+          }
+          const orderedTracks = allTrackIds.map(id => trackMap.get(id)).filter(Boolean);
+          if (orderedTracks.length > rawTracks.length) {
+            rawTracks = orderedTracks;
+          }
+        }
+
         const songs: SongItem[] = rawTracks.map((t: any, idx: number) => {
           const songId = String(t.id);
           const artists = Array.isArray(t.ar) ? t.ar.map((a: any) => a.name).join('/') : '网易云音乐人';
