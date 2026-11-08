@@ -229,7 +229,7 @@ export const MusicPlayerPanel: React.FC<MusicPlayerPanelProps> = ({ onOpenNotebo
         setShuffledOrder(newQueue);
         setShuffledCursor(0);
       }
-      showToast('伪随机洗牌播放（队列已固定）');
+      showToast('随机播放');
     } else {
       setPlayMode('list');
       showToast('列表循环');
