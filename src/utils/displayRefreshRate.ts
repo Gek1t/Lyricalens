@@ -18,6 +18,7 @@ declare global {
       getCookiesForUrl?: (url: string) => string;
       getDeviceRefreshRate?: () => number;
       getSafeTopDp?: () => number;
+      boostFrameRate?: (durationMs: number) => void;
     };
   }
 }
@@ -34,6 +35,25 @@ const listeners = new Set<(state: RefreshRateState) => void>();
 let isInitialized = false;
 let isSampling = false;
 let lastTouchProbeTime = 0;
+let lastNativeBoostTime = 0;
+
+/**
+ * Notify Android native RenderThread VSync keep-alive view to lock 90/120/144Hz during animations
+ * (Defeats Xiaomi HyperOS/MIUI, OPPO ColorOS, vivo OriginOS 60Hz WebView whitelist throttling).
+ */
+export function triggerHighRefreshBoost(durationMs: number = 1400): void {
+  if (typeof window === 'undefined') return;
+  const now = performance.now();
+  if (now - lastNativeBoostTime < 250) return;
+  lastNativeBoostTime = now;
+  try {
+    if (typeof window.AndroidNativeMedia?.boostFrameRate === 'function') {
+      window.AndroidNativeMedia.boostFrameRate(durationMs);
+    }
+  } catch {
+    // ignore
+  }
+}
 
 /**
  * Snap raw measured or reported refresh rate (e.g., 59.9, 89.8, 119.9, 143.9) to standard mobile hardware tiers.

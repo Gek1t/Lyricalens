@@ -2,7 +2,7 @@ import React, { useState, useEffect, useCallback } from 'react';
 import { Capacitor } from '@capacitor/core';
 import { useAppStore } from '../store/useAppStore';
 import { useGestureEngine } from '../hooks/useGestureEngine';
-import { initDisplayRefreshRateAdapter } from '../utils/displayRefreshRate';
+import { initDisplayRefreshRateAdapter, triggerHighRefreshBoost } from '../utils/displayRefreshRate';
 import { initializeDatabase, db } from '../db';
 import { SEED_SONGS } from '../db/seedData';
 import { prioritizeSongsByNotebook } from '../utils/vocabEngine';
@@ -37,8 +37,13 @@ export const ViewPager: React.FC = () => {
   const closeNotebook = useAppStore(s => s.closeNotebook);
 
   const handleOpenNotebook = useCallback(() => {
+    triggerHighRefreshBoost(1200);
     openNotebook();
   }, [openNotebook]);
+
+  useEffect(() => {
+    triggerHighRefreshBoost(1000);
+  }, [activeSpace, isWordSheetOpen, isNotebookOpen]);
 
   // Initialize adaptive refresh rate detector (60Hz / 90Hz / 120Hz / 144Hz) + Dexie.js database
   useEffect(() => {
@@ -184,20 +189,12 @@ export const ViewPager: React.FC = () => {
             {/* Panel 0 (Left - AR Space): Completely transparent container over the wide S-curve AR backdrop */}
             <div
               id="panel-ar-space"
+              style={{ contain: 'layout style paint' }}
               className="w-1/3 h-full flex-shrink-0 relative z-10 overflow-hidden bg-transparent"
             >
               <div
                 id="stage-ar-space"
-                className="w-full h-full relative hardware-accelerated"
-                style={{
-                  transform: 'translate3d(0, 0, 0)',
-                  WebkitTransform: 'translate3d(0, 0, 0)',
-                  opacity: activeSpace === 0 ? 1 : 0.82,
-                  transition: 'transform var(--spring-duration-space, 380ms) cubic-bezier(0.22, 1, 0.36, 1), opacity 350ms cubic-bezier(0.22, 1, 0.36, 1)',
-                  WebkitBackfaceVisibility: 'hidden',
-                  backfaceVisibility: 'hidden',
-                  willChange: 'transform, opacity',
-                }}
+                className="w-full h-full relative"
               >
                 <MemoizedARCameraPanel onOpenNotebook={handleOpenNotebook} />
               </div>
@@ -206,20 +203,12 @@ export const ViewPager: React.FC = () => {
             {/* Panel 1 (Center - Music Hub) */}
             <div
               id="panel-music-space"
+              style={{ contain: 'layout style paint' }}
               className="w-1/3 h-full flex-shrink-0 relative z-10 overflow-hidden bg-transparent"
             >
               <div
                 id="stage-music-space"
-                className="w-full h-full relative hardware-accelerated"
-                style={{
-                  transform: 'translate3d(0, 0, 0)',
-                  WebkitTransform: 'translate3d(0, 0, 0)',
-                  opacity: activeSpace === 1 ? 1 : 0.82,
-                  transition: 'transform var(--spring-duration-space, 380ms) cubic-bezier(0.22, 1, 0.36, 1), opacity 350ms cubic-bezier(0.22, 1, 0.36, 1)',
-                  WebkitBackfaceVisibility: 'hidden',
-                  backfaceVisibility: 'hidden',
-                  willChange: 'transform, opacity',
-                }}
+                className="w-full h-full relative"
               >
                 <MemoizedMusicPlayerPanel onOpenNotebook={handleOpenNotebook} />
               </div>
@@ -228,20 +217,12 @@ export const ViewPager: React.FC = () => {
             {/* Panel 2 (Right - IELTS Reading Space): Starts from-transparent at the left edge touching Music Space so there is 0% seam */}
             <div
               id="panel-ielts-space"
+              style={{ contain: 'layout style paint' }}
               className="w-1/3 h-full flex-shrink-0 relative z-10 overflow-hidden bg-gradient-to-r from-transparent via-[#FAF7F2]/68 to-[#FAF7F2]/95 dark:from-transparent dark:via-[#0B0F17]/72 dark:to-[#0C1017]/96"
             >
               <div
                 id="stage-ielts-space"
-                className="w-full h-full relative hardware-accelerated"
-                style={{
-                  transform: 'translate3d(0, 0, 0)',
-                  WebkitTransform: 'translate3d(0, 0, 0)',
-                  opacity: activeSpace === 2 ? 1 : 0.82,
-                  transition: 'transform var(--spring-duration-space, 380ms) cubic-bezier(0.22, 1, 0.36, 1), opacity 350ms cubic-bezier(0.22, 1, 0.36, 1)',
-                  WebkitBackfaceVisibility: 'hidden',
-                  backfaceVisibility: 'hidden',
-                  willChange: 'transform, opacity',
-                }}
+                className="w-full h-full relative"
               >
                 <MemoizedIELTSPanel onOpenNotebook={handleOpenNotebook} />
               </div>

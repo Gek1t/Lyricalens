@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useMemo } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
 import { ChevronDown, Volume2, Music2, BookOpen, Layers, Sparkles, Compass } from 'lucide-react';
 import { useAppStore } from '../store/useAppStore';
@@ -9,6 +9,8 @@ import { HighlightedText } from './HighlightedText';
 import { getCollocationsForWord, parseStructuredDefinitions, CollocationItem } from '../utils/collocationDictionary';
 import { findSongContextInPlaylist, findIELTSAcademicContext } from '../utils/contextFinder';
 import { lookupWord, formatPartOfSpeech } from '../utils/lyricDictionary';
+import { withColorAlpha } from '../utils/colorExtractor';
+import { triggerHighRefreshBoost } from '../utils/displayRefreshRate';
 import { WordDrawer } from './WordDrawer';
 
 export const WordDetailSheet: React.FC = () => {
@@ -57,6 +59,7 @@ export const WordDetailSheet: React.FC = () => {
 
   useEffect(() => {
     if (isVisible && currentItem?.word) {
+      triggerHighRefreshBoost(1000);
       speakWordIfAutoEnabled(currentItem.word);
     }
   }, [isVisible, currentItem?.word]);
@@ -77,17 +80,35 @@ export const WordDetailSheet: React.FC = () => {
     }
   };
 
-  // 1. Song Playlist Check
-  const songContext = currentItem ? findSongContextInPlaylist(currentItem.word) : { found: false };
+  // 1. Song Playlist Check (Memoized & only evaluated when visible)
+  const songContext = useMemo(
+    () => (isVisible && currentItem ? findSongContextInPlaylist(currentItem.word) : { found: false }),
+    [isVisible, currentItem?.word]
+  );
 
-  // 2. IELTS Academic Context
-  const ieltsContext = currentItem ? findIELTSAcademicContext(currentItem.word) : { found: false, sentenceEn: '', sentenceCn: '', source: 'IELTS ACADEMIC' };
+  // 2. IELTS Academic Context (Memoized & only evaluated when visible)
+  const ieltsContext = useMemo(
+    () =>
+      isVisible && currentItem
+        ? findIELTSAcademicContext(currentItem.word)
+        : { found: false, sentenceEn: '', sentenceCn: '', source: 'IELTS ACADEMIC' },
+    [isVisible, currentItem?.word]
+  );
 
   // 3. Structured multi-POS definition parsing
-  const structuredDefs = currentItem ? parseStructuredDefinitions(currentItem.definitionCn, currentItem.partOfSpeech) : [];
+  const structuredDefs = useMemo(
+    () =>
+      isVisible && currentItem
+        ? parseStructuredDefinitions(currentItem.definitionCn, currentItem.partOfSpeech)
+        : [],
+    [isVisible, currentItem?.definitionCn, currentItem?.partOfSpeech]
+  );
 
   // 4. Collocations lookup
-  const collocations: CollocationItem[] = currentItem ? getCollocationsForWord(currentItem.word) : [];
+  const collocations: CollocationItem[] = useMemo(
+    () => (isVisible && currentItem ? getCollocationsForWord(currentItem.word) : []),
+    [isVisible, currentItem?.word]
+  );
 
   // Click any word in sentences or collocations to pop up the bottom drawer
   const handleWordClick = async (clickedWord: string, sentence?: string) => {
@@ -140,36 +161,41 @@ export const WordDetailSheet: React.FC = () => {
           <motion.div
             key="fullscreen-word-detail-page"
             id="fullscreen-word-detail-page"
-            initial={{ opacity: 0, y: 16, scale: 0.98 }}
+            initial={{ opacity: 0, y: 14 }}
             animate={{
               opacity: 1,
               y: 0,
-              scale: 1,
-              transition: { duration: 0.28, ease: [0.16, 1, 0.3, 1] }
+              transition: { duration: 0.24, ease: [0.16, 1, 0.3, 1] }
             }}
             exit={{
               opacity: 0,
-              y: 16,
-              scale: 0.98,
-              transition: { duration: 0.24, ease: [0.22, 1, 0.36, 1] }
+              y: 14,
+              transition: { duration: 0.2, ease: [0.22, 1, 0.36, 1] }
             }}
+            onAnimationStart={() => triggerHighRefreshBoost(1000)}
             onTouchStart={handleTouchStart}
             onTouchEnd={handleTouchEnd}
-            className="absolute inset-0 z-50 flex flex-col justify-between overflow-hidden select-none bg-[#FAF8F5]/95 dark:bg-[#0E121A]/95 backdrop-blur-md text-stone-900 dark:text-stone-100"
+            className="absolute inset-0 z-50 flex flex-col justify-between overflow-hidden select-none bg-[#FAF8F5] dark:bg-[#0E121A] text-stone-900 dark:text-stone-100 hardware-accelerated"
           >
-          {/* Luminous Soft Linen Ambient Background */}
-          <div className="absolute inset-0 pointer-events-none overflow-hidden">
+          {/* Luminous Soft Linen Ambient Background (Zero GPU Gaussian Blur Cost) */}
+          <div className="absolute inset-0 pointer-events-none overflow-hidden" style={{ contain: 'strict' }}>
             <div
-              className="absolute -top-32 -left-20 w-[420px] h-[420px] rounded-full blur-[140px] opacity-25 dark:opacity-10 transition-all duration-1000"
-              style={{ backgroundColor: ambientColors[0] || '#D4DCD2' }}
+              className="absolute -top-32 -left-20 w-[440px] h-[440px] rounded-full opacity-35 dark:opacity-15"
+              style={{
+                background: `radial-gradient(circle, ${withColorAlpha(ambientColors[0] || '#D4DCD2', 0.65, '#D4DCD2')} 0%, ${withColorAlpha(ambientColors[0] || '#D4DCD2', 0.22, '#D4DCD2')} 45%, transparent 72%)`
+              }}
             />
             <div
-              className="absolute top-1/2 -right-28 w-[380px] h-[380px] rounded-full blur-[130px] opacity-20 dark:opacity-10 transition-all duration-1000"
-              style={{ backgroundColor: ambientColors[1] || '#EAE2D5' }}
+              className="absolute top-1/2 -right-28 w-[400px] h-[400px] rounded-full opacity-30 dark:opacity-15"
+              style={{
+                background: `radial-gradient(circle, ${withColorAlpha(ambientColors[1] || '#EAE2D5', 0.6, '#EAE2D5')} 0%, ${withColorAlpha(ambientColors[1] || '#EAE2D5', 0.2, '#EAE2D5')} 45%, transparent 72%)`
+              }}
             />
             <div
-              className="absolute -bottom-32 left-1/4 w-[400px] h-[400px] rounded-full blur-[140px] opacity-20 dark:opacity-10 transition-all duration-1000"
-              style={{ backgroundColor: ambientColors[2] || '#D2C8BA' }}
+              className="absolute -bottom-32 left-1/4 w-[420px] h-[420px] rounded-full opacity-30 dark:opacity-15"
+              style={{
+                background: `radial-gradient(circle, ${withColorAlpha(ambientColors[2] || '#D2C8BA', 0.6, '#D2C8BA')} 0%, ${withColorAlpha(ambientColors[2] || '#D2C8BA', 0.2, '#D2C8BA')} 45%, transparent 72%)`
+              }}
             />
           </div>
 

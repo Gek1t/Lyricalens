@@ -1,4 +1,4 @@
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useEffect } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
 import { useLiveQuery } from 'dexie-react-hooks';
 import { BookOpen, Check, Sparkles, ChevronRight, ChevronDown, Flame, ArrowRight, Globe } from 'lucide-react';
@@ -8,6 +8,7 @@ import {
   computeWordHitMapForPassages,
   normalizeVolumeKey
 } from '../../utils/ieltsWorkbookEngine';
+import { triggerHighRefreshBoost } from '../../utils/displayRefreshRate';
 import { useAppStore } from '../../store/useAppStore';
 import { db } from '../../db';
 
@@ -33,8 +34,9 @@ export const CambridgePassageSelectorModal: React.FC = () => {
     [customPassages]
   );
 
-  // Real-time hit calculation against notebook words across all workbook passages
+  // Real-time hit calculation against notebook words across all workbook passages (suspended when modal is closed)
   const passagesWithHits = useMemo(() => {
+    if (!isCambridgeSelectorOpen) return [];
     const hitMap = computeWordHitMapForPassages(completePassages, userWordStrings);
     return completePassages.map(passage => {
       const hitInfo = hitMap[passage.id] || { count: 0, matchedWords: [] };
@@ -44,7 +46,13 @@ export const CambridgePassageSelectorModal: React.FC = () => {
         hitCount: hitInfo.count
       };
     });
-  }, [completePassages, userWordStrings]);
+  }, [isCambridgeSelectorOpen, completePassages, userWordStrings]);
+
+  useEffect(() => {
+    if (isCambridgeSelectorOpen) {
+      triggerHighRefreshBoost(1200);
+    }
+  }, [isCambridgeSelectorOpen]);
 
   const availableBooks = useMemo(() => {
     const books = Array.from(new Set(completePassages.map(p => normalizeVolumeKey(p.cambridgeBook))));
@@ -102,18 +110,18 @@ export const CambridgePassageSelectorModal: React.FC = () => {
           data-no-gesture="true"
           className="absolute inset-0 z-50 flex flex-col justify-end pointer-events-auto overflow-hidden select-none"
         >
-          {/* Backdrop with smooth fade */}
+          {/* Backdrop with smooth fade (Zero GPU Readback) */}
           <motion.div
             key="cambridge-selector-backdrop"
             initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}
             exit={{ opacity: 0 }}
             transition={{ duration: 0.22, ease: 'easeOut' }}
-            className="absolute inset-0 bg-black/60 backdrop-blur-xs cursor-pointer"
+            className="absolute inset-0 bg-black/60 cursor-pointer"
             onClick={handleClose}
           />
 
-          {/* Interactive Responsive Modal Sheet */}
+          {/* Interactive Responsive Modal Sheet (Pure GPU Transform Expansion without CSS Height Reflow) */}
           <motion.div
             id="cambridge-passages-sheet"
             key="cambridge-selector-sheet"
@@ -121,14 +129,15 @@ export const CambridgePassageSelectorModal: React.FC = () => {
             data-no-gesture="true"
             initial={{ y: '100%' }}
             animate={{
-              y: 0,
-              height: isExpanded ? '92%' : '75%',
+              y: isExpanded ? '0%' : '17%',
             }}
             exit={{ y: '100%' }}
             drag="y"
             dragConstraints={{ top: 0, bottom: 0 }}
             dragElastic={{ top: isExpanded ? 0.05 : 0.22, bottom: 0.55 }}
+            onDragStart={() => triggerHighRefreshBoost(1000)}
             onDragEnd={(_, info) => {
+              triggerHighRefreshBoost(1000);
               if (info.offset.y < -35 || info.velocity.y < -180) {
                 setIsExpanded(true);
               } else if (info.offset.y > 45 || info.velocity.y > 200) {
@@ -145,10 +154,18 @@ export const CambridgePassageSelectorModal: React.FC = () => {
               stiffness: 320,
               mass: 0.8,
             }}
+            style={{
+              height: '92%',
+              paddingBottom: isExpanded ? '0px' : '17%',
+              willChange: 'transform',
+              contain: 'layout style paint',
+              backfaceVisibility: 'hidden',
+              WebkitBackfaceVisibility: 'hidden'
+            }}
             onTouchStart={e => e.stopPropagation()}
             onTouchMove={e => e.stopPropagation()}
             onTouchEnd={e => e.stopPropagation()}
-            className="relative w-full flex flex-col rounded-t-[28px] sm:rounded-t-3xl bg-[#FAF7F2] dark:bg-[#121620] border-t border-stone-200/90 dark:border-slate-800/90 shadow-2xl z-10 overflow-hidden transition-[border-radius] duration-300"
+            className="relative w-full flex flex-col rounded-t-[28px] sm:rounded-t-3xl bg-[#FAF7F2] dark:bg-[#121620] border-t border-stone-200/90 dark:border-slate-800/90 shadow-2xl z-10 overflow-hidden hardware-accelerated"
           >
             {/* Top Interactive Pull Handle (Drag up to Expand, Drag down to Collapse/Close) */}
             <div

@@ -1,6 +1,6 @@
 import { useRef, useEffect, useCallback } from 'react';
 import { useAppStore } from '../store/useAppStore';
-import { getDisplayRefreshRateState } from '../utils/displayRefreshRate';
+import { getDisplayRefreshRateState, triggerHighRefreshBoost } from '../utils/displayRefreshRate';
 
 interface GestureEngineOptions {
   enableXSwipe?: boolean;
@@ -119,6 +119,7 @@ export function useGestureEngine(options: GestureEngineOptions = {}) {
 
     // Cache DOM elements & container dimensions once at touchstart (zero layout reads during touchmove)
     refreshDomCache();
+    triggerHighRefreshBoost(2200);
 
     const point = 'touches' in e ? e.touches[0] : e;
     startX.current = point.clientX;
@@ -193,27 +194,6 @@ export function useGestureEngine(options: GestureEngineOptions = {}) {
         }
         arSolidCore.style.opacity = coreOpacity.toFixed(3);
       }
-
-      // Real-time opacity interpolation across inner stages without pushing buttons into panel clip edges
-      const stages = cache.stages;
-      const targetIdx = latestDiffX < 0 ? Math.min(2, activeSpace + 1) : Math.max(0, activeSpace - 1);
-      for (let idx = 0; idx < stages.length; idx++) {
-        const st = stages[idx];
-        if (!st) continue;
-        if (st.style.transition !== 'none') {
-          st.style.transition = 'none';
-          (st.style as any).webkitTransition = 'none';
-        }
-        if (idx === activeSpace) {
-          const o = 1 - dragRatio * 0.18;
-          st.style.opacity = o.toFixed(3);
-        } else if (idx === targetIdx) {
-          const o = 0.82 + dragRatio * 0.18;
-          st.style.opacity = o.toFixed(3);
-        } else {
-          st.style.opacity = '0.82';
-        }
-      }
     });
   }, [activeSpace, refreshDomCache]);
 
@@ -226,6 +206,7 @@ export function useGestureEngine(options: GestureEngineOptions = {}) {
     const el = cache.viewport || document.getElementById('viewpager-viewport');
     if (!el) return;
 
+    triggerHighRefreshBoost(1200);
     const { fps } = getDisplayRefreshRateState();
     const durationMs = fps >= 120 ? 360 : fps >= 90 ? 380 : 400;
     const opacityDurationMs = fps >= 120 ? 330 : fps >= 90 ? 350 : 370;
@@ -248,21 +229,6 @@ export function useGestureEngine(options: GestureEngineOptions = {}) {
       (arSolidCore.style as any).webkitTransition = `opacity ${opacityDurationMs}ms ${curve}`;
       arSolidCore.style.opacity = targetSpace === 0 ? '1' : '0';
     }
-
-    const stages = [
-      cache.stages[0] || document.getElementById('stage-ar-space'),
-      cache.stages[1] || document.getElementById('stage-music-space'),
-      cache.stages[2] || document.getElementById('stage-ielts-space')
-    ];
-    stages.forEach((st, idx) => {
-      if (!st) return;
-      st.style.transition = `transform ${durationMs}ms ${curve}, opacity ${opacityDurationMs}ms ${curve}`;
-      (st.style as any).webkitTransition = `-webkit-transform ${durationMs}ms ${curve}, opacity ${opacityDurationMs}ms ${curve}`;
-      const isTarget = idx === targetSpace;
-      st.style.transform = 'translate3d(0, 0, 0)';
-      (st.style as any).webkitTransform = 'translate3d(0, 0, 0)';
-      st.style.opacity = isTarget ? '1' : '0.82';
-    });
   }, []);
 
   const updateCardVerticalTransform = useCallback((diffY: number) => {
@@ -287,15 +253,13 @@ export function useGestureEngine(options: GestureEngineOptions = {}) {
         wrapper.style.transition = 'none';
         (wrapper.style as any).webkitTransition = 'none';
       }
-      // Responsive 1:1 tactile tracking with gentle progressive resistance only at extremes
+      // Pure GPU translate3d + scale without mutating wrapper opacity (avoids Group Opacity offscreen surface allocation)
       const dampedY = latestDiffY * 0.78;
       const progress = Math.min(1, Math.abs(latestDiffY) / 150);
       const scale = 1 - progress * 0.055;
-      const opacity = 1 - progress * 0.32;
       const cardTransform = `translate3d(0, ${dampedY.toFixed(2)}px, 0) scale(${scale.toFixed(4)})`;
       wrapper.style.transform = cardTransform;
       (wrapper.style as any).webkitTransform = cardTransform;
-      wrapper.style.opacity = opacity.toFixed(3);
 
       const textTransform = `translate3d(0, ${(dampedY * 0.35).toFixed(2)}px, 0)`;
       const textOpacity = (1 - progress * 0.55).toFixed(3);
@@ -329,41 +293,41 @@ export function useGestureEngine(options: GestureEngineOptions = {}) {
     const quoteStage = cache.quoteStage || document.getElementById('gallery-quote-stage');
     if (!wrapper) return;
 
+    triggerHighRefreshBoost(1200);
     const { fps } = getDisplayRefreshRateState();
-    const settleMs = fps >= 120 ? 330 : fps >= 90 ? 350 : 370;
-    const fadeMs = fps >= 120 ? 240 : fps >= 90 ? 260 : 280;
+    const settleMs = fps >= 120 ? 320 : fps >= 90 ? 340 : 360;
+    const fadeMs = fps >= 120 ? 220 : fps >= 90 ? 240 : 260;
 
     if (!direction) {
       // Smooth spring snapback when swipe didn't reach threshold
-      const springCss = `transform ${settleMs}ms cubic-bezier(0.22, 1, 0.36, 1), opacity ${fadeMs}ms ease-out`;
-      wrapper.style.transition = springCss;
-      (wrapper.style as any).webkitTransition = springCss;
+      const cardSpringCss = `transform ${settleMs}ms cubic-bezier(0.22, 1, 0.36, 1)`;
+      const textSpringCss = `transform ${settleMs}ms cubic-bezier(0.22, 1, 0.36, 1), opacity ${fadeMs}ms ease-out`;
+      wrapper.style.transition = cardSpringCss;
+      (wrapper.style as any).webkitTransition = `-webkit-transform ${settleMs}ms cubic-bezier(0.22, 1, 0.36, 1)`;
       wrapper.style.transform = 'translate3d(0, 0, 0) scale(1)';
       (wrapper.style as any).webkitTransform = 'translate3d(0, 0, 0) scale(1)';
-      wrapper.style.opacity = '1';
 
       if (titleStage) {
-        titleStage.style.transition = springCss;
+        titleStage.style.transition = textSpringCss;
         titleStage.style.transform = 'translate3d(0, 0, 0)';
         titleStage.style.opacity = '1';
       }
       if (quoteStage) {
-        quoteStage.style.transition = springCss;
+        quoteStage.style.transition = textSpringCss;
         quoteStage.style.transform = 'translate3d(0, 0, 0)';
         quoteStage.style.opacity = '1';
       }
       return;
     }
 
-    // Pure compositor-thread inertial entry from incoming direction (up = next song enters from bottom +68px)
-    const entryY = direction === 'up' ? 68 : -68;
-    const textEntryY = direction === 'up' ? 20 : -20;
+    // Pure compositor-thread inertial entry from incoming direction (zero Group Opacity offscreen FBO on card wrapper)
+    const entryY = direction === 'up' ? 64 : -64;
+    const textEntryY = direction === 'up' ? 18 : -18;
 
     wrapper.style.transition = 'none';
     (wrapper.style as any).webkitTransition = 'none';
-    wrapper.style.transform = `translate3d(0, ${entryY}px, 0) scale(0.92)`;
-    (wrapper.style as any).webkitTransform = `translate3d(0, ${entryY}px, 0) scale(0.92)`;
-    wrapper.style.opacity = '0.18';
+    wrapper.style.transform = `translate3d(0, ${entryY}px, 0) scale(0.93)`;
+    (wrapper.style as any).webkitTransform = `translate3d(0, ${entryY}px, 0) scale(0.93)`;
 
     if (titleStage) {
       titleStage.style.transition = 'none';
@@ -380,20 +344,20 @@ export function useGestureEngine(options: GestureEngineOptions = {}) {
     cardSwitchRafId.current = requestAnimationFrame(() => {
       cardSwitchRafId.current = requestAnimationFrame(() => {
         cardSwitchRafId.current = null;
-        const enterSpring = `transform ${settleMs}ms cubic-bezier(0.16, 1, 0.3, 1), opacity ${fadeMs}ms cubic-bezier(0.16, 1, 0.3, 1)`;
-        wrapper.style.transition = enterSpring;
-        (wrapper.style as any).webkitTransition = enterSpring;
+        const cardEnterSpring = `transform ${settleMs}ms cubic-bezier(0.16, 1, 0.3, 1)`;
+        const textEnterSpring = `transform ${settleMs}ms cubic-bezier(0.16, 1, 0.3, 1), opacity ${fadeMs}ms cubic-bezier(0.16, 1, 0.3, 1)`;
+        wrapper.style.transition = cardEnterSpring;
+        (wrapper.style as any).webkitTransition = `-webkit-transform ${settleMs}ms cubic-bezier(0.16, 1, 0.3, 1)`;
         wrapper.style.transform = 'translate3d(0, 0, 0) scale(1)';
         (wrapper.style as any).webkitTransform = 'translate3d(0, 0, 0) scale(1)';
-        wrapper.style.opacity = '1';
 
         if (titleStage) {
-          titleStage.style.transition = enterSpring;
+          titleStage.style.transition = textEnterSpring;
           titleStage.style.transform = 'translate3d(0, 0, 0)';
           titleStage.style.opacity = '1';
         }
         if (quoteStage) {
-          quoteStage.style.transition = enterSpring;
+          quoteStage.style.transition = textEnterSpring;
           quoteStage.style.transform = 'translate3d(0, 0, 0)';
           quoteStage.style.opacity = '1';
         }
@@ -444,9 +408,12 @@ export function useGestureEngine(options: GestureEngineOptions = {}) {
 
     const state = useAppStore.getState();
     if (isAnyModalOpen(state)) {
+      if (lockedAxis.current === 'x') {
+        resetViewportTransition(activeSpace);
+      } else if (lockedAxis.current === 'y') {
+        animateCardVerticalSwitch(null);
+      }
       lockedAxis.current = null;
-      resetViewportTransition(activeSpace);
-      animateCardVerticalSwitch(null);
       return;
     }
 
@@ -456,6 +423,11 @@ export function useGestureEngine(options: GestureEngineOptions = {}) {
     const velocityX = diffX / duration; // px per ms
     const velocityY = diffY / duration;
     const totalDistance = Math.hypot(diffX, diffY);
+
+    // Pure tap without axis lock: skip any style mutation or spring reset on #viewport / #gallery-card-drag-stage
+    if (!lockedAxis.current && totalDistance <= 6) {
+      return;
+    }
 
     // If there was any noticeable drag movement (> 10px), suppress subsequent click events
     if (totalDistance > 10 || lockedAxis.current !== null) {
@@ -481,6 +453,10 @@ export function useGestureEngine(options: GestureEngineOptions = {}) {
           targetSpace = activeSpace - 1;
         }
       }
+      resetViewportTransition(targetSpace);
+      if (targetSpace !== activeSpace) {
+        setActiveSpace(targetSpace);
+      }
     } else if (lockedAxis.current === 'y' && enableYSwipeInMusic && activeSpace === 1) {
       const isFastFlickY = Math.abs(velocityY) > 0.18 && Math.abs(diffY) > 16;
       if (diffY < -26 || (diffY < 0 && isFastFlickY)) {
@@ -493,15 +469,9 @@ export function useGestureEngine(options: GestureEngineOptions = {}) {
         switchedDirection = 'down';
         prevSong('down');
         animateCardVerticalSwitch('down');
+      } else {
+        animateCardVerticalSwitch(null);
       }
-    }
-
-    if (!switchedDirection) {
-      animateCardVerticalSwitch(null);
-    }
-    resetViewportTransition(targetSpace);
-    if (targetSpace !== activeSpace) {
-      setActiveSpace(targetSpace);
     }
 
     lockedAxis.current = null;

@@ -4,7 +4,9 @@ import android.content.ContentValues;
 import android.content.Context;
 import android.content.Intent;
 import android.content.res.Configuration;
+import android.graphics.Canvas;
 import android.graphics.Color;
+import android.graphics.Paint;
 import android.hardware.display.DisplayManager;
 import android.net.Uri;
 import android.os.Build;
@@ -12,12 +14,19 @@ import android.os.Bundle;
 import android.os.Environment;
 import android.os.Handler;
 import android.os.Looper;
+import android.os.SystemClock;
 import android.provider.MediaStore;
 import android.util.Base64;
 import android.view.Display;
+import android.view.Gravity;
+import android.view.MotionEvent;
+import android.view.Surface;
+import android.view.SurfaceView;
 import android.view.View;
+import android.view.ViewGroup;
 import android.view.Window;
 import android.view.WindowManager;
+import android.widget.FrameLayout;
 import android.webkit.CookieManager;
 import android.webkit.JavascriptInterface;
 import android.webkit.WebResourceRequest;
@@ -39,12 +48,63 @@ public class MainActivity extends BridgeActivity {
     private volatile int lastSafeTopDp = 48;
     private boolean isWebViewConfigured = false;
     private DisplayManager.DisplayListener displayListener = null;
+    private HighFpsKeepAliveView highFpsKeepAliveView = null;
+
+    /**
+     * 1x1px Hardware RenderNode VSync Keep-Alive View.
+     * Defeats Xiaomi (HyperOS/MIUI), OPPO/OnePlus (ColorOS), and vivo/iQOO (OriginOS) 60Hz WebView whitelist throttling
+     * by keeping Android's native ViewRootImpl & RenderThread actively voting for 90Hz/120Hz/144Hz VSync during all touch & animation windows.
+     */
+    private static final class HighFpsKeepAliveView extends View {
+        private final Paint paint = new Paint();
+        private boolean toggle = false;
+        private long boostUntilMs = 0L;
+
+        public HighFpsKeepAliveView(Context context) {
+            super(context);
+            setClickable(false);
+            setFocusable(false);
+            setAlpha(0.004f);
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.JELLY_BEAN) {
+                setImportantForAccessibility(View.IMPORTANT_FOR_ACCESSIBILITY_NO);
+            }
+        }
+
+        public void triggerBoost(long durationMs) {
+            long target = SystemClock.uptimeMillis() + Math.min(Math.max(durationMs, 300L), 10000L);
+            if (target > boostUntilMs) {
+                boostUntilMs = target;
+            }
+            postInvalidateOnAnimation();
+        }
+
+        public void stopBoost() {
+            boostUntilMs = 0L;
+            setTranslationX(0.0f);
+        }
+
+        @Override
+        protected void onDraw(Canvas canvas) {
+            super.onDraw(canvas);
+            toggle = !toggle;
+            setTranslationX(toggle ? 0.05f : 0.0f);
+            paint.setColor(toggle ? 0x01FFFFFF : 0x01FEFEFE);
+            canvas.drawRect(0, 0, 1, 1, paint);
+            if (SystemClock.uptimeMillis() < boostUntilMs) {
+                postInvalidateOnAnimation();
+            }
+        }
+    }
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
 
         Window window = getWindow();
+        window.setFlags(
+            WindowManager.LayoutParams.FLAG_HARDWARE_ACCELERATED,
+            WindowManager.LayoutParams.FLAG_HARDWARE_ACCELERATED
+        );
 
         // 1. Edge-to-edge immersive display & transparent system bars
         WindowCompat.setDecorFitsSystemWindows(window, false);
@@ -60,11 +120,14 @@ public class MainActivity extends BridgeActivity {
             window.setAttributes(lp);
         }
 
-        // 3. Unlock 90Hz / 120Hz / 144Hz native display refresh rate matching active physical resolution
+        // 3. Attach 1x1px native RenderThread VSync Keep-Alive View for Chinese OEM ROMs (HyperOS/ColorOS/OriginOS)
+        attachHighFpsKeepAliveView();
+
+        // 4. Unlock 90Hz / 120Hz / 144Hz native display refresh rate matching active physical resolution
         applyHighRefreshRateMode();
         registerDynamicDisplayListener();
 
-        // 4. Accurately measure punch-hole / cutout depth and inject CSS safe-area & refresh rate variables
+        // 5. Accurately measure punch-hole / cutout depth and inject CSS safe-area & refresh rate variables
         ViewCompat.setOnApplyWindowInsetsListener(window.getDecorView(), (v, windowInsets) -> {
             int topInsetPx = 0;
             DisplayCutoutCompat cutout = windowInsets.getDisplayCutout();
@@ -82,15 +145,60 @@ public class MainActivity extends BridgeActivity {
             return windowInsets;
         });
 
-        // 5. Hardware acceleration, external scheme handling & WebView optimizations
+        // 6. Hardware acceleration, external scheme handling & WebView optimizations
         setupWebViewAndBridge();
         window.getDecorView().post(this::setupWebViewAndBridge);
+    }
+
+    private void attachHighFpsKeepAliveView() {
+        try {
+            if (highFpsKeepAliveView != null) return;
+            ViewGroup contentParent = findViewById(android.R.id.content);
+            if (contentParent != null) {
+                highFpsKeepAliveView = new HighFpsKeepAliveView(this);
+                FrameLayout.LayoutParams params = new FrameLayout.LayoutParams(1, 1, Gravity.TOP | Gravity.START);
+                contentParent.addView(highFpsKeepAliveView, params);
+                highFpsKeepAliveView.triggerBoost(3500L);
+            }
+        } catch (Exception ignored) {}
+    }
+
+    @Override
+    public boolean dispatchTouchEvent(MotionEvent ev) {
+        if (highFpsKeepAliveView != null && ev != null) {
+            int action = ev.getActionMasked();
+            if (action == MotionEvent.ACTION_DOWN
+                || action == MotionEvent.ACTION_MOVE
+                || action == MotionEvent.ACTION_POINTER_DOWN
+                || action == MotionEvent.ACTION_UP
+                || action == MotionEvent.ACTION_CANCEL) {
+                highFpsKeepAliveView.triggerBoost(2800L);
+            }
+        }
+        return super.dispatchTouchEvent(ev);
+    }
+
+    public void boostNativeFrameRate(long durationMs) {
+        if (highFpsKeepAliveView != null) {
+            highFpsKeepAliveView.post(() -> highFpsKeepAliveView.triggerBoost(durationMs));
+        }
     }
 
     @Override
     public void onResume() {
         super.onResume();
         applyHighRefreshRateMode();
+        if (highFpsKeepAliveView != null) {
+            highFpsKeepAliveView.triggerBoost(3000L);
+        }
+    }
+
+    @Override
+    public void onPause() {
+        if (highFpsKeepAliveView != null) {
+            highFpsKeepAliveView.stopBoost();
+        }
+        super.onPause();
     }
 
     @Override
@@ -98,6 +206,11 @@ public class MainActivity extends BridgeActivity {
         super.onWindowFocusChanged(hasFocus);
         if (hasFocus) {
             applyHighRefreshRateMode();
+            if (highFpsKeepAliveView != null) {
+                highFpsKeepAliveView.triggerBoost(2500L);
+            }
+        } else if (highFpsKeepAliveView != null) {
+            highFpsKeepAliveView.stopBoost();
         }
     }
 
@@ -245,9 +358,51 @@ public class MainActivity extends BridgeActivity {
                 detectedRefreshRate = 60;
             }
 
+            applyRequestedFrameRateOnViews(preferredRateHint);
             injectMetricsToWebView();
         } catch (Exception e) {
             // Ignore fallback
+        }
+    }
+
+    private void applyRequestedFrameRateOnViews(float targetFrameRate) {
+        try {
+            Window window = getWindow();
+            View decorView = window != null ? window.getDecorView() : null;
+            WebView webView = getBridge() != null ? getBridge().getWebView() : null;
+
+            // Android 14+ (API 34+): View.setRequestedFrameRate(float) explicit high-refresh vote for HyperOS/ColorOS/OriginOS
+            if (Build.VERSION.SDK_INT >= 34) {
+                try {
+                    Method setReqRate = View.class.getMethod("setRequestedFrameRate", float.class);
+                    if (decorView != null) setReqRate.invoke(decorView, targetFrameRate);
+                    if (webView != null) setReqRate.invoke(webView, targetFrameRate);
+                    if (highFpsKeepAliveView != null) setReqRate.invoke(highFpsKeepAliveView, targetFrameRate);
+                } catch (Exception ignored) {}
+            }
+
+            // Android 11+ (API 30+): if any child SurfaceView exists inside WebView hierarchy, vote high frame rate on its Surface
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R && decorView instanceof ViewGroup) {
+                applySurfaceViewFrameRateRecursive((ViewGroup) decorView, targetFrameRate);
+            }
+        } catch (Exception ignored) {}
+    }
+
+    private void applySurfaceViewFrameRateRecursive(ViewGroup group, float targetFrameRate) {
+        if (group == null || Build.VERSION.SDK_INT < Build.VERSION_CODES.R) return;
+        int count = group.getChildCount();
+        for (int i = 0; i < count; i++) {
+            View child = group.getChildAt(i);
+            if (child instanceof SurfaceView) {
+                try {
+                    Surface surface = ((SurfaceView) child).getHolder().getSurface();
+                    if (surface != null && surface.isValid()) {
+                        surface.setFrameRate(targetFrameRate, Surface.FRAME_RATE_COMPATIBILITY_DEFAULT);
+                    }
+                } catch (Exception ignored) {}
+            } else if (child instanceof ViewGroup) {
+                applySurfaceViewFrameRateRecursive((ViewGroup) child, targetFrameRate);
+            }
         }
     }
 
@@ -268,8 +423,11 @@ public class MainActivity extends BridgeActivity {
             WebView webView = bridge != null ? bridge.getWebView() : null;
             if (webView != null && bridge != null) {
                 isWebViewConfigured = true;
-                webView.setLayerType(View.LAYER_TYPE_HARDWARE, null);
+                // Crucial: Use LAYER_TYPE_NONE on WebView inside hardware-accelerated Window so Chromium tiles
+                // composite directly into the Window RenderNode without a redundant full-screen offscreen FBO copy!
+                webView.setLayerType(View.LAYER_TYPE_NONE, null);
                 webView.setOverScrollMode(View.OVER_SCROLL_NEVER);
+                applyRequestedFrameRateOnViews((float) detectedRefreshRate);
                 WebSettings webSettings = webView.getSettings();
                 webSettings.setDomStorageEnabled(true);
                 webSettings.setDatabaseEnabled(true);
@@ -566,6 +724,15 @@ public class MainActivity extends BridgeActivity {
                 }
             } catch (Exception ignored) {}
             return 48;
+        }
+
+        @JavascriptInterface
+        public void boostFrameRate(int durationMs) {
+            try {
+                if (context instanceof MainActivity) {
+                    ((MainActivity) context).boostNativeFrameRate((long) durationMs);
+                }
+            } catch (Exception ignored) {}
         }
     }
 }
