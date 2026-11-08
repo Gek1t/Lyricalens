@@ -1,7 +1,8 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import { Capacitor } from '@capacitor/core';
 import { useAppStore } from '../store/useAppStore';
 import { useGestureEngine } from '../hooks/useGestureEngine';
+import { initDisplayRefreshRateAdapter } from '../utils/displayRefreshRate';
 import { initializeDatabase, db } from '../db';
 import { SEED_SONGS } from '../db/seedData';
 import { prioritizeSongsByNotebook } from '../utils/vocabEngine';
@@ -19,7 +20,11 @@ import { PersonalHubModal } from './PersonalHub/PersonalHubModal';
 import { AmbientBackground } from './AmbientBackground';
 import { BottomNavDots } from './BottomNavDots';
 import { ToastNotification } from './ToastNotification';
-import { AnimatePresence } from 'motion/react';
+
+// Memoize the three primary space panels so modal state toggles or space switches never trigger cascade Virtual DOM re-renders
+const MemoizedARCameraPanel = React.memo(ARCameraPanel);
+const MemoizedMusicPlayerPanel = React.memo(MusicPlayerPanel);
+const MemoizedIELTSPanel = React.memo(IELTSPanel);
 
 export const ViewPager: React.FC = () => {
   const activeSpace = useAppStore(s => s.activeSpace);
@@ -27,14 +32,17 @@ export const ViewPager: React.FC = () => {
   const isWordSheetOpen = useAppStore(s => s.isWordSheetOpen);
   const wordViewMode = useAppStore(s => s.wordViewMode);
   const closeWordDetail = useAppStore(s => s.closeWordDetail);
-  const isFullscreenLyricsOpen = useAppStore(s => s.isFullscreenLyricsOpen);
-  const isPersonalHubOpen = useAppStore(s => s.isPersonalHubOpen);
   const isNotebookOpen = useAppStore(s => s.isNotebookOpen);
   const openNotebook = useAppStore(s => s.openNotebook);
   const closeNotebook = useAppStore(s => s.closeNotebook);
 
-  // Initialize Dexie.js database & load persisted songs prioritized by notebook words
+  const handleOpenNotebook = useCallback(() => {
+    openNotebook();
+  }, [openNotebook]);
+
+  // Initialize adaptive refresh rate detector (60Hz / 90Hz / 120Hz / 144Hz) + Dexie.js database
   useEffect(() => {
+    initDisplayRefreshRateAdapter();
     async function setupApp() {
       await initializeDatabase();
       try {
@@ -138,8 +146,8 @@ export const ViewPager: React.FC = () => {
             style={{
               transform: `translate3d(-${(activeSpace * 100) / 3}%, 0, 0)`,
               WebkitTransform: `translate3d(-${(activeSpace * 100) / 3}%, 0, 0)`,
-              transition: 'transform 420ms cubic-bezier(0.22, 1, 0.36, 1)',
-              WebkitTransition: '-webkit-transform 420ms cubic-bezier(0.22, 1, 0.36, 1)',
+              transition: 'transform var(--spring-duration-space, 380ms) cubic-bezier(0.22, 1, 0.36, 1)',
+              WebkitTransition: '-webkit-transform var(--spring-duration-space, 380ms) cubic-bezier(0.22, 1, 0.36, 1)',
               willChange: 'transform',
               WebkitBackfaceVisibility: 'hidden',
               backfaceVisibility: 'hidden',
@@ -153,8 +161,8 @@ export const ViewPager: React.FC = () => {
               className="absolute top-0 bottom-0 left-0 w-[56%] z-0 pointer-events-none hardware-accelerated"
               style={{
                 opacity: activeSpace === 0 ? 1 : 0,
-                transition: 'opacity 420ms cubic-bezier(0.22, 1, 0.36, 1)',
-                WebkitTransition: 'opacity 420ms cubic-bezier(0.22, 1, 0.36, 1)',
+                transition: 'opacity var(--spring-duration-space, 380ms) cubic-bezier(0.22, 1, 0.36, 1)',
+                WebkitTransition: 'opacity var(--spring-duration-space, 380ms) cubic-bezier(0.22, 1, 0.36, 1)',
                 willChange: 'opacity',
                 background:
                   'linear-gradient(to right, #0D0F12 0%, #0E1116 44%, rgba(14,17,22,0.97) 50%, rgba(15,18,24,0.90) 56%, rgba(16,20,27,0.78) 62%, rgba(18,22,30,0.62) 68%, rgba(20,24,32,0.44) 74%, rgba(22,26,34,0.27) 80%, rgba(24,28,36,0.14) 86%, rgba(26,29,37,0.06) 91%, rgba(28,30,38,0.015) 96%, rgba(28,30,38,0) 100%)',
@@ -166,8 +174,8 @@ export const ViewPager: React.FC = () => {
                 className="absolute top-0 bottom-0 left-0 w-[59.6%] bg-[#0D0F12] hardware-accelerated"
                 style={{
                   opacity: activeSpace === 0 ? 1 : 0,
-                  transition: 'opacity 380ms cubic-bezier(0.22, 1, 0.36, 1)',
-                  WebkitTransition: 'opacity 380ms cubic-bezier(0.22, 1, 0.36, 1)',
+                  transition: 'opacity var(--spring-duration-space, 380ms) cubic-bezier(0.22, 1, 0.36, 1)',
+                  WebkitTransition: 'opacity var(--spring-duration-space, 380ms) cubic-bezier(0.22, 1, 0.36, 1)',
                   willChange: 'opacity',
                 }}
               />
@@ -185,13 +193,13 @@ export const ViewPager: React.FC = () => {
                   transform: 'translate3d(0, 0, 0)',
                   WebkitTransform: 'translate3d(0, 0, 0)',
                   opacity: activeSpace === 0 ? 1 : 0.82,
-                  transition: 'transform 420ms cubic-bezier(0.22, 1, 0.36, 1), opacity 380ms cubic-bezier(0.22, 1, 0.36, 1)',
+                  transition: 'transform var(--spring-duration-space, 380ms) cubic-bezier(0.22, 1, 0.36, 1), opacity 350ms cubic-bezier(0.22, 1, 0.36, 1)',
                   WebkitBackfaceVisibility: 'hidden',
                   backfaceVisibility: 'hidden',
                   willChange: 'transform, opacity',
                 }}
               >
-                <ARCameraPanel onOpenNotebook={() => openNotebook()} />
+                <MemoizedARCameraPanel onOpenNotebook={handleOpenNotebook} />
               </div>
             </div>
 
@@ -207,13 +215,13 @@ export const ViewPager: React.FC = () => {
                   transform: 'translate3d(0, 0, 0)',
                   WebkitTransform: 'translate3d(0, 0, 0)',
                   opacity: activeSpace === 1 ? 1 : 0.82,
-                  transition: 'transform 420ms cubic-bezier(0.22, 1, 0.36, 1), opacity 380ms cubic-bezier(0.22, 1, 0.36, 1)',
+                  transition: 'transform var(--spring-duration-space, 380ms) cubic-bezier(0.22, 1, 0.36, 1), opacity 350ms cubic-bezier(0.22, 1, 0.36, 1)',
                   WebkitBackfaceVisibility: 'hidden',
                   backfaceVisibility: 'hidden',
                   willChange: 'transform, opacity',
                 }}
               >
-                <MusicPlayerPanel onOpenNotebook={() => openNotebook()} />
+                <MemoizedMusicPlayerPanel onOpenNotebook={handleOpenNotebook} />
               </div>
             </div>
 
@@ -229,13 +237,13 @@ export const ViewPager: React.FC = () => {
                   transform: 'translate3d(0, 0, 0)',
                   WebkitTransform: 'translate3d(0, 0, 0)',
                   opacity: activeSpace === 2 ? 1 : 0.82,
-                  transition: 'transform 420ms cubic-bezier(0.22, 1, 0.36, 1), opacity 380ms cubic-bezier(0.22, 1, 0.36, 1)',
+                  transition: 'transform var(--spring-duration-space, 380ms) cubic-bezier(0.22, 1, 0.36, 1), opacity 350ms cubic-bezier(0.22, 1, 0.36, 1)',
                   WebkitBackfaceVisibility: 'hidden',
                   backfaceVisibility: 'hidden',
                   willChange: 'transform, opacity',
                 }}
               >
-                <IELTSPanel onOpenNotebook={() => openNotebook()} />
+                <MemoizedIELTSPanel onOpenNotebook={handleOpenNotebook} />
               </div>
             </div>
           </div>

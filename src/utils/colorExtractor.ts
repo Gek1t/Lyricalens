@@ -39,15 +39,65 @@ function rgbToHsl(r: number, g: number, b: number): [number, number, number] {
 }
 
 function hslToHex(h: number, s: number, l: number): string {
-  s /= 100;
-  l /= 100;
-  const a = s * Math.min(l, 1 - l);
+  const safeH = (((Number.isFinite(h) ? h : 0) % 360) + 360) % 360;
+  const safeS = Math.max(0, Math.min(100, Number.isFinite(s) ? s : 0)) / 100;
+  const safeL = Math.max(0, Math.min(100, Number.isFinite(l) ? l : 0)) / 100;
+  const a = safeS * Math.min(safeL, 1 - safeL);
   const f = (n: number) => {
-    const k = (n + h / 30) % 12;
-    const color = l - a * Math.max(Math.min(k - 3, 9 - k, 1), -1);
-    return Math.round(255 * color).toString(16).padStart(2, '0');
+    const k = (n + safeH / 30) % 12;
+    const color = safeL - a * Math.max(Math.min(k - 3, 9 - k, 1), -1);
+    const byte = Math.max(0, Math.min(255, Math.round(255 * color)));
+    return byte.toString(16).padStart(2, '0');
   };
   return `#${f(0)}${f(8)}${f(4)}`;
+}
+
+/**
+ * Normalize any CSS color string (#RGB, #RRGGBB, #RRGGBBAA, rgb(), rgba(), hsl(), hsla())
+ * into a guaranteed-valid `rgba(r, g, b, alpha)` string so CSS radial-gradient stops never fail.
+ */
+export function withColorAlpha(color: string | undefined, alpha: number, fallbackHex: string = '#7C8F6E'): string {
+  const clampedAlpha = Math.max(0, Math.min(1, Number.isFinite(alpha) ? alpha : 1));
+  const parseRgb = (input: string): [number, number, number] | null => {
+    const str = (input || '').trim();
+    if (!str) return null;
+
+    if (str.startsWith('#')) {
+      const hex = str.slice(1).trim();
+      if (/^[0-9a-fA-F]{3}$/.test(hex)) {
+        const r = parseInt(hex[0] + hex[0], 16);
+        const g = parseInt(hex[1] + hex[1], 16);
+        const b = parseInt(hex[2] + hex[2], 16);
+        return [r, g, b];
+      }
+      if (/^[0-9a-fA-F]{6}$/.test(hex) || /^[0-9a-fA-F]{8}$/.test(hex)) {
+        const r = parseInt(hex.slice(0, 2), 16);
+        const g = parseInt(hex.slice(2, 4), 16);
+        const b = parseInt(hex.slice(4, 6), 16);
+        return [r, g, b];
+      }
+      return null;
+    }
+
+    const rgbMatch = str.match(/^rgba?\(\s*([\d.]+)\s*,\s*([\d.]+)\s*,\s*([\d.]+)/i);
+    if (rgbMatch) {
+      const r = Math.max(0, Math.min(255, Math.round(Number(rgbMatch[1]))));
+      const g = Math.max(0, Math.min(255, Math.round(Number(rgbMatch[2]))));
+      const b = Math.max(0, Math.min(255, Math.round(Number(rgbMatch[3]))));
+      return [r, g, b];
+    }
+
+    const hslMatch = str.match(/^hsla?\(\s*([-\d.]+)(?:deg)?\s*,\s*([\d.]+)%\s*,\s*([\d.]+)%/i);
+    if (hslMatch) {
+      const hex = hslToHex(Number(hslMatch[1]), Number(hslMatch[2]), Number(hslMatch[3]));
+      return parseRgb(hex);
+    }
+
+    return null;
+  };
+
+  const rgb = parseRgb(color || '') || parseRgb(fallbackHex) || [124, 143, 110];
+  return `rgba(${rgb[0]}, ${rgb[1]}, ${rgb[2]}, ${Number(clampedAlpha.toFixed(3))})`;
 }
 
 /**

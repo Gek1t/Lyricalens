@@ -3,11 +3,15 @@ package com.lyricalens.app;
 import android.content.ContentValues;
 import android.content.Context;
 import android.content.Intent;
+import android.content.res.Configuration;
 import android.graphics.Color;
+import android.hardware.display.DisplayManager;
 import android.net.Uri;
 import android.os.Build;
 import android.os.Bundle;
 import android.os.Environment;
+import android.os.Handler;
+import android.os.Looper;
 import android.provider.MediaStore;
 import android.util.Base64;
 import android.view.Display;
@@ -28,8 +32,14 @@ import com.getcapacitor.Bridge;
 import com.getcapacitor.BridgeActivity;
 import com.getcapacitor.BridgeWebViewClient;
 import java.io.OutputStream;
+import java.lang.reflect.Method;
 
 public class MainActivity extends BridgeActivity {
+    private volatile int detectedRefreshRate = 60;
+    private volatile int lastSafeTopDp = 48;
+    private boolean isWebViewConfigured = false;
+    private DisplayManager.DisplayListener displayListener = null;
+
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
@@ -50,39 +60,11 @@ public class MainActivity extends BridgeActivity {
             window.setAttributes(lp);
         }
 
-        // 3. Unlock 120Hz / highest available display refresh rate
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
-            try {
-                Display display = null;
-                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
-                    display = getDisplay();
-                }
-                if (display == null) {
-                    display = window.getWindowManager().getDefaultDisplay();
-                }
-                if (display != null) {
-                    Display.Mode[] modes = display.getSupportedModes();
-                    Display.Mode bestMode = null;
-                    float maxRefreshRate = 60.0f;
-                    for (Display.Mode mode : modes) {
-                        if (mode.getRefreshRate() > maxRefreshRate) {
-                            maxRefreshRate = mode.getRefreshRate();
-                            bestMode = mode;
-                        }
-                    }
-                    if (bestMode != null) {
-                        WindowManager.LayoutParams lp = window.getAttributes();
-                        lp.preferredDisplayModeId = bestMode.getModeId();
-                        lp.preferredRefreshRate = maxRefreshRate;
-                        window.setAttributes(lp);
-                    }
-                }
-            } catch (Exception e) {
-                // Ignore fallback
-            }
-        }
+        // 3. Unlock 90Hz / 120Hz / 144Hz native display refresh rate matching active physical resolution
+        applyHighRefreshRateMode();
+        registerDynamicDisplayListener();
 
-        // 4. Accurately measure punch-hole / cutout depth and inject CSS safe-area variables
+        // 4. Accurately measure punch-hole / cutout depth and inject CSS safe-area & refresh rate variables
         ViewCompat.setOnApplyWindowInsetsListener(window.getDecorView(), (v, windowInsets) -> {
             int topInsetPx = 0;
             DisplayCutoutCompat cutout = windowInsets.getDisplayCutout();
@@ -95,17 +77,8 @@ public class MainActivity extends BridgeActivity {
             topInsetPx = Math.max(topInsetPx, barInsets.top);
 
             float density = getResources().getDisplayMetrics().density;
-            final int topDp = Math.max((int) (topInsetPx / density), 48);
-
-            WebView webView = getBridge() != null ? getBridge().getWebView() : null;
-            if (webView != null) {
-                webView.post(() -> {
-                    webView.evaluateJavascript(
-                        "document.documentElement.style.setProperty('--android-safe-top', '" + topDp + "px');",
-                        null
-                    );
-                });
-            }
+            lastSafeTopDp = Math.max((int) (topInsetPx / density), 48);
+            injectMetricsToWebView();
             return windowInsets;
         });
 
@@ -114,11 +87,187 @@ public class MainActivity extends BridgeActivity {
         window.getDecorView().post(this::setupWebViewAndBridge);
     }
 
+    @Override
+    public void onResume() {
+        super.onResume();
+        applyHighRefreshRateMode();
+    }
+
+    @Override
+    public void onWindowFocusChanged(boolean hasFocus) {
+        super.onWindowFocusChanged(hasFocus);
+        if (hasFocus) {
+            applyHighRefreshRateMode();
+        }
+    }
+
+    @Override
+    public void onConfigurationChanged(Configuration newConfig) {
+        super.onConfigurationChanged(newConfig);
+        applyHighRefreshRateMode();
+    }
+
+    @Override
+    public void onDestroy() {
+        if (displayListener != null && Build.VERSION.SDK_INT >= Build.VERSION_CODES.JELLY_BEAN_MR1) {
+            try {
+                DisplayManager dm = (DisplayManager) getSystemService(Context.DISPLAY_SERVICE);
+                if (dm != null) {
+                    dm.unregisterDisplayListener(displayListener);
+                }
+            } catch (Exception ignored) {}
+            displayListener = null;
+        }
+        super.onDestroy();
+    }
+
+    private void registerDynamicDisplayListener() {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.JELLY_BEAN_MR1 || displayListener != null) {
+            return;
+        }
+        try {
+            DisplayManager dm = (DisplayManager) getSystemService(Context.DISPLAY_SERVICE);
+            if (dm != null) {
+                displayListener = new DisplayManager.DisplayListener() {
+                    @Override
+                    public void onDisplayAdded(int displayId) {}
+
+                    @Override
+                    public void onDisplayRemoved(int displayId) {}
+
+                    @Override
+                    public void onDisplayChanged(int displayId) {
+                        applyHighRefreshRateMode();
+                    }
+                };
+                dm.registerDisplayListener(displayListener, new Handler(Looper.getMainLooper()));
+            }
+        } catch (Exception ignored) {}
+    }
+
+    private void injectMetricsToWebView() {
+        try {
+            WebView webView = getBridge() != null ? getBridge().getWebView() : null;
+            if (webView == null) return;
+            final int fps = detectedRefreshRate;
+            final int topDp = lastSafeTopDp;
+            final String budgetMs = String.format(java.util.Locale.US, "%.2fms", 1000.0f / Math.max(60, fps));
+            webView.post(() -> {
+                try {
+                    webView.evaluateJavascript(
+                        "window.__DEVICE_REFRESH_RATE__ = " + fps + ";" +
+                        "if (window.document && window.document.documentElement) {" +
+                        "  var r = window.document.documentElement;" +
+                        "  r.style.setProperty('--android-safe-top', '" + topDp + "px');" +
+                        "  r.style.setProperty('--device-fps', '" + fps + "');" +
+                        "  r.style.setProperty('--frame-budget-ms', '" + budgetMs + "');" +
+                        "  r.dataset.refreshRate = '" + fps + "';" +
+                        "}",
+                        null
+                    );
+                } catch (Exception ignored) {}
+            });
+        } catch (Exception ignored) {}
+    }
+
+    private void applyHighRefreshRateMode() {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.M) {
+            return;
+        }
+        try {
+            Window window = getWindow();
+            if (window == null) return;
+
+            // Android 14/15 (API 34+): disable frame rate power-saving throttling on WebView window
+            if (Build.VERSION.SDK_INT >= 34) {
+                try {
+                    Method m = Window.class.getMethod("setFrameRatePowerSavingsBalanced", boolean.class);
+                    m.invoke(window, false);
+                } catch (Exception ignored) {}
+            }
+
+            Display display = null;
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+                display = getDisplay();
+            }
+            if (display == null) {
+                display = window.getWindowManager().getDefaultDisplay();
+            }
+            if (display == null) return;
+
+            Display.Mode activeMode = display.getMode();
+            Display.Mode[] modes = display.getSupportedModes();
+            Display.Mode bestSameResMode = null;
+            float maxSameResRate = 0.0f;
+            float maxOverallRate = activeMode != null ? activeMode.getRefreshRate() : 60.0f;
+
+            for (Display.Mode mode : modes) {
+                float rate = mode.getRefreshRate();
+                if (activeMode != null &&
+                    mode.getPhysicalWidth() == activeMode.getPhysicalWidth() &&
+                    mode.getPhysicalHeight() == activeMode.getPhysicalHeight()) {
+                    if (rate > maxSameResRate) {
+                        maxSameResRate = rate;
+                        bestSameResMode = mode;
+                    }
+                }
+                if (rate > maxOverallRate) {
+                    maxOverallRate = rate;
+                }
+            }
+
+            // Strictly lock preferredDisplayModeId within the active physical resolution to avoid black-screen resolution switches
+            float targetRate = maxSameResRate > 0.0f ? maxSameResRate : maxOverallRate;
+            float preferredRateHint = Math.max(targetRate, maxOverallRate);
+
+            WindowManager.LayoutParams lp = window.getAttributes();
+            boolean changed = false;
+            if (bestSameResMode != null && lp.preferredDisplayModeId != bestSameResMode.getModeId()) {
+                lp.preferredDisplayModeId = bestSameResMode.getModeId();
+                changed = true;
+            }
+            if (Math.abs(lp.preferredRefreshRate - preferredRateHint) > 0.5f) {
+                lp.preferredRefreshRate = preferredRateHint;
+                changed = true;
+            }
+            if (changed) {
+                window.setAttributes(lp);
+            }
+
+            int roundedFps = Math.round(targetRate);
+            if (roundedFps >= 132) {
+                detectedRefreshRate = 144;
+            } else if (roundedFps >= 105) {
+                detectedRefreshRate = 120;
+            } else if (roundedFps >= 75) {
+                detectedRefreshRate = 90;
+            } else {
+                detectedRefreshRate = 60;
+            }
+
+            injectMetricsToWebView();
+        } catch (Exception e) {
+            // Ignore fallback
+        }
+    }
+
+    public int getDetectedRefreshRate() {
+        return detectedRefreshRate;
+    }
+
+    public int getLastSafeTopDp() {
+        return lastSafeTopDp;
+    }
+
     private void setupWebViewAndBridge() {
+        if (isWebViewConfigured) {
+            return;
+        }
         try {
             Bridge bridge = getBridge();
             WebView webView = bridge != null ? bridge.getWebView() : null;
-            if (webView != null) {
+            if (webView != null && bridge != null) {
+                isWebViewConfigured = true;
                 webView.setLayerType(View.LAYER_TYPE_HARDWARE, null);
                 webView.setOverScrollMode(View.OVER_SCROLL_NEVER);
                 WebSettings webSettings = webView.getSettings();
@@ -132,37 +281,49 @@ public class MainActivity extends BridgeActivity {
                     cookieManager.setAcceptThirdPartyCookies(webView, true);
                 }
 
-                // Register custom BridgeWebViewClient to reliably intercept and handle external schemes (mqq://, qqmusic://, intent://, etc.)
-                if (bridge != null) {
-                    bridge.setWebViewClient(new BridgeWebViewClient(bridge) {
-                        @Override
-                        public boolean shouldOverrideUrlLoading(WebView view, WebResourceRequest request) {
-                            if (request != null && request.getUrl() != null) {
-                                Uri reqUri = request.getUrl();
-                                if (isExternalScheme(reqUri)) {
-                                    handleExternalUri(reqUri);
-                                    return true; // Crucial: absorb external scheme so WebView never displays net::ERR_UNKNOWN_URL_SCHEME
-                                }
-                            }
-                            return super.shouldOverrideUrlLoading(view, request);
-                        }
-
-                        @Override
-                        public boolean shouldOverrideUrlLoading(WebView view, String url) {
-                            if (url != null && !url.trim().isEmpty()) {
-                                Uri parsedUri = Uri.parse(url);
-                                if (isExternalScheme(parsedUri)) {
-                                    handleExternalUri(parsedUri);
-                                    return true;
-                                }
-                            }
-                            return super.shouldOverrideUrlLoading(view, url);
-                        }
-                    });
-                }
-
                 // Register Native MediaStore Image Saver Bridge for seamless QR saving to Gallery & App Scheme Invocation
                 webView.addJavascriptInterface(new AndroidNativeMediaBridge(MainActivity.this), "AndroidNativeMedia");
+
+                // Register custom BridgeWebViewClient to reliably intercept external schemes and replay DOM metrics after navigation commit
+                bridge.setWebViewClient(new BridgeWebViewClient(bridge) {
+                    @Override
+                    public void onPageCommitVisible(WebView view, String url) {
+                        super.onPageCommitVisible(view, url);
+                        injectMetricsToWebView();
+                    }
+
+                    @Override
+                    public void onPageFinished(WebView view, String url) {
+                        super.onPageFinished(view, url);
+                        injectMetricsToWebView();
+                    }
+
+                    @Override
+                    public boolean shouldOverrideUrlLoading(WebView view, WebResourceRequest request) {
+                        if (request != null && request.getUrl() != null) {
+                            Uri reqUri = request.getUrl();
+                            if (isExternalScheme(reqUri)) {
+                                handleExternalUri(reqUri);
+                                return true; // Crucial: absorb external scheme so WebView never displays net::ERR_UNKNOWN_URL_SCHEME
+                            }
+                        }
+                        return super.shouldOverrideUrlLoading(view, request);
+                    }
+
+                    @Override
+                    public boolean shouldOverrideUrlLoading(WebView view, String url) {
+                        if (url != null && !url.trim().isEmpty()) {
+                            Uri parsedUri = Uri.parse(url);
+                            if (isExternalScheme(parsedUri)) {
+                                handleExternalUri(parsedUri);
+                                return true;
+                            }
+                        }
+                        return super.shouldOverrideUrlLoading(view, url);
+                    }
+                });
+
+                injectMetricsToWebView();
             }
         } catch (Exception e) {
             // Ignore
@@ -385,6 +546,26 @@ public class MainActivity extends BridgeActivity {
             } catch (Exception e) {
                 return "";
             }
+        }
+
+        @JavascriptInterface
+        public int getDeviceRefreshRate() {
+            try {
+                if (context instanceof MainActivity) {
+                    return ((MainActivity) context).getDetectedRefreshRate();
+                }
+            } catch (Exception ignored) {}
+            return 60;
+        }
+
+        @JavascriptInterface
+        public int getSafeTopDp() {
+            try {
+                if (context instanceof MainActivity) {
+                    return ((MainActivity) context).getLastSafeTopDp();
+                }
+            } catch (Exception ignored) {}
+            return 48;
         }
     }
 }

@@ -1,9 +1,21 @@
 import { useRef, useEffect, useCallback } from 'react';
 import { useAppStore } from '../store/useAppStore';
+import { getDisplayRefreshRateState } from '../utils/displayRefreshRate';
 
 interface GestureEngineOptions {
   enableXSwipe?: boolean;
   enableYSwipeInMusic?: boolean;
+}
+
+interface CachedGestureDOM {
+  viewport: HTMLElement | null;
+  arBackdrop: HTMLElement | null;
+  arSolidCore: HTMLElement | null;
+  stages: (HTMLElement | null)[];
+  cardWrapper: HTMLElement | null;
+  titleStage: HTMLElement | null;
+  quoteStage: HTMLElement | null;
+  containerWidth: number;
 }
 
 function isAnyModalOpen(state: ReturnType<typeof useAppStore.getState>): boolean {
@@ -41,6 +53,43 @@ export function useGestureEngine(options: GestureEngineOptions = {}) {
   const lockedAxis = useRef<'x' | 'y' | null>(null);
   const suppressClickUntil = useRef(0);
 
+  // VSync frame-coalescing state (never cancel mid-frame on 240Hz touch sampling; always latch latest delta)
+  const rafId = useRef<number | null>(null);
+  const cardRafId = useRef<number | null>(null);
+  const cardSwitchRafId = useRef<number | null>(null);
+  const pendingDiffX = useRef(0);
+  const pendingDiffY = useRef(0);
+
+  const domCache = useRef<CachedGestureDOM>({
+    viewport: null,
+    arBackdrop: null,
+    arSolidCore: null,
+    stages: [null, null, null],
+    cardWrapper: null,
+    titleStage: null,
+    quoteStage: null,
+    containerWidth: 412,
+  });
+
+  const refreshDomCache = useCallback(() => {
+    const viewport = document.getElementById('viewpager-viewport');
+    const containerWidth = viewport?.parentElement?.clientWidth || window.innerWidth || 412;
+    domCache.current = {
+      viewport,
+      arBackdrop: document.getElementById('ar-ambient-backdrop'),
+      arSolidCore: document.getElementById('ar-solid-core'),
+      stages: [
+        document.getElementById('stage-ar-space'),
+        document.getElementById('stage-music-space'),
+        document.getElementById('stage-ielts-space'),
+      ],
+      cardWrapper: document.getElementById('gallery-card-drag-stage'),
+      titleStage: document.getElementById('gallery-title-stage'),
+      quoteStage: document.getElementById('gallery-quote-stage'),
+      containerWidth,
+    };
+  }, []);
+
   const handleTouchStart = useCallback((e: TouchEvent | MouseEvent) => {
     const state = useAppStore.getState();
     // If any modal sheet, fullscreen lyrics, or overlay is open, do not intercept main viewpager swipes
@@ -62,126 +111,153 @@ export function useGestureEngine(options: GestureEngineOptions = {}) {
       return;
     }
 
+    // Cancel any pending double-rAF card entry animation if user touches the screen mid-flight
+    if (cardSwitchRafId.current !== null) {
+      cancelAnimationFrame(cardSwitchRafId.current);
+      cardSwitchRafId.current = null;
+    }
+
+    // Cache DOM elements & container dimensions once at touchstart (zero layout reads during touchmove)
+    refreshDomCache();
+
     const point = 'touches' in e ? e.touches[0] : e;
     startX.current = point.clientX;
     startY.current = point.clientY;
-    startTime.current = Date.now();
+    startTime.current = performance.now();
     currentX.current = point.clientX;
     currentY.current = point.clientY;
     isDragging.current = true;
     lockedAxis.current = null;
-  }, []);
-
-  const rafId = useRef<number | null>(null);
-  const cardRafId = useRef<number | null>(null);
+  }, [refreshDomCache]);
 
   const updateViewportTransform = useCallback((diffX: number) => {
+    pendingDiffX.current = diffX;
     if (rafId.current !== null) {
-      cancelAnimationFrame(rafId.current);
+      // Coalesce high-frequency touchmove samples (e.g. 240Hz) into the next 90Hz/120Hz VSync tick
+      return;
     }
     rafId.current = requestAnimationFrame(() => {
-      const el = document.getElementById('viewpager-viewport');
+      rafId.current = null;
+      if (!domCache.current.viewport) {
+        refreshDomCache();
+      }
+      const cache = domCache.current;
+      const el = cache.viewport;
       if (!el) return;
-      el.style.transition = 'none';
-      (el.style as any).webkitTransition = 'none';
-      const containerWidth = el.parentElement?.clientWidth || window.innerWidth || 412;
-      const dragRatio = Math.min(1, Math.abs(diffX) / containerWidth);
-      const dragPercent = (diffX / containerWidth) * (100 / 3);
+
+      const latestDiffX = pendingDiffX.current;
+      const containerWidth = cache.containerWidth || 412;
+      const dragRatio = Math.min(1, Math.abs(latestDiffX) / containerWidth);
+      const dragPercent = (latestDiffX / containerWidth) * (100 / 3);
       const basePercent = -(activeSpace * 100) / 3;
       let finalPercent = basePercent + dragPercent;
       // Soft elastic rubber-band resistance at boundary edges
-      if ((activeSpace === 0 && diffX > 0) || (activeSpace === 2 && diffX < 0)) {
+      if ((activeSpace === 0 && latestDiffX > 0) || (activeSpace === 2 && latestDiffX < 0)) {
         finalPercent = basePercent + dragPercent * 0.28;
       }
-      el.style.transform = `translate3d(${finalPercent}%, 0, 0)`;
-      (el.style as any).webkitTransform = `translate3d(${finalPercent}%, 0, 0)`;
+
+      const transformStr = `translate3d(${finalPercent.toFixed(4)}%, 0, 0)`;
+      if (el.style.transition !== 'none') {
+        el.style.transition = 'none';
+        (el.style as any).webkitTransition = 'none';
+      }
+      el.style.transform = transformStr;
+      (el.style as any).webkitTransform = transformStr;
 
       // Real-time wide S-curve dark camera atmosphere interpolation between AR Space (0) and Music Space (1)
-      const arBackdrop = document.getElementById('ar-ambient-backdrop');
-      const arSolidCore = document.getElementById('ar-solid-core');
+      const arBackdrop = cache.arBackdrop;
+      const arSolidCore = cache.arSolidCore;
       if (arBackdrop) {
-        arBackdrop.style.transition = 'none';
-        (arBackdrop.style as any).webkitTransition = 'none';
+        if (arBackdrop.style.transition !== 'none') {
+          arBackdrop.style.transition = 'none';
+          (arBackdrop.style as any).webkitTransition = 'none';
+        }
         let arOpacity = activeSpace === 0 ? 1 : 0;
-        if (activeSpace === 0 && diffX < 0) {
-          // Smooth ease-out keep-alive so AR stays rich dark while visible and melts away as it leaves
+        if (activeSpace === 0 && latestDiffX < 0) {
           arOpacity = Math.max(0, 1 - Math.pow(dragRatio, 1.35) * 0.65);
-        } else if (activeSpace === 1 && diffX > 0) {
-          // Quickly bring in the wide S-curve dark backdrop under the incoming AR panel
+        } else if (activeSpace === 1 && latestDiffX > 0) {
           arOpacity = Math.min(1, 0.35 + Math.pow(dragRatio, 0.75) * 0.65);
         }
         arBackdrop.style.opacity = arOpacity.toFixed(3);
       }
       if (arSolidCore) {
-        arSolidCore.style.transition = 'none';
-        (arSolidCore.style as any).webkitTransition = 'none';
+        if (arSolidCore.style.transition !== 'none') {
+          arSolidCore.style.transition = 'none';
+          (arSolidCore.style as any).webkitTransition = 'none';
+        }
         let coreOpacity = activeSpace === 0 ? 1 : 0;
-        if (activeSpace === 0 && diffX < 0) {
+        if (activeSpace === 0 && latestDiffX < 0) {
           coreOpacity = Math.max(0, 1 - Math.min(1, dragRatio * 2.4));
-        } else if (activeSpace === 1 && diffX > 0) {
+        } else if (activeSpace === 1 && latestDiffX > 0) {
           coreOpacity = Math.max(0, (dragRatio - 0.65) / 0.35);
         }
         arSolidCore.style.opacity = coreOpacity.toFixed(3);
       }
 
       // Real-time opacity interpolation across inner stages without pushing buttons into panel clip edges
-      const stages = [
-        document.getElementById('stage-ar-space'),
-        document.getElementById('stage-music-space'),
-        document.getElementById('stage-ielts-space')
-      ];
-      const targetIdx = diffX < 0 ? Math.min(2, activeSpace + 1) : Math.max(0, activeSpace - 1);
-      stages.forEach((st, idx) => {
-        if (!st) return;
-        st.style.transition = 'none';
-        (st.style as any).webkitTransition = 'none';
-        st.style.transform = 'translate3d(0, 0, 0)';
-        (st.style as any).webkitTransform = 'translate3d(0, 0, 0)';
+      const stages = cache.stages;
+      const targetIdx = latestDiffX < 0 ? Math.min(2, activeSpace + 1) : Math.max(0, activeSpace - 1);
+      for (let idx = 0; idx < stages.length; idx++) {
+        const st = stages[idx];
+        if (!st) continue;
+        if (st.style.transition !== 'none') {
+          st.style.transition = 'none';
+          (st.style as any).webkitTransition = 'none';
+        }
         if (idx === activeSpace) {
           const o = 1 - dragRatio * 0.18;
           st.style.opacity = o.toFixed(3);
         } else if (idx === targetIdx) {
           const o = 0.82 + dragRatio * 0.18;
           st.style.opacity = o.toFixed(3);
+        } else {
+          st.style.opacity = '0.82';
         }
-      });
+      }
     });
-  }, [activeSpace]);
+  }, [activeSpace, refreshDomCache]);
 
   const resetViewportTransition = useCallback((targetSpace: number) => {
     if (rafId.current !== null) {
       cancelAnimationFrame(rafId.current);
       rafId.current = null;
     }
-    const el = document.getElementById('viewpager-viewport');
+    const cache = domCache.current;
+    const el = cache.viewport || document.getElementById('viewpager-viewport');
     if (!el) return;
-    el.style.transition = 'transform 420ms cubic-bezier(0.22, 1, 0.36, 1)';
-    (el.style as any).webkitTransition = '-webkit-transform 420ms cubic-bezier(0.22, 1, 0.36, 1)';
+
+    const { fps } = getDisplayRefreshRateState();
+    const durationMs = fps >= 120 ? 360 : fps >= 90 ? 380 : 400;
+    const opacityDurationMs = fps >= 120 ? 330 : fps >= 90 ? 350 : 370;
+    const curve = 'cubic-bezier(0.22, 1, 0.36, 1)';
+
+    el.style.transition = `transform ${durationMs}ms ${curve}`;
+    (el.style as any).webkitTransition = `-webkit-transform ${durationMs}ms ${curve}`;
     el.style.transform = `translate3d(-${(targetSpace * 100) / 3}%, 0, 0)`;
     (el.style as any).webkitTransform = `translate3d(-${(targetSpace * 100) / 3}%, 0, 0)`;
 
-    const arBackdrop = document.getElementById('ar-ambient-backdrop');
+    const arBackdrop = cache.arBackdrop || document.getElementById('ar-ambient-backdrop');
     if (arBackdrop) {
-      arBackdrop.style.transition = 'opacity 420ms cubic-bezier(0.22, 1, 0.36, 1)';
-      (arBackdrop.style as any).webkitTransition = 'opacity 420ms cubic-bezier(0.22, 1, 0.36, 1)';
+      arBackdrop.style.transition = `opacity ${durationMs}ms ${curve}`;
+      (arBackdrop.style as any).webkitTransition = `opacity ${durationMs}ms ${curve}`;
       arBackdrop.style.opacity = targetSpace === 0 ? '1' : '0';
     }
-    const arSolidCore = document.getElementById('ar-solid-core');
+    const arSolidCore = cache.arSolidCore || document.getElementById('ar-solid-core');
     if (arSolidCore) {
-      arSolidCore.style.transition = 'opacity 380ms cubic-bezier(0.22, 1, 0.36, 1)';
-      (arSolidCore.style as any).webkitTransition = 'opacity 380ms cubic-bezier(0.22, 1, 0.36, 1)';
+      arSolidCore.style.transition = `opacity ${opacityDurationMs}ms ${curve}`;
+      (arSolidCore.style as any).webkitTransition = `opacity ${opacityDurationMs}ms ${curve}`;
       arSolidCore.style.opacity = targetSpace === 0 ? '1' : '0';
     }
 
     const stages = [
-      document.getElementById('stage-ar-space'),
-      document.getElementById('stage-music-space'),
-      document.getElementById('stage-ielts-space')
+      cache.stages[0] || document.getElementById('stage-ar-space'),
+      cache.stages[1] || document.getElementById('stage-music-space'),
+      cache.stages[2] || document.getElementById('stage-ielts-space')
     ];
     stages.forEach((st, idx) => {
       if (!st) return;
-      st.style.transition = 'transform 420ms cubic-bezier(0.22, 1, 0.36, 1), opacity 380ms cubic-bezier(0.22, 1, 0.36, 1)';
-      (st.style as any).webkitTransition = '-webkit-transform 420ms cubic-bezier(0.22, 1, 0.36, 1), opacity 380ms cubic-bezier(0.22, 1, 0.36, 1)';
+      st.style.transition = `transform ${durationMs}ms ${curve}, opacity ${opacityDurationMs}ms ${curve}`;
+      (st.style as any).webkitTransition = `-webkit-transform ${durationMs}ms ${curve}, opacity ${opacityDurationMs}ms ${curve}`;
       const isTarget = idx === targetSpace;
       st.style.transform = 'translate3d(0, 0, 0)';
       (st.style as any).webkitTransform = 'translate3d(0, 0, 0)';
@@ -190,35 +266,49 @@ export function useGestureEngine(options: GestureEngineOptions = {}) {
   }, []);
 
   const updateCardVerticalTransform = useCallback((diffY: number) => {
+    if (cardSwitchRafId.current !== null) {
+      cancelAnimationFrame(cardSwitchRafId.current);
+      cardSwitchRafId.current = null;
+    }
+    pendingDiffY.current = diffY;
     if (cardRafId.current !== null) {
-      cancelAnimationFrame(cardRafId.current);
+      return;
     }
     cardRafId.current = requestAnimationFrame(() => {
-      const wrapper = document.getElementById('gallery-card-drag-stage');
-      const titleStage = document.getElementById('gallery-title-stage');
-      const quoteStage = document.getElementById('gallery-quote-stage');
+      cardRafId.current = null;
+      const cache = domCache.current;
+      const wrapper = cache.cardWrapper || document.getElementById('gallery-card-drag-stage');
       if (!wrapper) return;
+      const titleStage = cache.titleStage;
+      const quoteStage = cache.quoteStage;
 
-      wrapper.style.transition = 'none';
-      (wrapper.style as any).webkitTransition = 'none';
+      const latestDiffY = pendingDiffY.current;
+      if (wrapper.style.transition !== 'none') {
+        wrapper.style.transition = 'none';
+        (wrapper.style as any).webkitTransition = 'none';
+      }
       // Responsive 1:1 tactile tracking with gentle progressive resistance only at extremes
-      const dampedY = diffY * 0.78;
-      const progress = Math.min(1, Math.abs(diffY) / 150);
+      const dampedY = latestDiffY * 0.78;
+      const progress = Math.min(1, Math.abs(latestDiffY) / 150);
       const scale = 1 - progress * 0.055;
       const opacity = 1 - progress * 0.32;
-      wrapper.style.transform = `translate3d(0, ${dampedY.toFixed(2)}px, 0) scale(${scale.toFixed(4)})`;
-      (wrapper.style as any).webkitTransform = `translate3d(0, ${dampedY.toFixed(2)}px, 0) scale(${scale.toFixed(4)})`;
+      const cardTransform = `translate3d(0, ${dampedY.toFixed(2)}px, 0) scale(${scale.toFixed(4)})`;
+      wrapper.style.transform = cardTransform;
+      (wrapper.style as any).webkitTransform = cardTransform;
       wrapper.style.opacity = opacity.toFixed(3);
 
+      const textTransform = `translate3d(0, ${(dampedY * 0.35).toFixed(2)}px, 0)`;
+      const textOpacity = (1 - progress * 0.55).toFixed(3);
+
       if (titleStage) {
-        titleStage.style.transition = 'none';
-        titleStage.style.transform = `translate3d(0, ${(dampedY * 0.35).toFixed(2)}px, 0)`;
-        titleStage.style.opacity = (1 - progress * 0.55).toFixed(3);
+        if (titleStage.style.transition !== 'none') titleStage.style.transition = 'none';
+        titleStage.style.transform = textTransform;
+        titleStage.style.opacity = textOpacity;
       }
       if (quoteStage) {
-        quoteStage.style.transition = 'none';
-        quoteStage.style.transform = `translate3d(0, ${(dampedY * 0.35).toFixed(2)}px, 0)`;
-        quoteStage.style.opacity = (1 - progress * 0.55).toFixed(3);
+        if (quoteStage.style.transition !== 'none') quoteStage.style.transition = 'none';
+        quoteStage.style.transform = textTransform;
+        quoteStage.style.opacity = textOpacity;
       }
     });
   }, []);
@@ -228,14 +318,24 @@ export function useGestureEngine(options: GestureEngineOptions = {}) {
       cancelAnimationFrame(cardRafId.current);
       cardRafId.current = null;
     }
-    const wrapper = document.getElementById('gallery-card-drag-stage');
-    const titleStage = document.getElementById('gallery-title-stage');
-    const quoteStage = document.getElementById('gallery-quote-stage');
+    if (cardSwitchRafId.current !== null) {
+      cancelAnimationFrame(cardSwitchRafId.current);
+      cardSwitchRafId.current = null;
+    }
+
+    const cache = domCache.current;
+    const wrapper = cache.cardWrapper || document.getElementById('gallery-card-drag-stage');
+    const titleStage = cache.titleStage || document.getElementById('gallery-title-stage');
+    const quoteStage = cache.quoteStage || document.getElementById('gallery-quote-stage');
     if (!wrapper) return;
+
+    const { fps } = getDisplayRefreshRateState();
+    const settleMs = fps >= 120 ? 330 : fps >= 90 ? 350 : 370;
+    const fadeMs = fps >= 120 ? 240 : fps >= 90 ? 260 : 280;
 
     if (!direction) {
       // Smooth spring snapback when swipe didn't reach threshold
-      const springCss = 'transform 340ms cubic-bezier(0.22, 1, 0.36, 1), opacity 260ms ease-out';
+      const springCss = `transform ${settleMs}ms cubic-bezier(0.22, 1, 0.36, 1), opacity ${fadeMs}ms ease-out`;
       wrapper.style.transition = springCss;
       (wrapper.style as any).webkitTransition = springCss;
       wrapper.style.transform = 'translate3d(0, 0, 0) scale(1)';
@@ -255,9 +355,9 @@ export function useGestureEngine(options: GestureEngineOptions = {}) {
       return;
     }
 
-    // Pure compositor-thread inertial entry from incoming direction (up = next song enters from bottom +72px)
-    const entryY = direction === 'up' ? 72 : -72;
-    const textEntryY = direction === 'up' ? 22 : -22;
+    // Pure compositor-thread inertial entry from incoming direction (up = next song enters from bottom +68px)
+    const entryY = direction === 'up' ? 68 : -68;
+    const textEntryY = direction === 'up' ? 20 : -20;
 
     wrapper.style.transition = 'none';
     (wrapper.style as any).webkitTransition = 'none';
@@ -276,25 +376,29 @@ export function useGestureEngine(options: GestureEngineOptions = {}) {
       quoteStage.style.opacity = '0';
     }
 
-    // Flush style on compositor and immediately glide to resting state at 120fps
-    void wrapper.offsetHeight;
-    const enterSpring = 'transform 380ms cubic-bezier(0.16, 1, 0.3, 1), opacity 280ms cubic-bezier(0.16, 1, 0.3, 1)';
-    wrapper.style.transition = enterSpring;
-    (wrapper.style as any).webkitTransition = enterSpring;
-    wrapper.style.transform = 'translate3d(0, 0, 0) scale(1)';
-    (wrapper.style as any).webkitTransform = 'translate3d(0, 0, 0) scale(1)';
-    wrapper.style.opacity = '1';
+    // Use next-VSync frame handoff instead of synchronous `offsetHeight` forced layout reflow
+    cardSwitchRafId.current = requestAnimationFrame(() => {
+      cardSwitchRafId.current = requestAnimationFrame(() => {
+        cardSwitchRafId.current = null;
+        const enterSpring = `transform ${settleMs}ms cubic-bezier(0.16, 1, 0.3, 1), opacity ${fadeMs}ms cubic-bezier(0.16, 1, 0.3, 1)`;
+        wrapper.style.transition = enterSpring;
+        (wrapper.style as any).webkitTransition = enterSpring;
+        wrapper.style.transform = 'translate3d(0, 0, 0) scale(1)';
+        (wrapper.style as any).webkitTransform = 'translate3d(0, 0, 0) scale(1)';
+        wrapper.style.opacity = '1';
 
-    if (titleStage) {
-      titleStage.style.transition = enterSpring;
-      titleStage.style.transform = 'translate3d(0, 0, 0)';
-      titleStage.style.opacity = '1';
-    }
-    if (quoteStage) {
-      quoteStage.style.transition = enterSpring;
-      quoteStage.style.transform = 'translate3d(0, 0, 0)';
-      quoteStage.style.opacity = '1';
-    }
+        if (titleStage) {
+          titleStage.style.transition = enterSpring;
+          titleStage.style.transform = 'translate3d(0, 0, 0)';
+          titleStage.style.opacity = '1';
+        }
+        if (quoteStage) {
+          quoteStage.style.transition = enterSpring;
+          quoteStage.style.transform = 'translate3d(0, 0, 0)';
+          quoteStage.style.opacity = '1';
+        }
+      });
+    });
   }, []);
 
   const handleTouchMove = useCallback((e: TouchEvent | MouseEvent) => {
@@ -303,6 +407,9 @@ export function useGestureEngine(options: GestureEngineOptions = {}) {
     const state = useAppStore.getState();
     if (isAnyModalOpen(state)) {
       isDragging.current = false;
+      lockedAxis.current = null;
+      resetViewportTransition(activeSpace);
+      animateCardVerticalSwitch(null);
       return;
     }
 
@@ -329,7 +436,7 @@ export function useGestureEngine(options: GestureEngineOptions = {}) {
     } else if (lockedAxis.current === 'y' && enableYSwipeInMusic && activeSpace === 1) {
       updateCardVerticalTransform(diffY);
     }
-  }, [activeSpace, enableXSwipe, enableYSwipeInMusic, updateViewportTransform, updateCardVerticalTransform]);
+  }, [activeSpace, enableXSwipe, enableYSwipeInMusic, updateViewportTransform, updateCardVerticalTransform, resetViewportTransition, animateCardVerticalSwitch]);
 
   const handleTouchEnd = useCallback(() => {
     if (!isDragging.current) return;
@@ -345,7 +452,7 @@ export function useGestureEngine(options: GestureEngineOptions = {}) {
 
     const diffX = currentX.current - startX.current;
     const diffY = currentY.current - startY.current;
-    const duration = Math.max(1, Date.now() - startTime.current);
+    const duration = Math.max(1, performance.now() - startTime.current);
     const velocityX = diffX / duration; // px per ms
     const velocityY = diffY / duration;
     const totalDistance = Math.hypot(diffX, diffY);
@@ -402,12 +509,18 @@ export function useGestureEngine(options: GestureEngineOptions = {}) {
 
   useEffect(() => {
     const el = window;
+    const docEl = document.documentElement;
 
     const handleCancel = () => {
+      if (!isDragging.current) return;
       isDragging.current = false;
       resetViewportTransition(activeSpace);
       animateCardVerticalSwitch(null);
       lockedAxis.current = null;
+    };
+
+    const handleResize = () => {
+      refreshDomCache();
     };
 
     // Use capture phase so no nested element's stopPropagation can block gesture detection
@@ -415,12 +528,13 @@ export function useGestureEngine(options: GestureEngineOptions = {}) {
     el.addEventListener('touchmove', handleTouchMove, { passive: true, capture: true });
     el.addEventListener('touchend', handleTouchEnd, { passive: true, capture: true });
     el.addEventListener('touchcancel', handleCancel, { passive: true, capture: true });
+    el.addEventListener('resize', handleResize, { passive: true });
 
-    // Mouse events for desktop testability
+    // Mouse events for desktop testability (mouseleave bound on documentElement without capture so child element exits don't cancel active animations)
     el.addEventListener('mousedown', handleTouchStart, true);
     el.addEventListener('mousemove', handleTouchMove, true);
     el.addEventListener('mouseup', handleTouchEnd, true);
-    el.addEventListener('mouseleave', handleCancel, true);
+    docEl.addEventListener('mouseleave', handleCancel, false);
 
     // Suppress click events immediately following a drag/swipe
     const handleCaptureClick = (e: MouseEvent) => {
@@ -432,15 +546,19 @@ export function useGestureEngine(options: GestureEngineOptions = {}) {
     window.addEventListener('click', handleCaptureClick, true);
 
     return () => {
+      if (rafId.current !== null) cancelAnimationFrame(rafId.current);
+      if (cardRafId.current !== null) cancelAnimationFrame(cardRafId.current);
+      if (cardSwitchRafId.current !== null) cancelAnimationFrame(cardSwitchRafId.current);
       el.removeEventListener('touchstart', handleTouchStart, { capture: true });
       el.removeEventListener('touchmove', handleTouchMove, { capture: true });
       el.removeEventListener('touchend', handleTouchEnd, { capture: true });
       el.removeEventListener('touchcancel', handleCancel, { capture: true });
+      el.removeEventListener('resize', handleResize);
       el.removeEventListener('mousedown', handleTouchStart, true);
       el.removeEventListener('mousemove', handleTouchMove, true);
       el.removeEventListener('mouseup', handleTouchEnd, true);
-      el.removeEventListener('mouseleave', handleCancel, true);
+      docEl.removeEventListener('mouseleave', handleCancel, false);
       window.removeEventListener('click', handleCaptureClick, true);
     };
-  }, [handleTouchStart, handleTouchMove, handleTouchEnd]);
+  }, [handleTouchStart, handleTouchMove, handleTouchEnd, refreshDomCache, activeSpace, resetViewportTransition, animateCardVerticalSwitch]);
 }
