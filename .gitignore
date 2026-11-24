@@ -16,3 +16,12 @@ coverage/
 .idea/
 .agents/backup_before_auth_fix/
 
+*.db-wal
+*.db-shm
+.aistudio/
+public/assets/aistudio/
+design_references/
+CONVERSATION_HISTORY_AND_CONTEXT.md
+SESSION_HANDOFF.md
+README_ORIGINAL_VISION.md
+.agents/capture_modals.py
