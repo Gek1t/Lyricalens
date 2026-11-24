@@ -1,11 +1,11 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { createPortal } from 'react-dom';
 import { motion, AnimatePresence } from 'motion/react';
-import { Capacitor } from '@capacitor/core';
+import { Capacitor, type PluginListenerHandle } from '@capacitor/core';
 import { App as CapApp } from '@capacitor/app';
 import { useAppStore } from '../../store/useAppStore';
 import { db } from '../../db';
-import { AIProviderType, MajorAIProvider, AIProviderConfig, SongItem, AudioQuality, AUDIO_QUALITY_OPTIONS } from '../../types';
+import { AIProviderType, MajorAIProvider, AIProviderConfig, SongItem, AudioQuality, AUDIO_QUALITY_OPTIONS, WordItem } from '../../types';
 import {
   analyzeSongVocab,
   prioritizeSongsByNotebook,
@@ -34,6 +34,14 @@ import {
   removeStoredPlatformAuth,
   SupportedMusicPlatform
 } from '../../utils/clientMusicSync';
+import {
+  getDefaultBaseUrl,
+  getDefaultModelForProvider,
+  isLocalAiEndpoint,
+  normalizeProbeBaseUrl,
+  probeProviderModels
+} from '../../utils/aiModelProbe';
+import { resolveMajorProvider } from '../../utils/aiProviderDefaults';
 
 // Mastery status circle indicator matching the app design system (0: hollow, 1: needle-dot, 2: mid-dot, 3: solid)
 const MasteryCircleIndicator: React.FC<{ level?: number; isDue?: boolean; size?: number }> = ({
@@ -86,7 +94,7 @@ interface TrackListWithFadingScrollbarProps {
 
 const TrackListWithFadingScrollbar: React.FC<TrackListWithFadingScrollbarProps> = ({ songs }) => {
   const containerRef = useRef<HTMLDivElement>(null);
-  const [notebookWords, setNotebookWords] = useState<any[]>([]);
+  const [notebookWords, setNotebookWords] = useState<WordItem[]>([]);
   const [thumb, setThumb] = useState<{ height: number; top: number; visible: boolean }>({
     height: 20,
     top: 0,
@@ -109,7 +117,7 @@ const TrackListWithFadingScrollbar: React.FC<TrackListWithFadingScrollbarProps> 
 
   // Map of user's notebook words for instant lookup of mastery levels
   const notebookWordMap = React.useMemo(() => {
-    const map = new Map<string, any>();
+    const map = new Map<string, WordItem>();
     notebookWords.forEach(w => {
       if (w.word) map.set(w.word.trim().toLowerCase(), w);
     });
@@ -298,7 +306,6 @@ import {
   EyeOff,
   Sparkles,
   ShieldCheck,
-  Zap,
   Globe,
   Server,
   GraduationCap,
@@ -438,8 +445,8 @@ export const MAJOR_AI_PROVIDERS: MajorProviderOption[] = [
     name: 'DeepSeek',
     icon: DeepSeekLogo,
     brandColor: 'text-[#4D6BFE]',
-    defaultBaseUrl: 'https://api.deepseek.com/v1',
-    defaultModel: 'deepseek-chat',
+    defaultBaseUrl: getDefaultBaseUrl('deepseek'),
+    defaultModel: getDefaultModelForProvider('deepseek'),
     apiKeyPlaceholder: 'sk-... (输入您的 DeepSeek API Key)'
   },
   {
@@ -447,8 +454,8 @@ export const MAJOR_AI_PROVIDERS: MajorProviderOption[] = [
     name: 'Claude',
     icon: ClaudeLogo,
     brandColor: 'text-[#D97757]',
-    defaultBaseUrl: 'https://api.anthropic.com/v1',
-    defaultModel: 'claude-3-7-sonnet-20250219',
+    defaultBaseUrl: getDefaultBaseUrl('claude'),
+    defaultModel: getDefaultModelForProvider('claude'),
     apiKeyPlaceholder: 'sk-ant-... (输入 Anthropic 或中转 Key)'
   },
   {
@@ -456,8 +463,8 @@ export const MAJOR_AI_PROVIDERS: MajorProviderOption[] = [
     name: 'OpenAI',
     icon: OpenAILogo,
     brandColor: 'text-[#10A37F]',
-    defaultBaseUrl: 'https://api.openai.com/v1',
-    defaultModel: 'gpt-4o-mini',
+    defaultBaseUrl: getDefaultBaseUrl('openai'),
+    defaultModel: getDefaultModelForProvider('openai'),
     apiKeyPlaceholder: 'sk-... (输入您的 OpenAI API Key)'
   },
   {
@@ -466,16 +473,16 @@ export const MAJOR_AI_PROVIDERS: MajorProviderOption[] = [
     icon: GeminiLogo,
     brandColor: 'text-[#1B72E8]',
     defaultBaseUrl: '',
-    defaultModel: 'gemini-2.5-flash',
-    apiKeyPlaceholder: 'AIzaSy... (留空使用系统内置 Gemini 密钥)'
+    defaultModel: getDefaultModelForProvider('gemini'),
+    apiKeyPlaceholder: 'AIzaSy... (输入您的 Gemini API Key)'
   },
   {
     id: 'kimi',
     name: 'Kimi (月之暗面)',
     icon: KimiLogo,
     brandColor: 'text-stone-900 dark:text-stone-100',
-    defaultBaseUrl: 'https://api.moonshot.cn/v1',
-    defaultModel: 'moonshot-v1-8k',
+    defaultBaseUrl: getDefaultBaseUrl('kimi'),
+    defaultModel: getDefaultModelForProvider('kimi'),
     apiKeyPlaceholder: 'sk-... (输入 Moonshot API Key)'
   },
   {
@@ -483,8 +490,8 @@ export const MAJOR_AI_PROVIDERS: MajorProviderOption[] = [
     name: '通义千问 (Qwen)',
     icon: QwenLogo,
     brandColor: 'text-[#165DFF]',
-    defaultBaseUrl: 'https://dashscope.aliyuncs.com/compatible-mode/v1',
-    defaultModel: 'qwen-plus',
+    defaultBaseUrl: getDefaultBaseUrl('qwen'),
+    defaultModel: getDefaultModelForProvider('qwen'),
     apiKeyPlaceholder: 'sk-... (输入阿里 DashScope API Key)'
   },
   {
@@ -492,8 +499,8 @@ export const MAJOR_AI_PROVIDERS: MajorProviderOption[] = [
     name: '智谱 GLM',
     icon: GLMLogo,
     brandColor: 'text-stone-900 dark:text-stone-100',
-    defaultBaseUrl: 'https://open.bigmodel.cn/api/paas/v4',
-    defaultModel: 'glm-4-flash',
+    defaultBaseUrl: getDefaultBaseUrl('glm'),
+    defaultModel: getDefaultModelForProvider('glm'),
     apiKeyPlaceholder: '... (输入智谱开放平台 API Key)'
   },
   {
@@ -501,8 +508,8 @@ export const MAJOR_AI_PROVIDERS: MajorProviderOption[] = [
     name: '自定义 API',
     icon: CustomApiLogo,
     brandColor: 'text-emerald-600 dark:text-emerald-400',
-    defaultBaseUrl: 'https://api.siliconflow.cn/v1',
-    defaultModel: 'deepseek-ai/DeepSeek-V3',
+    defaultBaseUrl: getDefaultBaseUrl('custom'),
+    defaultModel: getDefaultModelForProvider('custom'),
     apiKeyPlaceholder: 'sk-... (输入您的中转/自定义 API Key)',
     requiresBaseUrlInput: true
   }
@@ -727,11 +734,11 @@ export const MAJOR_MUSIC_PLATFORMS: MusicPlatformOption[] = [
 const DEFAULT_AI_CONFIG: AIProviderConfig = {
   majorProvider: 'deepseek',
   provider: 'openai_compatible',
-  geminiModel: 'gemini-2.5-flash',
+  geminiModel: getDefaultModelForProvider('gemini'),
   geminiApiKey: '',
-  customBaseUrl: 'https://api.deepseek.com/v1',
+  customBaseUrl: getDefaultBaseUrl('deepseek'),
   customApiKey: '',
-  customModel: 'deepseek-chat',
+  customModel: getDefaultModelForProvider('deepseek'),
   detectedModels: []
 };
 
@@ -1764,7 +1771,7 @@ export const SettingsSyncTab: React.FC = () => {
     window.addEventListener('lyricalens:native-resume', handleNativeResume);
     window.addEventListener('lyricalens:native-qr-status', handleNativeQrStatus);
 
-    let appStateSub: any = null;
+    let appStateSub: Promise<PluginListenerHandle> | null = null;
     if (Capacitor.isNativePlatform()) {
       try {
         appStateSub = CapApp.addListener('appStateChange', (state) => {
@@ -1785,7 +1792,7 @@ export const SettingsSyncTab: React.FC = () => {
       window.removeEventListener('lyricalens:native-resume', handleNativeResume);
       window.removeEventListener('lyricalens:native-qr-status', handleNativeQrStatus);
       if (appStateSub) {
-        appStateSub.then?.((sub: any) => sub.remove?.()).catch?.(() => {});
+        appStateSub.then((sub) => sub.remove()).catch(() => {});
       }
     };
   }, [activeMusicPlatform, isQrModalOpen, qrUniKey, qrStatus]);
@@ -1828,8 +1835,11 @@ export const SettingsSyncTab: React.FC = () => {
   const [showApiKey, setShowApiKey] = useState(false);
   const [isCustomModelInput, setIsCustomModelInput] = useState(false);
   const [isProviderDropdownOpen, setIsProviderDropdownOpen] = useState(false);
-  const [isAiConfigModalOpen, setIsAiConfigModalOpen] = useState(false);
-  const [savedProviderKeys, setSavedProviderKeys] = useState<Record<string, { apiKey: string; baseUrl?: string; model?: string }>>(() => {
+  const isAiConfigModalOpen = useAppStore(s => s.isAiConfigModalOpen);
+  const setIsAiConfigModalOpen = useAppStore(s => s.setIsAiConfigModalOpen);
+  const [savedProviderKeys, setSavedProviderKeys] = useState<
+    Record<string, { apiKey: string; baseUrl?: string; model?: string; detectedModels?: string[] }>
+  >(() => {
     try {
       const saved = localStorage.getItem('lyricalens_ai_saved_providers');
       if (saved) return JSON.parse(saved);
@@ -1838,15 +1848,18 @@ export const SettingsSyncTab: React.FC = () => {
     }
     return {};
   });
-  const [isTestingPing, setIsTestingPing] = useState(false);
+  const savedProviderKeysRef = useRef(savedProviderKeys);
+  savedProviderKeysRef.current = savedProviderKeys;
   const [pingResult, setPingResult] = useState<{ status: 'idle' | 'success' | 'error'; latency?: number; msg?: string }>({ status: 'idle' });
   const [isFetchingModels, setIsFetchingModels] = useState(false);
 
   // Check if a specific provider has configured credentials
   const isProviderConfigured = (providerId: string): boolean => {
-    if (providerId === 'gemini') return true; // Gemini has built-in system key
-    if (aiConfig.majorProvider === providerId && aiConfig.customApiKey && aiConfig.customApiKey.trim().length > 0) {
-      return true;
+    if (providerId === 'gemini') {
+      return Boolean(aiConfig.geminiApiKey && aiConfig.geminiApiKey.trim().length > 0);
+    }
+    if (resolveMajorProvider(aiConfig.majorProvider, aiConfig.provider) === providerId) {
+      return Boolean(aiConfig.customApiKey && aiConfig.customApiKey.trim().length > 0);
     }
     const saved = savedProviderKeys[providerId];
     return Boolean(saved && saved.apiKey && saved.apiKey.trim().length > 0);
@@ -1935,9 +1948,193 @@ export const SettingsSyncTab: React.FC = () => {
     }
   }, [aiConfig]);
 
-  const updateConfig = (patch: Partial<AIProviderConfig>) => {
-    setAiConfig(prev => ({ ...prev, ...patch }));
-    setPingResult({ status: 'idle' });
+  const latestAiConfigRef = useRef<AIProviderConfig>(aiConfig);
+  latestAiConfigRef.current = aiConfig;
+  const apiKeyInputRef = useRef<HTMLInputElement | null>(null);
+  const baseUrlInputRef = useRef<HTMLInputElement | null>(null);
+  const customModelInputRef = useRef<HTMLInputElement | null>(null);
+  const fetchModelsAbortRef = useRef<AbortController | null>(null);
+  const wasAiModalOpenRef = useRef(false);
+  const pendingSyncRafsRef = useRef<Set<number>>(new Set());
+  const syncEpochRef = useRef(0);
+
+  const clearPendingSyncRafs = () => {
+    syncEpochRef.current += 1;
+    pendingSyncRafsRef.current.forEach(id => window.cancelAnimationFrame(id));
+    pendingSyncRafsRef.current.clear();
+  };
+
+  const abortInflightProbe = () => {
+    if (fetchModelsAbortRef.current) {
+      fetchModelsAbortRef.current.abort();
+      fetchModelsAbortRef.current = null;
+    }
+    setIsFetchingModels(false);
+  };
+
+  const updateConfig = (
+    patch: Partial<AIProviderConfig>,
+    options: { preservePing?: boolean; resetDetectedModels?: boolean } = {}
+  ) => {
+    if (options.resetDetectedModels) {
+      abortInflightProbe();
+    }
+    const applyPatch = (base: AIProviderConfig): AIProviderConfig => ({
+      ...base,
+      ...patch,
+      ...(options.resetDetectedModels ? { detectedModels: [] } : {})
+    });
+    latestAiConfigRef.current = applyPatch(latestAiConfigRef.current);
+    setAiConfig(prev => {
+      const next = applyPatch(prev);
+      latestAiConfigRef.current = next;
+      return next;
+    });
+    if (!options.preservePing) {
+      setPingResult({ status: 'idle' });
+    }
+  };
+
+  const syncApiKeyValue = (nextValue: string) => {
+    const cfg = latestAiConfigRef.current;
+    const isGemini = resolveMajorProvider(cfg.majorProvider, cfg.provider) === 'gemini';
+    const currentValue = isGemini ? (cfg.geminiApiKey || '') : (cfg.customApiKey || '');
+    if (nextValue === currentValue) return;
+    updateConfig(
+      isGemini ? { geminiApiKey: nextValue } : { customApiKey: nextValue },
+      { resetDetectedModels: true }
+    );
+  };
+
+  const syncBaseUrlValue = (nextValue: string) => {
+    const currentValue = latestAiConfigRef.current.customBaseUrl || '';
+    if (nextValue === currentValue) return;
+    updateConfig({ customBaseUrl: nextValue }, { resetDetectedModels: true });
+  };
+
+  const syncCustomModelValue = (nextValue: string) => {
+    const cfg = latestAiConfigRef.current;
+    const isGemini = resolveMajorProvider(cfg.majorProvider, cfg.provider) === 'gemini';
+    const currentValue = isGemini ? (cfg.geminiModel ?? '') : (cfg.customModel ?? '');
+    if (nextValue === currentValue) return;
+    selectAiModel(nextValue);
+  };
+
+  const scheduleInputDomSync = (
+    inputEl: HTMLInputElement | null,
+    commit: (value: string) => void
+  ) => {
+    if (!inputEl) return;
+    const epoch = syncEpochRef.current;
+    const readAndCommit = () => {
+      if (epoch !== syncEpochRef.current || !inputEl.isConnected) return;
+      commit(inputEl.value);
+    };
+    queueMicrotask(readAndCommit);
+    const rafId = window.requestAnimationFrame(() => {
+      pendingSyncRafsRef.current.delete(rafId);
+      readAndCommit();
+    });
+    pendingSyncRafsRef.current.add(rafId);
+  };
+
+  const makeDomSyncedInputProps = (
+    inputRef: React.RefObject<HTMLInputElement | null>,
+    commit: (value: string) => void,
+    fallbackOnEmptyBlur?: string
+  ) => ({
+    ref: inputRef,
+    autoComplete: 'off' as const,
+    autoCorrect: 'off' as const,
+    autoCapitalize: 'off' as const,
+    spellCheck: false,
+    onChange: (e: React.ChangeEvent<HTMLInputElement>) => commit(e.target.value),
+    onInput: (e: React.FormEvent<HTMLInputElement>) => commit(e.currentTarget.value),
+    onCompositionEnd: (e: React.CompositionEvent<HTMLInputElement>) =>
+      scheduleInputDomSync(e.currentTarget, commit),
+    onPaste: (e: React.ClipboardEvent<HTMLInputElement>) =>
+      scheduleInputDomSync(e.currentTarget, commit),
+    onBlur: (e: React.FocusEvent<HTMLInputElement>) => {
+      const val = e.currentTarget.value;
+      if (fallbackOnEmptyBlur && !val.trim()) {
+        commit(fallbackOnEmptyBlur);
+        return;
+      }
+      commit(val);
+    }
+  });
+
+  const reconcileModalInputsFromDom = () => {
+    if (apiKeyInputRef.current?.isConnected) {
+      syncApiKeyValue(apiKeyInputRef.current.value);
+    }
+    if (baseUrlInputRef.current?.isConnected) {
+      syncBaseUrlValue(baseUrlInputRef.current.value);
+    }
+  };
+
+  const persistProviderSnapshot = (
+    providerId: MajorAIProvider,
+    snapshot: { apiKey: string; baseUrl?: string; model?: string; detectedModels?: string[] }
+  ) => {
+    const syncNext = {
+      ...savedProviderKeysRef.current,
+      [providerId]: snapshot
+    };
+    savedProviderKeysRef.current = syncNext;
+    setSavedProviderKeys(prev => {
+      const updated = {
+        ...prev,
+        [providerId]: snapshot
+      };
+      savedProviderKeysRef.current = updated;
+      try {
+        localStorage.setItem('lyricalens_ai_saved_providers', JSON.stringify(updated));
+      } catch (e) {
+        console.warn(e);
+      }
+      return updated;
+    });
+  };
+
+  const persistSnapshotForConfig = (cfg: AIProviderConfig) => {
+    const major = resolveMajorProvider(cfg.majorProvider, cfg.provider);
+    const meta = MAJOR_AI_PROVIDERS.find(p => p.id === major) || MAJOR_AI_PROVIDERS[0];
+    if (major === 'gemini') {
+      persistProviderSnapshot('gemini', {
+        apiKey: cfg.geminiApiKey || '',
+        model: cfg.geminiModel || meta.defaultModel,
+        detectedModels: cfg.detectedModels || []
+      });
+    } else {
+      persistProviderSnapshot(major, {
+        apiKey: cfg.customApiKey || '',
+        baseUrl: cfg.customBaseUrl,
+        model: cfg.customModel || meta.defaultModel,
+        detectedModels: cfg.detectedModels || []
+      });
+    }
+  };
+
+  const selectAiModel = (
+    modelId: string,
+    options?: { closeCustomInput?: boolean; toastMsg?: string }
+  ) => {
+    const cfg = latestAiConfigRef.current;
+    const isGemini = resolveMajorProvider(cfg.majorProvider, cfg.provider) === 'gemini';
+
+    updateConfig(
+      isGemini ? { geminiModel: modelId } : { customModel: modelId },
+      { preservePing: true }
+    );
+    persistSnapshotForConfig(latestAiConfigRef.current);
+
+    if (options?.closeCustomInput) {
+      setIsCustomModelInput(false);
+    }
+    if (options?.toastMsg) {
+      showToast(options.toastMsg);
+    }
   };
 
   // Switch Major Provider (Gemini, DeepSeek, OpenAI, Claude, Custom)
@@ -1945,139 +2142,205 @@ export const SettingsSyncTab: React.FC = () => {
     const meta = MAJOR_AI_PROVIDERS.find(p => p.id === providerId);
     if (!meta) return;
 
-    // Cache current credentials if not gemini
-    if (aiConfig.majorProvider && aiConfig.majorProvider !== 'gemini' && aiConfig.customApiKey) {
-      const updated = {
-        ...savedProviderKeys,
-        [aiConfig.majorProvider]: {
-          apiKey: aiConfig.customApiKey,
-          baseUrl: aiConfig.customBaseUrl,
-          model: aiConfig.customModel
-        }
-      };
-      setSavedProviderKeys(updated);
-      try {
-        localStorage.setItem('lyricalens_ai_saved_providers', JSON.stringify(updated));
-      } catch (e) {
-        console.warn(e);
-      }
+    const cfg = latestAiConfigRef.current;
+    const prevMajor = resolveMajorProvider(cfg.majorProvider, cfg.provider);
+    if (providerId === prevMajor) {
+      return;
     }
 
+    clearPendingSyncRafs();
+    abortInflightProbe();
+    persistSnapshotForConfig(cfg);
+
     const isGemini = providerId === 'gemini';
-    const saved = savedProviderKeys[providerId];
-    const newApiKey = isGemini ? (aiConfig.geminiApiKey || '') : (saved?.apiKey || '');
-    const newBaseUrl = isGemini ? '' : (saved?.baseUrl || meta.defaultBaseUrl || aiConfig.customBaseUrl);
-    const newModel = isGemini ? (aiConfig.geminiModel || meta.defaultModel) : (saved?.model || meta.defaultModel);
+    const saved = savedProviderKeysRef.current[providerId];
+    const newApiKey = isGemini ? (cfg.geminiApiKey || saved?.apiKey || '') : (saved?.apiKey || '');
+    const newBaseUrl = isGemini ? '' : (saved?.baseUrl || meta.defaultBaseUrl || '');
+    const newModel = isGemini ? (saved?.model || cfg.geminiModel || meta.defaultModel) : (saved?.model || meta.defaultModel);
+    const restoredDetectedModels = saved?.detectedModels || [];
 
     updateConfig({
       majorProvider: providerId,
       provider: isGemini ? 'gemini' : 'openai_compatible',
-      geminiApiKey: isGemini ? newApiKey : aiConfig.geminiApiKey,
+      geminiApiKey: isGemini ? newApiKey : cfg.geminiApiKey,
+      geminiModel: isGemini ? newModel : cfg.geminiModel,
       customApiKey: isGemini ? '' : newApiKey,
       customBaseUrl: newBaseUrl,
-      customModel: newModel,
-      detectedModels: []
+      customModel: isGemini ? cfg.customModel : newModel,
+      detectedModels: restoredDetectedModels
     });
-    if (fetchModelsAbortRef.current) {
-      fetchModelsAbortRef.current.abort();
-      fetchModelsAbortRef.current = null;
-    }
-    setIsFetchingModels(false);
-    setIsTestingPing(false);
-    setPingResult({ status: 'idle' });
-    showToast(`已切换至 ${meta.name} 模型`);
+    setIsCustomModelInput(false);
+    showToast(`已切换至 ${meta.name}`);
   };
 
-  const fetchModelsAbortRef = useRef<AbortController | null>(null);
+  const activeMajorProvider = resolveMajorProvider(aiConfig.majorProvider, aiConfig.provider);
 
-  // Dynamic Online Model Inspection & Handshake
+  // Reconcile native input/change/composition events (e.g. Android WebView IME / Autofill)
+  // directly from DOM elements so React _valueTracker never swallows updates.
+  useEffect(() => {
+    const bindings: Array<{ el: HTMLInputElement | null; sync: (val: string) => void }> = [
+      ...(isAiConfigModalOpen
+        ? [
+            { el: apiKeyInputRef.current, sync: syncApiKeyValue },
+            { el: baseUrlInputRef.current, sync: syncBaseUrlValue }
+          ]
+        : []),
+      ...(isCustomModelInput
+        ? [{ el: customModelInputRef.current, sync: syncCustomModelValue }]
+        : [])
+    ];
+    if (bindings.length === 0) return;
+
+    const cleanups: Array<() => void> = [];
+    for (const { el, sync } of bindings) {
+      if (!el) continue;
+      const handleNativeSync = () => sync(el.value);
+      el.addEventListener('input', handleNativeSync);
+      el.addEventListener('change', handleNativeSync);
+      el.addEventListener('compositionend', handleNativeSync);
+      cleanups.push(() => {
+        el.removeEventListener('input', handleNativeSync);
+        el.removeEventListener('change', handleNativeSync);
+        el.removeEventListener('compositionend', handleNativeSync);
+      });
+    }
+    return () => {
+      clearPendingSyncRafs();
+      cleanups.forEach(fn => fn());
+    };
+  }, [isAiConfigModalOpen, isCustomModelInput, activeMajorProvider, portalContainer]);
+
+  // Save snapshot & abort inflight probe whenever AI config modal closes (including Escape / Android Back)
+  useEffect(() => {
+    if (wasAiModalOpenRef.current && !isAiConfigModalOpen) {
+      reconcileModalInputsFromDom();
+      clearPendingSyncRafs();
+      abortInflightProbe();
+      persistSnapshotForConfig(latestAiConfigRef.current);
+    }
+    wasAiModalOpenRef.current = isAiConfigModalOpen;
+  }, [isAiConfigModalOpen]);
+
+  // Close AI config modal cleanly on Escape key
+  useEffect(() => {
+    if (!isAiConfigModalOpen) return;
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') {
+        e.stopPropagation();
+        reconcileModalInputsFromDom();
+        setIsAiConfigModalOpen(false);
+      }
+    };
+    window.addEventListener('keydown', onKeyDown);
+    return () => window.removeEventListener('keydown', onKeyDown);
+  }, [isAiConfigModalOpen, setIsAiConfigModalOpen]);
+
+  // Ensure inflight probes, queued rAFs, and modal flag are cleaned up on unmount
+  useEffect(() => {
+    return () => {
+      clearPendingSyncRafs();
+      abortInflightProbe();
+      setIsAiConfigModalOpen(false);
+    };
+  }, [setIsAiConfigModalOpen]);
+
+  // Dynamic Online Model Inspection & Handshake (Web backend + Capacitor native / direct fallback)
   const handleFetchAndDetectModels = async () => {
-    const currentMajor = aiConfig.majorProvider || (aiConfig.provider === 'gemini' ? 'gemini' : 'deepseek');
+    if (isAiConfigModalOpen) {
+      reconcileModalInputsFromDom();
+    }
+    const cfgSnapshot = latestAiConfigRef.current;
+    const currentMajor = resolveMajorProvider(cfgSnapshot.majorProvider, cfgSnapshot.provider);
     const isGemini = currentMajor === 'gemini';
-    const currentKey = isGemini ? (aiConfig.geminiApiKey || '') : (aiConfig.customApiKey || '');
-    const currentBaseUrl = isGemini ? '' : (aiConfig.customBaseUrl || 'https://api.deepseek.com/v1');
-    const isLocalEndpoint = /^https?:\/\/(localhost|127\.0\.0\.1)/i.test(currentBaseUrl.trim());
+    const currentKey = isGemini ? (cfgSnapshot.geminiApiKey || '') : (cfgSnapshot.customApiKey || '');
+    const currentBaseUrl = isGemini ? '' : (cfgSnapshot.customBaseUrl || getDefaultBaseUrl(currentMajor));
+    const isLocalEndpoint = !isGemini && isLocalAiEndpoint(currentBaseUrl);
 
-    if (!isGemini && !currentKey.trim() && !isLocalEndpoint) {
+    if (!currentKey.trim() && !isLocalEndpoint) {
       setPingResult({
         status: 'error',
         msg: '请先填写 API Key 后再进行探测'
       });
-      showToast('请先输入您的 API Key，再进行联网检测');
+      showToast('请先输入您的 API Key，再进行探测');
       return;
     }
 
-    if (fetchModelsAbortRef.current) {
-      fetchModelsAbortRef.current.abort();
-    }
+    abortInflightProbe();
     const controller = new AbortController();
     fetchModelsAbortRef.current = controller;
-    const timeoutId = setTimeout(() => controller.abort(), 8000);
+    let requestTimedOut = false;
+    const timeoutId = window.setTimeout(() => {
+      requestTimedOut = true;
+      controller.abort();
+    }, 17000);
 
     setIsFetchingModels(true);
-    setIsTestingPing(true);
     setPingResult({ status: 'idle' });
 
     try {
-      const res = await fetch('/api/ai/fetch-models', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+      const result = await probeProviderModels({
+        provider: isGemini ? 'gemini' : 'openai_compatible',
+        majorProvider: currentMajor,
+        baseUrl: isGemini ? undefined : normalizeProbeBaseUrl(currentBaseUrl, currentMajor),
+        apiKey: currentKey,
         signal: controller.signal,
-        body: JSON.stringify({
-          provider: aiConfig.provider,
-          majorProvider: currentMajor,
-          baseUrl: currentBaseUrl,
-          apiKey: currentKey
-        })
+        timeoutMs: 8000
       });
 
-      const data = await res.json();
-      if (res.ok && data.success && Array.isArray(data.models) && data.models.length > 0) {
-        const detectedList = data.models;
-        const currentActive = isGemini ? aiConfig.geminiModel : aiConfig.customModel;
+      // Stale request guard: discard results if aborted, replaced, closed, or credentials edited mid-flight
+      const latestCfg = latestAiConfigRef.current;
+      const latestMajor = resolveMajorProvider(latestCfg.majorProvider, latestCfg.provider);
+      const latestKey = latestMajor === 'gemini' ? (latestCfg.geminiApiKey || '') : (latestCfg.customApiKey || '');
+      const latestBaseUrl = latestMajor === 'gemini' ? '' : (latestCfg.customBaseUrl || getDefaultBaseUrl(latestMajor));
+      if (
+        fetchModelsAbortRef.current !== controller ||
+        latestMajor !== currentMajor ||
+        latestKey !== currentKey ||
+        latestBaseUrl !== currentBaseUrl
+      ) {
+        return;
+      }
+
+      if (result.status === 'success') {
+        const detectedList = result.models;
+        const currentActive = isGemini ? latestCfg.geminiModel : latestCfg.customModel;
         const newActiveModel = detectedList.includes(currentActive)
           ? currentActive
-          : (data.defaultModel || detectedList[0]);
+          : (result.defaultModel || detectedList[0]);
 
-        updateConfig({
-          detectedModels: detectedList,
-          lastCheckedLatency: data.latency,
-          lastCheckedTime: Date.now(),
-          ...(isGemini ? { geminiModel: newActiveModel } : { customModel: newActiveModel })
-        });
+        updateConfig(
+          {
+            detectedModels: detectedList,
+            lastCheckedLatency: result.latency,
+            lastCheckedTime: Date.now(),
+            ...(isGemini ? { geminiModel: newActiveModel } : { customModel: newActiveModel })
+          },
+          { preservePing: true }
+        );
+        persistSnapshotForConfig(latestAiConfigRef.current);
+        setIsCustomModelInput(false);
 
         setPingResult({
           status: 'success',
-          latency: data.latency,
-          msg: data.message || `握手成功 · 延迟 ${data.latency}ms · 已发现 ${detectedList.length} 个可用模型`
+          latency: result.latency,
+          msg: result.message
         });
-        showToast(`联网检测成功：获取到 ${detectedList.length} 个可用模型`);
+        showToast(`探测成功：获取到 ${detectedList.length} 个可用模型`);
       } else {
+        const errorMessage = requestTimedOut ? '探测请求超时，请检查网络连接' : result.error;
         setPingResult({
           status: 'error',
-          msg: data.error || '检测失败，请核对 API Key 或网络地址'
+          msg: errorMessage
         });
-        showToast(data.error || '联网检测失败，请核对 API Key');
-      }
-    } catch (err: any) {
-      if (err?.name === 'AbortError') {
-        setPingResult({
-          status: 'error',
-          msg: '请求已取消或超时'
-        });
-      } else {
-        setPingResult({
-          status: 'error',
-          msg: err.message || '网络请求超时'
-        });
-        showToast('联网检测超时，请检查网络连接');
+        if (!result.aborted || requestTimedOut) {
+          showToast(errorMessage);
+        }
       }
     } finally {
-      clearTimeout(timeoutId);
+      window.clearTimeout(timeoutId);
       if (fetchModelsAbortRef.current === controller) {
         fetchModelsAbortRef.current = null;
         setIsFetchingModels(false);
-        setIsTestingPing(false);
       }
     }
   };
@@ -2918,12 +3181,14 @@ export const SettingsSyncTab: React.FC = () => {
 
       {/* 3. AI 引擎与大模型配置 */}
       {(() => {
+        const currentMajor = resolveMajorProvider(aiConfig.majorProvider, aiConfig.provider);
         const currentMeta =
-          MAJOR_AI_PROVIDERS.find(p => p.id === (aiConfig.majorProvider || 'deepseek')) ||
+          MAJOR_AI_PROVIDERS.find(p => p.id === currentMajor) ||
           MAJOR_AI_PROVIDERS[0];
         const isGemini = currentMeta.id === 'gemini';
+        const rawModelInputValue = isGemini ? (aiConfig.geminiModel ?? '') : (aiConfig.customModel ?? '');
         const activeModel = isGemini
-          ? aiConfig.geminiModel || 'gemini-2.5-flash'
+          ? aiConfig.geminiModel || currentMeta.defaultModel
           : aiConfig.customModel || currentMeta.defaultModel;
         const ProviderIcon = currentMeta.icon;
         const currentConfigured = isProviderConfigured(currentMeta.id);
@@ -2962,6 +3227,8 @@ export const SettingsSyncTab: React.FC = () => {
               </label>
               <button
                 type="button"
+                aria-expanded={isProviderDropdownOpen}
+                aria-haspopup="listbox"
                 onClick={() => setIsProviderDropdownOpen(!isProviderDropdownOpen)}
                 className="w-full h-11 px-3.5 rounded-2xl bg-white/60 dark:bg-white/[0.05] border border-stone-900/[0.06] dark:border-white/[0.08] hover:border-stone-900/12 dark:hover:border-white/15 flex items-center justify-between text-left transition-all cursor-pointer"
               >
@@ -3018,7 +3285,7 @@ export const SettingsSyncTab: React.FC = () => {
                     >
                       {MAJOR_AI_PROVIDERS.map(p => {
                         const Icon = p.icon;
-                        const isSelected = (aiConfig.majorProvider || 'deepseek') === p.id;
+                        const isSelected = currentMajor === p.id;
                         const configured = isProviderConfigured(p.id);
                         return (
                           <button
@@ -3075,69 +3342,128 @@ export const SettingsSyncTab: React.FC = () => {
 
             {/* 2. 选用模型型号 */}
             <div className="pt-2 border-t border-stone-900/[0.05] dark:border-white/[0.06] space-y-1.5">
-              <div className="flex items-center justify-between">
-                <label className="text-[11px] font-sans font-medium text-stone-500 dark:text-stone-400 flex items-center gap-1.5">
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <label className="text-[11px] font-sans font-medium text-stone-500 dark:text-stone-400 flex items-center gap-1.5 shrink-0">
                   <Bot className="w-3.5 h-3.5 text-stone-400" />
                   <span>选用模型型号</span>
                 </label>
-                <button
-                  type="button"
-                  onClick={() => setIsCustomModelInput(!isCustomModelInput)}
-                  className="text-[11px] text-stone-600 dark:text-stone-300 hover:underline cursor-pointer"
-                >
-                  {isCustomModelInput ? '切换在线选择' : '手动输入型号'}
-                </button>
+                <div className="flex items-center gap-3 shrink-0">
+                  {(currentConfigured || (!isGemini && isLocalAiEndpoint(aiConfig.customBaseUrl))) && (
+                    <button
+                      type="button"
+                      onClick={handleFetchAndDetectModels}
+                      disabled={isFetchingModels}
+                      className="text-[11px] font-medium text-stone-700 dark:text-stone-200 hover:underline cursor-pointer disabled:opacity-50"
+                    >
+                      {isFetchingModels ? '探测中...' : '探测模型'}
+                    </button>
+                  )}
+                  <button
+                    type="button"
+                    onClick={() => setIsCustomModelInput(!isCustomModelInput)}
+                    className="text-[11px] text-stone-500 dark:text-stone-400 hover:text-stone-800 dark:hover:text-stone-200 hover:underline cursor-pointer"
+                  >
+                    {isCustomModelInput
+                      ? aiConfig.detectedModels && aiConfig.detectedModels.length > 0
+                        ? '切换在线选择'
+                        : '收起手动输入'
+                      : '手动输入型号'}
+                  </button>
+                </div>
               </div>
 
               {isCustomModelInput ? (
                 <input
+                  {...makeDomSyncedInputProps(customModelInputRef, syncCustomModelValue, currentMeta.defaultModel)}
                   type="text"
-                  value={activeModel}
-                  onChange={e => {
-                    if (isGemini) {
-                      updateConfig({ geminiModel: e.target.value });
-                    } else {
-                      updateConfig({ customModel: e.target.value });
-                    }
-                  }}
-                  placeholder="输入模型名称，如 deepseek-chat, gpt-4o..."
-                  className="w-full h-10 px-3.5 rounded-xl bg-white/70 dark:bg-white/[0.05] border border-stone-900/[0.08] dark:border-white/10 text-xs font-mono text-stone-800 dark:text-stone-200 placeholder-stone-400 focus:outline-none focus:ring-2 focus:ring-stone-400/30"
+                  value={rawModelInputValue}
+                  placeholder="输入模型名称，如 deepseek-flash, deepseek-v4-pro, gpt-4o..."
+                  className="select-text w-full h-10 px-3.5 rounded-xl bg-white/70 dark:bg-white/[0.05] border border-stone-900/[0.08] dark:border-white/10 text-xs font-mono text-stone-800 dark:text-stone-200 placeholder-stone-400 focus:outline-none focus:ring-2 focus:ring-stone-400/30"
                 />
               ) : aiConfig.detectedModels && aiConfig.detectedModels.length > 0 ? (
-                <div className="relative">
-                  <select
-                    value={activeModel}
-                    onChange={e => {
-                      const val = e.target.value;
-                      if (isGemini) {
-                        updateConfig({ geminiModel: val });
-                      } else {
-                        updateConfig({ customModel: val });
+                (() => {
+                  const modelOptions = activeModel && !aiConfig.detectedModels.includes(activeModel)
+                    ? [activeModel, ...aiConfig.detectedModels]
+                    : aiConfig.detectedModels;
+                  const useCompactSegmentedGrid =
+                    modelOptions.length <= 2 && modelOptions.every(m => m.length <= 18);
+                  return (
+                    <div
+                      className={
+                        useCompactSegmentedGrid
+                          ? `grid gap-1 p-1 rounded-2xl bg-stone-900/[0.04] dark:bg-white/[0.05] ${
+                              modelOptions.length === 1 ? 'grid-cols-1' : 'grid-cols-2'
+                            }`
+                          : 'flex flex-wrap gap-1.5 p-1.5 rounded-2xl bg-stone-900/[0.04] dark:bg-white/[0.05] max-h-44 overflow-y-auto no-scrollbar'
                       }
-                      showToast(`已选用模型: ${val}`);
-                    }}
-                    className="w-full h-10 pl-3.5 pr-8 rounded-xl bg-white/70 dark:bg-white/[0.05] border border-stone-900/[0.08] dark:border-white/10 text-xs font-mono text-stone-800 dark:text-stone-200 focus:outline-none cursor-pointer appearance-none"
-                  >
-                    {aiConfig.detectedModels.map(m => (
-                      <option key={m} value={m}>
-                        {m}
-                      </option>
-                    ))}
-                  </select>
-                  <ChevronRight className="w-4 h-4 text-stone-400 absolute right-3 top-1/2 -translate-y-1/2 rotate-90 pointer-events-none" />
-                </div>
+                    >
+                      {modelOptions.map(m => {
+                        const isSelected = activeModel === m;
+                        return (
+                          <button
+                            key={m}
+                            type="button"
+                            aria-pressed={isSelected}
+                            onClick={() => {
+                              selectAiModel(m, { toastMsg: `已选用模型: ${m}` });
+                            }}
+                            title={m}
+                            className={`rounded-xl text-center transition-all cursor-pointer flex items-center gap-1.5 max-w-full active:scale-[0.98] ${
+                              useCompactSegmentedGrid
+                                ? 'py-2 px-2.5 justify-center min-w-0'
+                                : 'py-1.5 px-3 justify-start'
+                            } ${
+                              isSelected
+                                ? 'bg-white dark:bg-stone-800 text-stone-900 dark:text-white shadow-xs font-semibold'
+                                : 'text-stone-500 dark:text-stone-400 hover:text-stone-800 dark:hover:text-stone-200'
+                            }`}
+                          >
+                            <span
+                              className={`w-1.5 h-1.5 rounded-full shrink-0 transition-colors ${
+                                isSelected
+                                  ? 'bg-[#516050] dark:bg-[#8FB996]'
+                                  : 'bg-stone-300 dark:bg-stone-600'
+                              }`}
+                            />
+                            <span className="text-[11.5px] font-mono truncate leading-tight">{m}</span>
+                          </button>
+                        );
+                      })}
+                    </div>
+                  );
+                })()
               ) : (
-                <div className="h-10 px-3.5 rounded-xl bg-white/50 dark:bg-white/[0.03] border border-dashed border-stone-900/10 dark:border-white/10 text-stone-500 dark:text-stone-400 text-xs flex items-center justify-between">
-                  <span className="font-mono text-[11px] truncate">
-                    {activeModel ? `当前型号: ${activeModel}` : '点击右上角「配置密钥」进行探测'}
+                <div className="h-10 px-3.5 rounded-xl bg-white/50 dark:bg-white/[0.03] border border-dashed border-stone-900/10 dark:border-white/10 text-stone-500 dark:text-stone-400 text-xs flex items-center justify-between gap-2">
+                  <span className="font-mono text-[11px] truncate flex-1 min-w-0">
+                    {activeModel ? `当前型号: ${activeModel}` : '尚未选定模型'}
                   </span>
-                  <button
-                    type="button"
-                    onClick={() => setIsCustomModelInput(true)}
-                    className="text-[11px] text-stone-700 dark:text-stone-300 font-medium hover:underline shrink-0 ml-2 cursor-pointer"
-                  >
-                    修改
-                  </button>
+                  <div className="flex items-center gap-2.5 shrink-0">
+                    {currentConfigured || (!isGemini && isLocalAiEndpoint(aiConfig.customBaseUrl)) ? (
+                      <button
+                        type="button"
+                        onClick={handleFetchAndDetectModels}
+                        disabled={isFetchingModels}
+                        className="text-[11px] text-stone-800 dark:text-stone-200 font-medium hover:underline cursor-pointer disabled:opacity-50"
+                      >
+                        {isFetchingModels ? '探测中...' : '探测模型'}
+                      </button>
+                    ) : (
+                      <button
+                        type="button"
+                        onClick={() => setIsAiConfigModalOpen(true)}
+                        className="text-[11px] text-stone-800 dark:text-stone-200 font-medium hover:underline cursor-pointer"
+                      >
+                        配置密钥
+                      </button>
+                    )}
+                    <button
+                      type="button"
+                      onClick={() => setIsCustomModelInput(true)}
+                      className="text-[11px] text-stone-500 dark:text-stone-400 hover:underline cursor-pointer"
+                    >
+                      修改
+                    </button>
+                  </div>
                 </div>
               )}
             </div>
@@ -3536,23 +3862,31 @@ export const SettingsSyncTab: React.FC = () => {
       {portalContainer && createPortal(
         <AnimatePresence>
           {isAiConfigModalOpen && (() => {
-            const currentMeta = MAJOR_AI_PROVIDERS.find(p => p.id === (aiConfig.majorProvider || 'deepseek')) || MAJOR_AI_PROVIDERS[0];
+            const modalMajor = resolveMajorProvider(aiConfig.majorProvider, aiConfig.provider);
+            const currentMeta = MAJOR_AI_PROVIDERS.find(p => p.id === modalMajor) || MAJOR_AI_PROVIDERS[0];
             const isGemini = currentMeta.id === 'gemini';
             const activeKey = isGemini ? (aiConfig.geminiApiKey || '') : (aiConfig.customApiKey || '');
             const currentBaseUrl = isGemini ? '' : (aiConfig.customBaseUrl || currentMeta.defaultBaseUrl || '');
-            const isLocalEndpoint = /^https?:\/\/(localhost|127\.0\.0\.1)/i.test(currentBaseUrl.trim());
-            const canProbe = isGemini || Boolean(activeKey.trim()) || isLocalEndpoint;
+            const isLocalEndpoint = !isGemini && isLocalAiEndpoint(currentBaseUrl);
+            const canProbe = Boolean(activeKey.trim()) || isLocalEndpoint;
             const ProviderIcon = currentMeta.icon;
+            const activeModel = isGemini
+              ? aiConfig.geminiModel || currentMeta.defaultModel
+              : aiConfig.customModel || currentMeta.defaultModel;
+            const detectedList = aiConfig.detectedModels || [];
 
             const closeAiModal = () => {
-              if (fetchModelsAbortRef.current) {
-                fetchModelsAbortRef.current.abort();
-                fetchModelsAbortRef.current = null;
-              }
-              setIsFetchingModels(false);
-              setIsTestingPing(false);
+              reconcileModalInputsFromDom();
               setIsAiConfigModalOpen(false);
             };
+
+            const selectProbedModel = (modelId: string) => {
+              selectAiModel(modelId, { closeCustomInput: true });
+            };
+
+            const modalModelOptions = activeModel && !detectedList.includes(activeModel)
+              ? [activeModel, ...detectedList]
+              : detectedList;
 
             return (
               <motion.div
@@ -3567,7 +3901,10 @@ export const SettingsSyncTab: React.FC = () => {
                   animate={{ scale: 1, opacity: 1, y: 0 }}
                   exit={{ scale: 0.95, opacity: 0, y: 10 }}
                   transition={{ type: 'spring', damping: 26, stiffness: 300 }}
-                  className="w-full max-w-[340px] sm:max-w-sm max-h-[min(580px,85%)] overflow-y-auto no-scrollbar bg-[#FAF8F5] dark:bg-[#18191C] border border-stone-200 dark:border-stone-700/80 rounded-3xl p-5 shadow-2xl space-y-4 text-stone-900 dark:text-stone-100"
+                  role="dialog"
+                  aria-modal="true"
+                  aria-labelledby="ai-config-modal-title"
+                  className="w-full max-w-[348px] sm:max-w-sm max-h-[min(600px,86%)] overflow-y-auto no-scrollbar bg-[#FAF8F5] dark:bg-[#18191C] border border-stone-200/90 dark:border-stone-700/80 rounded-3xl p-5 shadow-2xl space-y-4 text-stone-900 dark:text-stone-100"
                   onClick={e => e.stopPropagation()}
                 >
                   <div className="flex items-center justify-between pb-3 border-b border-stone-200/70 dark:border-stone-800">
@@ -3575,141 +3912,163 @@ export const SettingsSyncTab: React.FC = () => {
                       <div className={`w-8 h-8 rounded-xl flex items-center justify-center border border-stone-200/60 dark:border-stone-700 ${currentMeta.brandColor} bg-white dark:bg-stone-800 shadow-2xs shrink-0`}>
                         <ProviderIcon className="w-4 h-4" />
                       </div>
-                      <div className="min-w-0 flex-1">
-                        <h3 className="text-sm font-bold text-stone-900 dark:text-stone-100 truncate">
-                          配置 {currentMeta.name} 密钥与连接
-                        </h3>
-                        <p className="text-[10px] text-stone-400 dark:text-stone-500 truncate">
-                          用于剑桥真题长难句精讲与生词深度释义
-                        </p>
-                      </div>
+                      <h3 id="ai-config-modal-title" className="text-sm font-bold text-stone-900 dark:text-stone-100 truncate">
+                        配置 {currentMeta.name} 密钥与连接
+                      </h3>
                     </div>
                     <button
                       type="button"
                       onClick={closeAiModal}
-                      className="p-1 rounded-lg text-stone-400 hover:text-stone-600 dark:hover:text-stone-200 cursor-pointer shrink-0"
+                      aria-label="关闭配置弹窗"
+                      className="p-1.5 rounded-lg text-stone-400 hover:text-stone-600 dark:hover:text-stone-200 hover:bg-stone-900/[0.04] dark:hover:bg-white/[0.06] transition-colors cursor-pointer shrink-0"
                     >
                       <X className="w-4 h-4" />
                     </button>
                   </div>
 
-                  <div className="space-y-3">
-                    <div className="space-y-1">
-                      <div className="flex items-center justify-between gap-2">
-                        <label className="text-xs font-medium text-stone-700 dark:text-stone-300 flex items-center gap-1.5 shrink-0">
-                          <Key className="w-3.5 h-3.5 text-stone-400" />
-                          <span>API 密钥 (API Key)</span>
-                        </label>
-                        {isGemini && (
-                          <span className="text-[10px] text-emerald-600 dark:text-emerald-400 truncate">
-                            已内置系统通道
-                          </span>
-                        )}
-                      </div>
+                  <div className="space-y-3.5">
+                    <div className="space-y-1.5">
+                      <label className="text-xs font-medium text-stone-700 dark:text-stone-300 flex items-center gap-1.5">
+                        <Key className="w-3.5 h-3.5 text-stone-400" />
+                        <span>API 密钥 (API Key)</span>
+                      </label>
                       <div className="relative flex items-center">
                         <input
+                          {...makeDomSyncedInputProps(apiKeyInputRef, syncApiKeyValue)}
                           type={showApiKey ? 'text' : 'password'}
                           value={activeKey}
-                          onChange={e => {
-                            if (isGemini) {
-                              updateConfig({ geminiApiKey: e.target.value });
-                            } else {
-                              updateConfig({ customApiKey: e.target.value });
-                            }
-                          }}
                           placeholder={currentMeta.apiKeyPlaceholder}
-                          className="w-full h-10 pl-3 pr-8 rounded-xl bg-white dark:bg-stone-800/80 border border-stone-200 dark:border-stone-700 text-xs font-mono text-stone-800 dark:text-stone-200 placeholder-stone-400 focus:outline-none focus:ring-2 focus:ring-stone-400/30"
+                          className="select-text w-full h-10 pl-3 pr-9 rounded-xl bg-white dark:bg-stone-800/80 border border-stone-200 dark:border-stone-700 text-xs font-mono text-stone-800 dark:text-stone-200 placeholder-stone-400 focus:outline-none focus:ring-2 focus:ring-stone-400/30"
                         />
                         <button
                           type="button"
-                          onClick={() => setShowApiKey(!showApiKey)}
-                          className="absolute right-2.5 text-stone-400 hover:text-stone-600 dark:hover:text-stone-300 cursor-pointer p-1"
+                          onClick={() => {
+                            reconcileModalInputsFromDom();
+                            setShowApiKey(!showApiKey);
+                          }}
+                          aria-label={showApiKey ? '隐藏密钥' : '显示密钥'}
+                          className="absolute right-2 text-stone-400 hover:text-stone-600 dark:hover:text-stone-300 cursor-pointer p-1"
                         >
                           {showApiKey ? <EyeOff className="w-3.5 h-3.5" /> : <Eye className="w-3.5 h-3.5" />}
                         </button>
                       </div>
                     </div>
 
-                    <div className="space-y-1">
-                      <div className="flex items-center justify-between gap-2">
-                        <label className="text-xs font-medium text-stone-700 dark:text-stone-300 flex items-center gap-1.5 shrink-0">
-                          <Globe className="w-3.5 h-3.5 text-stone-400" />
-                          <span>接口地址 (Base URL)</span>
-                        </label>
-                        <span className="text-[10px] text-stone-400 dark:text-stone-500 truncate">
-                          留空使用官方默认
-                        </span>
+                    {!isGemini && (
+                      <div className="space-y-1.5">
+                        <div className="flex items-center justify-between gap-2">
+                          <label className="text-xs font-medium text-stone-700 dark:text-stone-300 flex items-center gap-1.5 shrink-0">
+                            <Globe className="w-3.5 h-3.5 text-stone-400" />
+                            <span>接口地址 (Base URL)</span>
+                          </label>
+                          {currentMeta.defaultBaseUrl && aiConfig.customBaseUrl && aiConfig.customBaseUrl !== currentMeta.defaultBaseUrl ? (
+                            <button
+                              type="button"
+                              onClick={() => updateConfig({ customBaseUrl: currentMeta.defaultBaseUrl }, { resetDetectedModels: true })}
+                              className="text-[10px] text-stone-500 hover:text-stone-800 dark:text-stone-400 dark:hover:text-stone-200 underline cursor-pointer shrink-0"
+                            >
+                              恢复默认
+                            </button>
+                          ) : (
+                            <span className="text-[10px] text-stone-400 dark:text-stone-500 truncate">
+                              留空使用官方默认
+                            </span>
+                          )}
+                        </div>
+                        <input
+                          {...makeDomSyncedInputProps(baseUrlInputRef, syncBaseUrlValue)}
+                          type="text"
+                          value={aiConfig.customBaseUrl || ''}
+                          placeholder={currentMeta.defaultBaseUrl || 'https://api.openai.com/v1'}
+                          className="select-text w-full h-10 px-3 rounded-xl bg-white dark:bg-stone-800/80 border border-stone-200 dark:border-stone-700 text-xs font-mono text-stone-800 dark:text-stone-200 placeholder-stone-400 focus:outline-none focus:ring-2 focus:ring-stone-400/30"
+                        />
                       </div>
-                      <input
-                        type="text"
-                        value={aiConfig.customBaseUrl || ''}
-                        onChange={e => updateConfig({ customBaseUrl: e.target.value })}
-                        placeholder={currentMeta.defaultBaseUrl || 'https://api.openai.com/v1'}
-                        className="w-full h-10 px-3 rounded-xl bg-white dark:bg-stone-800/80 border border-stone-200 dark:border-stone-700 text-xs font-mono text-stone-800 dark:text-stone-200 placeholder-stone-400 focus:outline-none focus:ring-2 focus:ring-stone-400/30"
-                      />
-                    </div>
+                    )}
 
-                    <div className="pt-1 flex items-center justify-between gap-2">
-                      <button
-                        type="button"
-                        onClick={handleFetchAndDetectModels}
-                        disabled={!canProbe || isFetchingModels || isTestingPing}
-                        className="h-9 px-3 rounded-xl bg-stone-200/70 hover:bg-stone-200 dark:bg-stone-800 dark:hover:bg-stone-700 text-stone-800 dark:text-stone-200 text-xs font-medium flex items-center gap-1.5 transition-all cursor-pointer disabled:opacity-45 disabled:cursor-not-allowed shrink-0"
-                      >
-                        {!canProbe ? (
-                          <>
-                            <Key className="w-3.5 h-3.5 text-stone-400" />
-                            <span>请先填写 API Key</span>
-                          </>
-                        ) : isFetchingModels ? (
-                          <>
-                            <Loader2 className="w-3.5 h-3.5 animate-spin" />
-                            <span>探测中...</span>
-                          </>
-                        ) : (
-                          <>
-                            <Zap className="w-3.5 h-3.5 text-amber-500 fill-current" />
+                    <div className="pt-0.5 space-y-2">
+                      <div className="flex items-center justify-between gap-2">
+                        <button
+                          type="button"
+                          onClick={handleFetchAndDetectModels}
+                          disabled={!canProbe || isFetchingModels}
+                          className={`h-9 px-3.5 rounded-xl text-xs font-medium flex items-center gap-1.5 transition-all cursor-pointer shrink-0 ${
+                            canProbe
+                              ? 'bg-stone-900/[0.08] hover:bg-stone-900/[0.14] dark:bg-white/[0.12] dark:hover:bg-white/[0.18] text-stone-800 dark:text-stone-100'
+                              : 'bg-stone-200/60 dark:bg-stone-800/70 text-stone-400 dark:text-stone-500 cursor-not-allowed'
+                          } disabled:opacity-60`}
+                        >
+                          {isFetchingModels ? (
+                            <>
+                              <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                              <span>探测中...</span>
+                            </>
+                          ) : (
                             <span>联网探测模型</span>
-                          </>
-                        )}
-                      </button>
+                          )}
+                        </button>
 
-                      {pingResult.status === 'success' && (
-                        <span className="text-xs font-mono text-emerald-600 dark:text-emerald-400 flex items-center gap-1 truncate">
-                          <CheckCircle2 className="w-3.5 h-3.5 shrink-0" />
-                          <span className="truncate">连通 ({pingResult.latency}ms)</span>
-                        </span>
-                      )}
+                        {!canProbe && (
+                          <span className="text-[11px] text-stone-400 dark:text-stone-500 truncate">
+                            填写 API Key 后可探测
+                          </span>
+                        )}
+
+                        {canProbe && pingResult.status === 'success' && (
+                          <span className="text-xs font-mono text-emerald-600 dark:text-emerald-400 flex items-center gap-1 truncate">
+                            <CheckCircle2 className="w-3.5 h-3.5 shrink-0" />
+                            <span className="truncate">连通 ({pingResult.latency}ms)</span>
+                          </span>
+                        )}
+                      </div>
+
                       {pingResult.status === 'error' && (
-                        <span className="text-xs font-mono text-rose-500 flex items-center gap-1 truncate">
-                          <AlertCircle className="w-3.5 h-3.5 shrink-0" />
-                          <span className="truncate">{pingResult.msg || '连接失败'}</span>
-                        </span>
+                        <div className="px-2.5 py-2 rounded-xl bg-rose-500/10 border border-rose-500/20 text-[11px] text-rose-600 dark:text-rose-400 flex items-start gap-1.5 leading-snug">
+                          <AlertCircle className="w-3.5 h-3.5 shrink-0 mt-0.5" />
+                          <span className="break-words min-w-0">{pingResult.msg || '连接失败'}</span>
+                        </div>
                       )}
                     </div>
+
+                    {modalModelOptions.length > 0 && detectedList.length > 0 && (
+                      <div className="pt-2.5 border-t border-stone-200/70 dark:border-stone-800 space-y-2">
+                        <div className="flex items-center justify-between gap-2">
+                          <span className="text-[11px] font-medium text-stone-600 dark:text-stone-300">
+                            可选模型
+                          </span>
+                          <span className="text-[10px] font-mono text-stone-400 dark:text-stone-500">
+                            已探测 {detectedList.length} 个
+                          </span>
+                        </div>
+
+                        <div className="flex flex-wrap gap-1.5 max-h-40 overflow-y-auto no-scrollbar pr-0.5">
+                          {modalModelOptions.map(modelId => {
+                            const selected = (activeModel || modalModelOptions[0] || '') === modelId;
+                            return (
+                              <button
+                                key={modelId}
+                                type="button"
+                                onClick={() => selectProbedModel(modelId)}
+                                className={`px-2.5 py-1.5 rounded-xl text-[11px] font-mono flex items-center gap-1.5 border transition-all cursor-pointer max-w-full ${
+                                  selected
+                                    ? 'bg-stone-900 dark:bg-white text-white dark:text-stone-950 border-stone-900 dark:border-white font-semibold shadow-2xs'
+                                    : 'bg-white dark:bg-stone-800/80 text-stone-700 dark:text-stone-300 border-stone-200 dark:border-stone-700 hover:border-stone-400 dark:hover:border-stone-500'
+                                }`}
+                              >
+                                <span className="truncate">{modelId}</span>
+                                {selected && <Check className="w-3 h-3 shrink-0" />}
+                              </button>
+                            );
+                          })}
+                        </div>
+                      </div>
+                    )}
                   </div>
 
                   <div className="pt-3 border-t border-stone-200/70 dark:border-stone-800 flex justify-end gap-2">
                     <button
                       type="button"
                       onClick={() => {
-                        if (currentMeta.id !== 'gemini' && aiConfig.customApiKey) {
-                          const updated = {
-                            ...savedProviderKeys,
-                            [currentMeta.id]: {
-                              apiKey: aiConfig.customApiKey,
-                              baseUrl: aiConfig.customBaseUrl,
-                              model: aiConfig.customModel
-                            }
-                          };
-                          setSavedProviderKeys(updated);
-                          try {
-                            localStorage.setItem('lyricalens_ai_saved_providers', JSON.stringify(updated));
-                          } catch (e) {
-                            console.warn(e);
-                          }
-                        }
-                        setIsAiConfigModalOpen(false);
+                        closeAiModal();
                         showToast(`已保存 ${currentMeta.name} 配置`);
                       }}
                       className="w-full sm:w-auto px-5 py-2.5 rounded-xl bg-stone-900 hover:bg-stone-800 dark:bg-white dark:hover:bg-stone-100 text-white dark:text-stone-950 text-xs font-semibold cursor-pointer shadow-xs transition-all text-center"

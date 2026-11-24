@@ -14,7 +14,13 @@ export function useAndroidBackButton() {
       // 1. Level 1: Overlays, Modals, and Drawers (highest to lowest visual hierarchy)
       // ==========================================
 
-      // Topmost: Word Detail Fullscreen Sheet or Drawer
+      // Topmost: Active Word Drawer stack (pops inner card or closes nested drawer before fullscreen WordDetailSheet)
+      if (state.wordDrawerBackHandler && state.wordDrawerBackHandler()) {
+        lastBackPressRef.current = 0;
+        return;
+      }
+
+      // Fullscreen Word Detail Sheet (or fallback Drawer)
       if (state.isWordSheetOpen) {
         state.closeWordDetail();
         lastBackPressRef.current = 0;
@@ -24,6 +30,13 @@ export function useAndroidBackButton() {
       // IELTS Archive Review Modal (opened from inside Personal Hub)
       if (state.activeArchiveReviewRecord) {
         state.setActiveArchiveReviewRecord(null);
+        lastBackPressRef.current = 0;
+        return;
+      }
+
+      // AI Config Modal (opened from inside Personal Hub Settings tab)
+      if (state.isAiConfigModalOpen) {
+        state.setIsAiConfigModalOpen(false);
         lastBackPressRef.current = 0;
         return;
       }

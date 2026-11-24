@@ -7,6 +7,7 @@ import { TopHeader } from '../TopHeader';
 import { SpatialTag } from './SpatialTag';
 import { ZenShutter } from './ZenShutter';
 import { db, setWordMastery } from '../../db';
+import { detectObjectsWithAiVision, VisionDetectionError } from '../../utils/arVisionDetector';
 
 interface ARCameraPanelProps {
   onOpenNotebook: () => void;
@@ -155,10 +156,17 @@ export const ARCameraPanel: React.FC<ARCameraPanelProps> = ({ onOpenNotebook }) 
   const [shutterFlash, setShutterFlash] = useState<boolean>(false);
   const [isScanning, setIsScanning] = useState<boolean>(false);
   const [isTorchOn, setIsTorchOn] = useState<boolean>(false);
-  const [hasTorch] = useState<boolean>(true);
+  const [hasTorch, setHasTorch] = useState<boolean>(false);
   const freezeCanvasRef = useRef<HTMLCanvasElement | null>(null);
   const [hasFreezeFrame, setHasFreezeFrame] = useState<boolean>(false);
   const streamStopTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const visionAbortRef = useRef<AbortController | null>(null);
+  const isMountedRef = useRef<boolean>(true);
+  const cameraRequestIdRef = useRef<number>(0);
+  const [containerSize, setContainerSize] = useState<{ width: number; height: number }>({
+    width: 390,
+    height: 820
+  });
 
   // First-time Guide Overlay State ("此次关掉" vs "以后都关掉")
   const [showFirstTimeGuide, setShowFirstTimeGuide] = useState<boolean>(() => {
@@ -207,7 +215,7 @@ export const ARCameraPanel: React.FC<ARCameraPanelProps> = ({ onOpenNotebook }) 
           sy = (sourceHeight - sh) / 2;
         }
 
-        const maxDim = 768;
+        const maxDim = 960;
         let outW = Math.round(sw);
         let outH = Math.round(sh);
         if (outW > maxDim || outH > maxDim) {
@@ -242,65 +250,102 @@ export const ARCameraPanel: React.FC<ARCameraPanelProps> = ({ onOpenNotebook }) 
     return captureObjectCoverBase64(video, video.videoWidth, video.videoHeight, 0.76);
   }, [captureObjectCoverBase64]);
 
-  // Deep Gemini / Multimodal Cloud Vision Analysis
+  const syncTagsWithDb = useCallback(async (rawTags: ARDetectedObject[]): Promise<ARDetectedObject[]> => {
+    try {
+      const wordsInDb = await db.words.toArray();
+      const wordMap = new Map(wordsInDb.map(w => [w.word.toLowerCase(), w]));
+      return rawTags.map((t) => {
+        const match = wordMap.get(t.wordData.word.toLowerCase());
+        return {
+          ...t,
+          wordData: {
+            ...t.wordData,
+            masteryLevel: (match?.masteryLevel ?? (match?.isStarred ? 1 : 0)) as MasteryLevel,
+            isStarred: Boolean(match?.isStarred || (match?.masteryLevel ?? 0) > 0)
+          }
+        };
+      });
+    } catch {
+      return rawTags;
+    }
+  }, []);
+
+  // Direct Multimodal Vision Analysis (Uses user-configured AI via CapacitorHttp/fetch, Web server fallback when unconfigured)
   const runCloudVisionDetection = useCallback(
     async (overrideBase64?: string, fallbackTagsOnFail?: ARDetectedObject[]) => {
-      const frameBase64 = overrideBase64 || frozenFrameUrl || captureCurrentFrameBase64();
-      if (!frameBase64) return;
+      const localFrozenFrame =
+        frozenFrameUrl && !/^https?:\/\//i.test(frozenFrameUrl) ? frozenFrameUrl : null;
+      const frameBase64 = overrideBase64 || localFrozenFrame || captureCurrentFrameBase64();
+      if (!frameBase64) {
+        if (fallbackTagsOnFail && fallbackTagsOnFail.length > 0) {
+          setTags(await syncTagsWithDb(fallbackTagsOnFail));
+        } else {
+          showToast('未能获取有效画面，请重试');
+        }
+        setIsScanning(false);
+        return;
+      }
 
+      visionAbortRef.current?.abort();
+      const controller = new AbortController();
+      visionAbortRef.current = controller;
       setIsScanning(true);
 
       const applySyncedTags = async (rawTags: ARDetectedObject[]) => {
-        const wordsInDb = await db.words.toArray();
-        const wordMap = new Map(wordsInDb.map(w => [w.word.toLowerCase(), w]));
-        const updatedTags: ARDetectedObject[] = rawTags.map((t: any) => {
-          const match = wordMap.get(t.wordData.word.toLowerCase());
-          return {
-            ...t,
-            wordData: {
-              ...t.wordData,
-              masteryLevel: (match?.masteryLevel ?? (match?.isStarred ? 1 : 0)) as MasteryLevel,
-              isStarred: Boolean(match?.isStarred || (match?.masteryLevel ?? 0) > 0)
-            }
-          };
-        });
-        setTags(updatedTags);
+        const synced = await syncTagsWithDb(rawTags);
+        if (!isMountedRef.current || controller.signal.aborted) return;
+        setTags(synced);
       };
 
       try {
-        const res = await fetch('/api/gemini/vision-detect', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ imageBase64: frameBase64 })
+        const result = await detectObjectsWithAiVision(frameBase64, {
+          signal: controller.signal,
+          timeoutMs: 35000
         });
-        if (!res.ok) throw new Error(`HTTP ${res.status}`);
-        const data = await res.json();
+        if (!isMountedRef.current || controller.signal.aborted) return;
 
-        if (data.tags && Array.isArray(data.tags) && data.tags.length > 0 && !data.isFallback) {
-          await applySyncedTags(data.tags);
+        if (result.tags.length > 0 && !result.isFallback) {
+          await applySyncedTags(result.tags);
         } else if (fallbackTagsOnFail && fallbackTagsOnFail.length > 0) {
           await applySyncedTags(fallbackTagsOnFail);
-        } else if (data.tags && Array.isArray(data.tags) && data.tags.length > 0) {
-          await applySyncedTags(data.tags);
+        } else if (result.tags.length > 0) {
+          await applySyncedTags(result.tags);
         } else {
           showToast('未检测到清晰物体，请重试');
         }
-      } catch (err) {
-        console.warn('Vision detection fallback:', err);
+      } catch (err: unknown) {
+        if (
+          !isMountedRef.current ||
+          controller.signal.aborted ||
+          (err instanceof VisionDetectionError && err.code === 'ABORTED')
+        ) {
+          return;
+        }
+        console.warn('Vision detection error:', err);
         if (fallbackTagsOnFail && fallbackTagsOnFail.length > 0) {
           await applySyncedTags(fallbackTagsOnFail);
         } else {
-          showToast('网络请求超时，请点击快门重试');
+          const message =
+            err instanceof Error && err.message
+              ? err.message
+              : '识图服务暂时不可用，请点击快门重试';
+          showToast(message);
         }
       } finally {
-        setIsScanning(false);
+        if (visionAbortRef.current === controller) {
+          visionAbortRef.current = null;
+          if (isMountedRef.current) {
+            setIsScanning(false);
+          }
+        }
       }
     },
-    [captureCurrentFrameBase64, frozenFrameUrl, showToast]
+    [captureCurrentFrameBase64, frozenFrameUrl, showToast, syncTagsWithDb]
   );
 
   // Clean stream release
   const stopStream = () => {
+    cameraRequestIdRef.current += 1;
     if (streamRef.current) {
       streamRef.current.getTracks().forEach(track => track.stop());
       streamRef.current = null;
@@ -308,12 +353,17 @@ export const ARCameraPanel: React.FC<ARCameraPanelProps> = ({ onOpenNotebook }) 
     if (videoRef.current) {
       videoRef.current.srcObject = null;
     }
-    setStreamActive(false);
-    setIsTorchOn(false);
+    if (isMountedRef.current) {
+      setStreamActive(false);
+      setIsTorchOn(false);
+      setHasTorch(false);
+      setIsRequesting(false);
+    }
   };
 
   // Start Camera
   const startCamera = async (targetFacing = facingMode) => {
+    const requestId = ++cameraRequestIdRef.current;
     setIsRequesting(true);
     const oldStream = streamRef.current;
 
@@ -329,10 +379,18 @@ export const ARCameraPanel: React.FC<ARCameraPanelProps> = ({ onOpenNotebook }) 
           audio: false
         });
       } catch {
+        if (!isMountedRef.current || requestId !== cameraRequestIdRef.current) {
+          return;
+        }
         stream = await navigator.mediaDevices.getUserMedia({
           video: true,
           audio: false
         });
+      }
+
+      if (!isMountedRef.current || requestId !== cameraRequestIdRef.current) {
+        stream?.getTracks().forEach(t => t.stop());
+        return;
       }
 
       if (stream) {
@@ -349,6 +407,25 @@ export const ARCameraPanel: React.FC<ARCameraPanelProps> = ({ onOpenNotebook }) 
             console.warn('Video autoplay prevented:', playErr);
           }
         }
+
+        if (!isMountedRef.current || requestId !== cameraRequestIdRef.current) {
+          stream.getTracks().forEach(t => t.stop());
+          if (streamRef.current === stream) {
+            streamRef.current = null;
+          }
+          if (videoRef.current && videoRef.current.srcObject === stream) {
+            videoRef.current.srcObject = null;
+          }
+          return;
+        }
+
+        const primaryTrack = stream.getVideoTracks()[0];
+        const trackCapabilities =
+          primaryTrack && typeof primaryTrack.getCapabilities === 'function'
+            ? (primaryTrack.getCapabilities() as MediaTrackCapabilities & { torch?: boolean })
+            : undefined;
+        setHasTorch(Boolean(trackCapabilities?.torch));
+        setIsTorchOn(false);
         setStreamActive(true);
         setPermissionDenied(false);
         setScannerActive(true);
@@ -359,12 +436,14 @@ export const ARCameraPanel: React.FC<ARCameraPanelProps> = ({ onOpenNotebook }) 
       }
     } catch (err) {
       console.warn('Camera access denied or unavailable:', err);
-      if (!streamRef.current) {
+      if (isMountedRef.current && requestId === cameraRequestIdRef.current && !streamRef.current) {
         setStreamActive(false);
         setPermissionDenied(true);
       }
     } finally {
-      setIsRequesting(false);
+      if (isMountedRef.current && requestId === cameraRequestIdRef.current) {
+        setIsRequesting(false);
+      }
     }
   };
 
@@ -372,6 +451,9 @@ export const ARCameraPanel: React.FC<ARCameraPanelProps> = ({ onOpenNotebook }) 
   const prevFrozenRef = useRef(isFrozen);
   useEffect(() => {
     if (prevFrozenRef.current && !isFrozen) {
+      visionAbortRef.current?.abort();
+      visionAbortRef.current = null;
+      setIsScanning(false);
       setFrozenFrameUrl(null);
       setTags([]);
       setActiveBubbleId(null);
@@ -415,21 +497,55 @@ export const ARCameraPanel: React.FC<ARCameraPanelProps> = ({ onOpenNotebook }) 
     }
   }, [activeSpace, isScannerActive, isFrozen, facingMode]);
 
+  // Track latest camera lifecycle state for visibilitychange & unmount-only cleanup
+  const latestLifecycleRef = useRef({ activeSpace, isScannerActive, isFrozen, facingMode });
+  useEffect(() => {
+    latestLifecycleRef.current = { activeSpace, isScannerActive, isFrozen, facingMode };
+  }, [activeSpace, isScannerActive, isFrozen, facingMode]);
+
   // Clean background unmount & phone screen sleep / minimize listener
   useEffect(() => {
+    isMountedRef.current = true;
     const handleVisibilityChange = () => {
+      const state = latestLifecycleRef.current;
       if (document.visibilityState === 'hidden') {
         stopStream();
-      } else if (document.visibilityState === 'visible' && activeSpace === 0 && isScannerActive && !isFrozen) {
-        startCamera(facingMode);
+      } else if (
+        document.visibilityState === 'visible' &&
+        state.activeSpace === 0 &&
+        state.isScannerActive &&
+        !state.isFrozen
+      ) {
+        startCamera(state.facingMode);
       }
     };
     document.addEventListener('visibilitychange', handleVisibilityChange);
     return () => {
+      isMountedRef.current = false;
       document.removeEventListener('visibilitychange', handleVisibilityChange);
+      visionAbortRef.current?.abort();
       stopStream();
     };
-  }, [activeSpace, isScannerActive, isFrozen, facingMode]);
+  }, []);
+
+  // Track container size for synchronized tag AABB collision bounds
+  useEffect(() => {
+    const el = containerRef.current;
+    if (!el) return;
+    const updateContainerSize = () => {
+      const w = el.clientWidth || window.innerWidth || 390;
+      const h = el.clientHeight || window.innerHeight || 820;
+      setContainerSize(prev => (prev.width === w && prev.height === h ? prev : { width: w, height: h }));
+    };
+    updateContainerSize();
+    const ro = new ResizeObserver(updateContainerSize);
+    ro.observe(el);
+    window.addEventListener('resize', updateContainerSize);
+    return () => {
+      ro.disconnect();
+      window.removeEventListener('resize', updateContainerSize);
+    };
+  }, []);
 
   // Subtle floating physics when frozen
   useEffect(() => {
@@ -459,19 +575,24 @@ export const ARCameraPanel: React.FC<ARCameraPanelProps> = ({ onOpenNotebook }) 
 
     try {
       const nextState = !isTorchOn;
-      const capabilities: any =
-        typeof videoTrack.getCapabilities === 'function' ? videoTrack.getCapabilities() : {};
-      if (capabilities && capabilities.torch !== undefined) {
-        await (videoTrack as any).applyConstraints({
+      const capabilities =
+        typeof videoTrack.getCapabilities === 'function'
+          ? (videoTrack.getCapabilities() as MediaTrackCapabilities & { torch?: boolean })
+          : undefined;
+      if (capabilities?.torch !== undefined) {
+        const torchConstraints: MediaTrackConstraints & {
+          advanced?: Array<MediaTrackConstraintSet & { torch?: boolean }>;
+        } = {
           advanced: [{ torch: nextState }]
-        });
+        };
+        await videoTrack.applyConstraints(torchConstraints);
         setIsTorchOn(nextState);
       } else {
-        setIsTorchOn(nextState);
+        setHasTorch(false);
       }
     } catch (err) {
       console.warn('Torch toggle error:', err);
-      setIsTorchOn(!isTorchOn);
+      showToast('当前设备暂不支持开启闪光灯');
     }
   };
 
@@ -487,11 +608,20 @@ export const ARCameraPanel: React.FC<ARCameraPanelProps> = ({ onOpenNotebook }) 
     e.target.value = '';
 
     const reader = new FileReader();
+    reader.onerror = () => {
+      showToast('图片读取失败，请更换图片重试');
+    };
     reader.onload = (event) => {
       const resultUrl = event.target?.result as string;
-      if (!resultUrl) return;
+      if (!resultUrl) {
+        showToast('图片读取失败，请更换图片重试');
+        return;
+      }
 
       const img = new Image();
+      img.onerror = () => {
+        showToast('无法解析所选图片，请更换图片重试');
+      };
       img.onload = () => {
         const compressedDataUrl =
           captureObjectCoverBase64(img, img.naturalWidth || img.width, img.naturalHeight || img.height, 0.8) ||
@@ -545,6 +675,8 @@ export const ARCameraPanel: React.FC<ARCameraPanelProps> = ({ onOpenNotebook }) 
       }
     } else {
       // Resume Live Stream (or return to standby if camera wasn't started)
+      visionAbortRef.current?.abort();
+      setIsScanning(false);
       setIsFrozen(false);
       setFrozenFrameUrl(null);
       setTags([]);
@@ -618,15 +750,32 @@ export const ARCameraPanel: React.FC<ARCameraPanelProps> = ({ onOpenNotebook }) 
         img.src = SAMPLE_DESK_IMAGE_URL;
       });
 
+      if (!isMountedRef.current || !useAppStore.getState().isArFrozen) {
+        if (isMountedRef.current) {
+          setIsScanning(false);
+        }
+        return;
+      }
+
       if (croppedBase64) {
         setFrozenFrameUrl(croppedBase64);
         await runCloudVisionDetection(croppedBase64, SAMPLE_DESK_TAGS);
       } else {
-        await runCloudVisionDetection(undefined, SAMPLE_DESK_TAGS);
+        const syncedFallback = await syncTagsWithDb(SAMPLE_DESK_TAGS);
+        if (isMountedRef.current && useAppStore.getState().isArFrozen) {
+          setTags(syncedFallback);
+        }
+        if (isMountedRef.current) {
+          setIsScanning(false);
+        }
       }
     } catch {
-      setTags(SAMPLE_DESK_TAGS);
-      setIsScanning(false);
+      if (isMountedRef.current && useAppStore.getState().isArFrozen) {
+        setTags(SAMPLE_DESK_TAGS);
+      }
+      if (isMountedRef.current) {
+        setIsScanning(false);
+      }
     }
   };
 
@@ -651,8 +800,10 @@ export const ARCameraPanel: React.FC<ARCameraPanelProps> = ({ onOpenNotebook }) 
     const offsets: Record<string, { x: number; y: number; preferTop?: boolean }> = {};
     if (tags.length <= 1) return offsets;
 
-    const containerW = containerRef.current?.clientWidth || 390;
-    const containerH = containerRef.current?.clientHeight || 820;
+    const containerW = containerSize.width || 390;
+    const containerH = containerSize.height || 820;
+    const topSafeMargin = 112;
+    const bottomSafeMargin = 178;
     const capsuleH = 38;
     const leaderH = 22;
 
@@ -672,7 +823,7 @@ export const ARCameraPanel: React.FC<ARCameraPanelProps> = ({ onOpenNotebook }) 
       const anchorY = containerH * (t.pos.y / 100);
       const cnShort = t.wordData.definitionCn ? t.wordData.definitionCn.split(/[，；,]/)[0] : '';
       const estWidth = Math.min(220, Math.max(128, t.label.length * 8.5 + cnShort.length * 13 + 52));
-      const preferTop = anchorY - leaderH - capsuleH >= 56;
+      const preferTop = anchorY - leaderH - capsuleH >= topSafeMargin;
       const defaultCy = preferTop
         ? anchorY - leaderH - capsuleH / 2
         : anchorY + leaderH + capsuleH / 2;
@@ -689,7 +840,7 @@ export const ARCameraPanel: React.FC<ARCameraPanelProps> = ({ onOpenNotebook }) 
       };
     });
 
-    // If two anchors are vertically close and horizontally overlapping, flip one to bottom and one to top first
+    // If two anchors are vertically close and horizontally overlapping, flip upper to top only when top safe room exists
     for (let i = 0; i < boxes.length; i++) {
       for (let j = i + 1; j < boxes.length; j++) {
         const a = boxes[i];
@@ -698,23 +849,23 @@ export const ARCameraPanel: React.FC<ARCameraPanelProps> = ({ onOpenNotebook }) 
         const minH = (a.h + b.h) / 2 + 8;
         if (Math.abs(a.cx - b.cx) < minW && Math.abs(a.cy - b.cy) < minH) {
           if (a.preferTop === b.preferTop) {
-            if (a.anchorY <= b.anchorY) {
-              a.preferTop = true;
-              a.cy = a.anchorY - leaderH - capsuleH / 2;
-              b.preferTop = false;
-              b.cy = b.anchorY + leaderH + capsuleH / 2;
-            } else {
-              b.preferTop = true;
-              b.cy = b.anchorY - leaderH - capsuleH / 2;
-              a.preferTop = false;
-              a.cy = a.anchorY + leaderH + capsuleH / 2;
+            const upper = a.anchorY <= b.anchorY ? a : b;
+            const lower = upper === a ? b : a;
+            if (upper.anchorY - leaderH - capsuleH >= topSafeMargin) {
+              upper.preferTop = true;
+              upper.cy = upper.anchorY - leaderH - capsuleH / 2;
+              lower.preferTop = false;
+              lower.cy = lower.anchorY + leaderH + capsuleH / 2;
             }
           }
         }
       }
     }
 
-    // Iterative relaxation pass to eliminate any remaining AABB overlap
+    const minCy = topSafeMargin + capsuleH / 2;
+    const maxCy = Math.max(minCy, containerH - bottomSafeMargin - capsuleH / 2);
+
+    // Iterative relaxation pass to eliminate any remaining AABB overlap while respecting safe edges
     for (let iter = 0; iter < 6; iter++) {
       for (let i = 0; i < boxes.length; i++) {
         for (let j = i + 1; j < boxes.length; j++) {
@@ -725,22 +876,30 @@ export const ARCameraPanel: React.FC<ARCameraPanelProps> = ({ onOpenNotebook }) 
 
           if (overlapX > 0 && overlapY > 0) {
             if (overlapY <= overlapX * 0.85) {
-              const pushY = (overlapY / 2) + 2;
-              if (a.cy <= b.cy) {
-                a.cy -= pushY;
-                b.cy += pushY;
+              const upper = a.cy <= b.cy ? a : b;
+              const lower = upper === a ? b : a;
+              const upperBlockedAbove =
+                upper.cy <= minCy + 2 || (!upper.preferTop && upper.anchorY - leaderH - capsuleH < topSafeMargin);
+              const lowerBlockedBelow = lower.cy >= maxCy - 2;
+              const step = overlapY + 4;
+
+              if (upperBlockedAbove && !lowerBlockedBelow) {
+                lower.cy = Math.min(maxCy, lower.cy + step);
+              } else if (lowerBlockedBelow && !upperBlockedAbove) {
+                upper.cy = Math.max(minCy, upper.cy - step);
               } else {
-                a.cy += pushY;
-                b.cy -= pushY;
+                const pushY = overlapY / 2 + 2;
+                upper.cy = Math.max(minCy, upper.cy - pushY);
+                lower.cy = Math.min(maxCy, lower.cy + pushY);
               }
             } else {
-              const pushX = (overlapX / 2) + 3;
+              const pushX = overlapX / 2 + 3;
               if (a.cx <= b.cx) {
-                a.cx -= pushX;
-                b.cx += pushX;
+                a.cx = Math.max(16 + a.w / 2, a.cx - pushX);
+                b.cx = Math.min(containerW - 16 - b.w / 2, b.cx + pushX);
               } else {
-                a.cx += pushX;
-                b.cx -= pushX;
+                a.cx = Math.min(containerW - 16 - a.w / 2, a.cx + pushX);
+                b.cx = Math.max(16 + b.w / 2, b.cx - pushX);
               }
             }
           }
@@ -749,18 +908,19 @@ export const ARCameraPanel: React.FC<ARCameraPanelProps> = ({ onOpenNotebook }) 
     }
 
     boxes.forEach((b) => {
+      const clampedCy = Math.min(maxCy, Math.max(minCy, b.cy));
       const baseCy = b.preferTop
         ? b.anchorY - leaderH - capsuleH / 2
         : b.anchorY + leaderH + capsuleH / 2;
       offsets[b.id] = {
         x: Math.round(b.cx - b.anchorX),
-        y: Math.round(b.cy - baseCy),
+        y: Math.round(clampedCy - baseCy),
         preferTop: b.preferTop
       };
     });
 
     return offsets;
-  }, [tags]);
+  }, [tags, containerSize]);
 
   return (
     <div
@@ -788,7 +948,7 @@ export const ARCameraPanel: React.FC<ARCameraPanelProps> = ({ onOpenNotebook }) 
               className={`w-9 h-9 rounded-full flex items-center justify-center backdrop-blur-xl border transition-all cursor-pointer active:scale-90 ${
                 isTorchOn
                   ? 'bg-amber-400/90 text-stone-900 border-amber-300 shadow-[0_0_16px_rgba(251,191,36,0.45)]'
-                  : 'bg-white/14 hover:bg-white/22 border-white/25 text-white shadow-[0_2px_10px_rgba(0,0,0,0.18)]'
+                  : 'bg-stone-950/30 hover:bg-stone-950/45 border-white/25 text-white shadow-[0_2px_10px_rgba(0,0,0,0.22)]'
               }`}
               title={isTorchOn ? '关闭补光' : '开启补光'}
               aria-label={isTorchOn ? 'Turn off flashlight' : 'Turn on flashlight'}
@@ -829,7 +989,7 @@ export const ARCameraPanel: React.FC<ARCameraPanelProps> = ({ onOpenNotebook }) 
           }`}
         />
 
-        {/* Minimalist First-Time Onboarding Card with Delayed Staggered Entrance */}
+        {/* Minimalist First-Time Onboarding Card centered inside visible viewfinder area */}
         <AnimatePresence>
           {isGuideVisible && (
             <motion.div
@@ -838,7 +998,7 @@ export const ARCameraPanel: React.FC<ARCameraPanelProps> = ({ onOpenNotebook }) 
               exit={{ opacity: 0 }}
               transition={{ duration: 0.35, ease: 'easeOut' }}
               onClick={e => e.stopPropagation()}
-              className="absolute inset-0 z-30 flex items-center justify-center px-6 pointer-events-auto"
+              className="absolute inset-0 z-30 flex items-center justify-center px-6 pt-20 pb-36 pointer-events-auto"
             >
               <motion.div
                 initial={{ opacity: 0, y: 24, scale: 0.94, filter: 'blur(8px)' }}
@@ -916,19 +1076,37 @@ export const ARCameraPanel: React.FC<ARCameraPanelProps> = ({ onOpenNotebook }) 
 
         {/* Subtle Minimalist Hint ONLY if Camera Permission is Denied and Guide is Closed */}
         {permissionDenied && !streamActive && !isFrozen && !isGuideVisible && (
-          <div className="absolute inset-0 z-10 flex flex-col items-center justify-center px-8 text-center pointer-events-none">
+          <div className="absolute inset-0 z-10 flex flex-col items-center justify-center px-8 pt-20 pb-36 text-center pointer-events-none">
             <button
               type="button"
               onClick={() => startCamera(facingMode)}
-              className="pointer-events-auto flex flex-col items-center gap-3 px-6 py-4 rounded-2xl bg-white/8 hover:bg-white/12 backdrop-blur-xl border border-white/15 transition-all active:scale-95 cursor-pointer"
+              className="pointer-events-auto flex flex-col items-center gap-3 px-6 py-4 rounded-2xl bg-stone-950/45 hover:bg-stone-950/60 backdrop-blur-xl border border-white/20 transition-all active:scale-95 cursor-pointer shadow-[0_12px_32px_rgba(0,0,0,0.3)]"
             >
-              <Camera className="w-5 h-5 text-white/70 stroke-[1.6]" />
-              <span className="text-xs text-white/85 font-sans tracking-wide">
+              <Camera className="w-5 h-5 text-white/85 stroke-[1.6]" />
+              <span className="text-xs text-white/90 font-sans tracking-wide">
                 未开启相机权限 · 轻触重试或从左下角相册选图
               </span>
             </button>
           </div>
         )}
+
+        {/* Crisp Centered Scanning Status Pill during Multimodal Vision Call */}
+        <AnimatePresence>
+          {isScanning && (
+            <motion.div
+              initial={{ opacity: 0, y: -8, scale: 0.96 }}
+              animate={{ opacity: 1, y: 0, scale: 1 }}
+              exit={{ opacity: 0, y: -8, scale: 0.96 }}
+              transition={{ duration: 0.22 }}
+              className="absolute inset-x-0 top-[calc(var(--android-safe-top,52px)+3.5rem)] z-30 flex justify-center pointer-events-none"
+            >
+              <div className="flex items-center gap-2 px-3.5 py-1.5 rounded-full bg-stone-950/65 backdrop-blur-xl border border-white/20 text-[11px] font-sans tracking-wide text-white/95 shadow-[0_8px_24px_rgba(0,0,0,0.35)]">
+                <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-ping" />
+                <span>AI 正在识别画面物体...</span>
+              </div>
+            </motion.div>
+          )}
+        </AnimatePresence>
 
         {/* Frozen Frame Snapshot Overlay */}
         {isFrozen && frozenFrameUrl && (

@@ -56,15 +56,16 @@ export const PersonalHubModal: React.FC = () => {
       aria-hidden={!isPersonalHubOpen}
       style={{
         visibility: isPersonalHubOpen ? 'visible' : 'hidden',
+        opacity: isPersonalHubOpen ? 1 : 0,
         transform: isPersonalHubOpen ? 'translate3d(0, 0%, 0)' : 'translate3d(0, -102%, 0)',
         WebkitTransform: isPersonalHubOpen ? 'translate3d(0, 0%, 0)' : 'translate3d(0, -102%, 0)',
         transition: isPersonalHubOpen
-          ? 'transform var(--spring-duration-modal, 320ms) cubic-bezier(0.22, 1, 0.36, 1), visibility 0s linear 0s'
-          : 'transform var(--spring-duration-modal, 320ms) cubic-bezier(0.22, 1, 0.36, 1), visibility 0s linear 320ms',
+          ? 'transform 480ms cubic-bezier(0.32, 0.72, 0, 1), opacity 340ms ease-out, visibility 0s linear 0s'
+          : 'transform 400ms cubic-bezier(0.32, 0.72, 0, 1), opacity 300ms ease-in, visibility 0s linear 400ms',
         WebkitTransition: isPersonalHubOpen
-          ? '-webkit-transform var(--spring-duration-modal, 320ms) cubic-bezier(0.22, 1, 0.36, 1), visibility 0s linear 0s'
-          : '-webkit-transform var(--spring-duration-modal, 320ms) cubic-bezier(0.22, 1, 0.36, 1), visibility 0s linear 320ms',
-        willChange: 'transform',
+          ? '-webkit-transform 480ms cubic-bezier(0.32, 0.72, 0, 1), opacity 340ms ease-out, visibility 0s linear 0s'
+          : '-webkit-transform 400ms cubic-bezier(0.32, 0.72, 0, 1), opacity 300ms ease-in, visibility 0s linear 400ms',
+        willChange: 'transform, opacity',
         backfaceVisibility: 'hidden',
         WebkitBackfaceVisibility: 'hidden',
         contain: 'layout style paint',

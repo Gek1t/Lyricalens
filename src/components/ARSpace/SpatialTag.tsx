@@ -98,10 +98,10 @@ export const SpatialTag: React.FC<SpatialTagProps> = ({
     onHeroFlight(rect);
   };
 
-  // Safe boundary clamping for full-screen viewfinder
+  // Safe boundary clamping for full-screen viewfinder (clears TopHeader & lifted ZenShutter)
   const { width: containerWidth, height: containerHeight } = containerDimensions;
-  const topSafeMargin = 56;
-  const bottomSafeMargin = 124;
+  const topSafeMargin = 112;
+  const bottomSafeMargin = 178;
   const leftSafeMargin = 16;
   const rightSafeMargin = 16;
 
@@ -129,18 +129,16 @@ export const SpatialTag: React.FC<SpatialTagProps> = ({
         ? collisionOffset.preferTop
         : anchorYPx - leaderHeight - capsuleHeight >= topSafeMargin;
 
-    if (preferTop && anchorYPx - leaderHeight - capsuleHeight + extraY >= topSafeMargin) {
-      isTopPlaced = true;
-      shiftY = -leaderHeight - capsuleHeight + extraY;
-      leaderLineEndY = shiftY + capsuleHeight;
-    } else {
-      isTopPlaced = false;
-      shiftY = Math.min(
-        containerHeight - bottomSafeMargin - capsuleHeight - anchorYPx,
-        Math.max(12, leaderHeight + extraY)
-      );
-      leaderLineEndY = shiftY;
-    }
+    const rawCardTop = preferTop
+      ? anchorYPx - leaderHeight - capsuleHeight + extraY
+      : anchorYPx + leaderHeight + extraY;
+    const minCardTop = topSafeMargin;
+    const maxCardTop = Math.max(minCardTop, containerHeight - bottomSafeMargin - capsuleHeight);
+    const clampedCardTop = Math.min(maxCardTop, Math.max(minCardTop, rawCardTop));
+
+    shiftY = clampedCardTop - anchorYPx;
+    isTopPlaced = clampedCardTop + capsuleHeight / 2 < anchorYPx;
+    leaderLineEndY = isTopPlaced ? shiftY + capsuleHeight : shiftY;
   } else {
     const leaderHeight = 24;
     const bubbleHeight = measuredCardSize.height || 230;
@@ -153,7 +151,9 @@ export const SpatialTag: React.FC<SpatialTagProps> = ({
       leaderLineEndY = shiftY + bubbleHeight;
     } else {
       isTopPlaced = false;
-      const cardTopPx = Math.min(containerHeight - bottomSafeMargin - bubbleHeight, anchorYPx + leaderHeight);
+      const minTop = topSafeMargin;
+      const maxTop = Math.max(minTop, containerHeight - bottomSafeMargin - bubbleHeight);
+      const cardTopPx = Math.max(minTop, Math.min(maxTop, anchorYPx + leaderHeight));
       shiftY = cardTopPx - anchorYPx;
       leaderLineEndY = shiftY;
     }

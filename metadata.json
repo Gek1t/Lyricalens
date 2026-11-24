@@ -1,6 +1,6 @@
 {
-  "name": "10.26",
-  "description": "Contextual English learning PWA blending AR camera exploration, dynamic KTV lyric karaoke, and IELTS Academic reading generation with local-first Dexie database.",
+  "name": "Lyricalens · ContextEng",
+  "description": "Zen Gallery Quiet Luxury contextual language learning through AR, real-time lyrics, and AI-generated IELTS reading.",
   "requestFramePermissions": [
     "camera"
   ],

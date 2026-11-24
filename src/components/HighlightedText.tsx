@@ -1,12 +1,21 @@
 import React from 'react';
+import {
+  isMultiWordHeading,
+  normalizeClickableToken,
+  tokenizeClickableSegment,
+} from '../utils/textTokenizer';
 
 interface HighlightedTextProps {
   text: string;
   targetWord: string;
   className?: string;
   highlightClassName?: string;
+  tokenClassName?: string;
   onWordClick?: (word: string, fullSentence: string) => void;
 }
+
+const DEFAULT_TOKEN_CLASS =
+  'hover:text-[#516050] dark:hover:text-[#8FB996] hover:underline underline-offset-2 cursor-pointer transition-colors duration-150';
 
 /**
  * Escapes regex special characters
@@ -17,7 +26,7 @@ function escapeRegExp(string: string): string {
 
 /**
  * Renders sentence with target word & inflections highlighted,
- * and allows tapping on ANY individual word (or the highlighted phrase/word)
+ * and allows tapping on ANY individual word (including words inside highlighted phrases)
  * to trigger word lookup in a bottom drawer.
  */
 export const HighlightedText: React.FC<HighlightedTextProps> = ({
@@ -25,20 +34,23 @@ export const HighlightedText: React.FC<HighlightedTextProps> = ({
   targetWord,
   className = '',
   highlightClassName = 'font-semibold text-stone-950 dark:text-stone-50 underline decoration-[#516050] dark:decoration-[#8FB996] decoration-[1.75px] underline-offset-[5px] bg-[#516050]/[0.08] dark:bg-[#8FB996]/[0.15] px-1.5 py-0.5 rounded-sm cursor-pointer hover:bg-[#516050]/15 transition-all',
-  onWordClick
+  tokenClassName = DEFAULT_TOKEN_CLASS,
+  onWordClick,
 }) => {
   if (!text) {
     return null;
   }
 
-  // Tokenize the full sentence into words and whitespace/punctuation
-  // Regex splits words [A-Za-z0-9'-]+ and other characters
   const cleanTarget = targetWord?.trim() || '';
 
-  // Function to render a single clickable word token
-  const renderWordToken = (wordToken: string, key: string | number, isTarget: boolean) => {
-    // Strip leading/trailing punctuation for lookup
-    const cleanWord = wordToken.replace(/^[^a-zA-Z0-9]+|[^a-zA-Z0-9]+$/g, '');
+  const renderWordToken = (
+    wordToken: string,
+    lookupOverride: string | null,
+    key: string | number,
+    isTarget: boolean,
+    customClass?: string
+  ) => {
+    const cleanWord = lookupOverride ?? normalizeClickableToken(wordToken);
 
     if (!cleanWord || !onWordClick) {
       return (
@@ -51,46 +63,60 @@ export const HighlightedText: React.FC<HighlightedTextProps> = ({
     return (
       <span
         key={key}
+        role="button"
+        tabIndex={0}
         onClick={(e) => {
           e.stopPropagation();
           onWordClick(cleanWord, text);
         }}
-        className={
-          isTarget
-            ? `${highlightClassName} cursor-pointer`
-            : 'hover:text-[#516050] dark:hover:text-[#8FB996] hover:underline underline-offset-2 cursor-pointer transition-colors duration-150'
-        }
+        onKeyDown={(e) => {
+          if (e.key === 'Enter' || e.key === ' ') {
+            e.preventDefault();
+            e.stopPropagation();
+            onWordClick(cleanWord, text);
+          }
+        }}
+        className={isTarget ? `${highlightClassName} cursor-pointer` : customClass || tokenClassName}
       >
         {wordToken}
       </span>
     );
   };
 
-  // If no target word provided, just make all words clickable
-  if (!cleanTarget) {
-    const tokens = text.split(/(\s+|[.,!?;:()""“”]+)/);
+  const renderPlainSegment = (segment: string, keyPrefix: string, innerTokenClass?: string) => {
+    const tokens = tokenizeClickableSegment(segment);
     return (
-      <span className={className}>
-        {tokens.map((token, idx) => {
-          if (/^[a-zA-Z0-9'-]+$/.test(token)) {
-            return renderWordToken(token, idx, false);
+      <span key={keyPrefix}>
+        {tokens.map((item, sIdx) => {
+          if (item.lookupWord) {
+            return renderWordToken(
+              item.raw,
+              item.lookupWord,
+              `${keyPrefix}-${sIdx}`,
+              false,
+              innerTokenClass
+            );
           }
-          return <span key={idx}>{token}</span>;
+          return <span key={`${keyPrefix}-${sIdx}`}>{item.raw}</span>;
         })}
       </span>
     );
+  };
+
+  if (!cleanTarget) {
+    return <span className={className}>{renderPlainSegment(text, 'plain')}</span>;
   }
 
-  // If target has multiple words or single word
   try {
     let pattern: RegExp;
     if (cleanTarget.includes(' ')) {
       pattern = new RegExp(`(${escapeRegExp(cleanTarget)})`, 'gi');
     } else {
       const stem = cleanTarget.replace(/(?:ing|ed|es|s|ly|tion|ence|ance|ity)$/i, '');
-      const matchPattern = stem.length >= 4 
-        ? `\\b(${escapeRegExp(stem)}[a-zA-Z]*)\\b|\\b(${escapeRegExp(cleanTarget)})\\b`
-        : `\\b(${escapeRegExp(cleanTarget)}[a-zA-Z]*)\\b`;
+      const matchPattern =
+        stem.length >= 4
+          ? `\\b(${escapeRegExp(stem)}[a-zA-Z]*)\\b|\\b(${escapeRegExp(cleanTarget)})\\b`
+          : `\\b(${escapeRegExp(cleanTarget)}[a-zA-Z]*)\\b`;
       pattern = new RegExp(matchPattern, 'gi');
     }
 
@@ -103,21 +129,18 @@ export const HighlightedText: React.FC<HighlightedTextProps> = ({
           pattern.lastIndex = 0;
 
           if (isMatch) {
-            return renderWordToken(chunk, `chunk-${chunkIdx}`, true);
+            // If matched target spans multiple words, preserve outer pill highlight while making each word individually clickable
+            if (/\s+/.test(chunk.trim())) {
+              return (
+                <span key={`chunk-${chunkIdx}`} className={highlightClassName}>
+                  {renderPlainSegment(chunk, `match-${chunkIdx}`, DEFAULT_TOKEN_CLASS)}
+                </span>
+              );
+            }
+            return renderWordToken(chunk, null, `chunk-${chunkIdx}`, true);
           }
 
-          // In regular text chunk, split words to allow tapping any individual word
-          const subTokens = chunk.split(/(\s+|[.,!?;:()""“”]+)/);
-          return (
-            <span key={`chunk-${chunkIdx}`}>
-              {subTokens.map((st, sIdx) => {
-                if (/^[a-zA-Z0-9'-]+$/.test(st)) {
-                  return renderWordToken(st, `${chunkIdx}-${sIdx}`, false);
-                }
-                return <span key={`${chunkIdx}-${sIdx}`}>{st}</span>;
-              })}
-            </span>
-          );
+          return renderPlainSegment(chunk, `chunk-${chunkIdx}`);
         })}
       </span>
     );
@@ -125,3 +148,21 @@ export const HighlightedText: React.FC<HighlightedTextProps> = ({
     return <span className={className}>{text}</span>;
   }
 };
+
+interface ClickableWordHeadingProps {
+  word: string;
+  onWordClick?: (word: string, fullSentence: string) => void;
+}
+
+const HEADING_TOKEN_CLASS =
+  'hover:text-[#516050] dark:hover:text-[#8FB996] active:text-[#516050] dark:active:text-[#8FB996] underline decoration-stone-300/80 dark:decoration-white/25 decoration-dotted underline-offset-[6px] hover:decoration-[#516050] dark:hover:decoration-[#8FB996] cursor-pointer rounded-md px-0.5 -mx-0.5 active:bg-[#516050]/10 dark:active:bg-[#8FB996]/15 transition-colors duration-150';
+
+/**
+ * Renders multi-word phrase headings as individually clickable words while leaving single-word headings inert.
+ */
+export function ClickableWordHeading({ word, onWordClick }: ClickableWordHeadingProps): React.ReactElement {
+  if (!isMultiWordHeading(word) || !onWordClick) {
+    return <>{word}</>;
+  }
+  return <HighlightedText text={word} targetWord="" tokenClassName={HEADING_TOKEN_CLASS} onWordClick={onWordClick} />;
+}

@@ -18,7 +18,7 @@ export const ZenShutter: React.FC<ZenShutterProps> = ({
   onFlipCamera
 }) => {
   return (
-    <div className="relative z-30 pt-8 pb-[max(2.5rem,calc(env(safe-area-inset-bottom,0px)+1.5rem))] px-8 w-full grid grid-cols-3 items-center pointer-events-auto bg-transparent select-none">
+    <div className="relative z-30 pt-10 pb-[max(4.25rem,calc(env(safe-area-inset-bottom,0px)+3.25rem))] px-8 w-full grid grid-cols-3 items-center pointer-events-auto bg-gradient-to-t from-black/65 via-black/28 to-transparent select-none">
       {/* Left Slot: Album Photo Picker (Strictly Symmetrical 44x44 Frosted Glass Circle) */}
       <div className="flex items-center justify-start">
         {onSelectPhoto && (
@@ -29,7 +29,7 @@ export const ZenShutter: React.FC<ZenShutterProps> = ({
               onSelectPhoto();
             }}
             disabled={isScanning}
-            className="w-11 h-11 rounded-full bg-white/14 hover:bg-white/22 active:scale-92 backdrop-blur-xl border border-white/28 flex items-center justify-center text-white shadow-[0_4px_20px_rgba(0,0,0,0.22)] transition-all duration-200 cursor-pointer disabled:opacity-40"
+            className="w-11 h-11 rounded-full bg-stone-950/35 hover:bg-stone-950/50 active:scale-92 backdrop-blur-xl border border-white/30 flex items-center justify-center text-white shadow-[0_4px_20px_rgba(0,0,0,0.28)] transition-all duration-200 cursor-pointer disabled:opacity-40"
             title="从相册选图"
             aria-label="Choose photo from album"
           >
@@ -50,7 +50,7 @@ export const ZenShutter: React.FC<ZenShutterProps> = ({
           disabled={isScanning}
           title={isFrozen ? '点击恢复实时取景' : '轻触快门定格识物'}
           aria-label={isFrozen ? 'Resume live stream' : 'Freeze frame and scan'}
-          className="group relative w-16 h-16 rounded-full p-1.5 flex items-center justify-center border border-white/35 bg-white/10 hover:bg-white/16 hover:border-white/55 backdrop-blur-2xl shadow-[0_8px_32px_rgba(0,0,0,0.35)] transition-all duration-300 cursor-pointer active:scale-92"
+          className="group relative w-16 h-16 rounded-full p-1.5 flex items-center justify-center border border-white/45 bg-stone-950/28 hover:bg-stone-950/42 hover:border-white/65 backdrop-blur-2xl shadow-[0_8px_32px_rgba(0,0,0,0.4)] transition-all duration-300 cursor-pointer active:scale-92"
         >
           {/* Subtle 1px Optical Ring Sweep when Analyzing */}
           {isScanning && (
@@ -74,12 +74,12 @@ export const ZenShutter: React.FC<ZenShutterProps> = ({
 
           {/* Inner Frosted Glass Core */}
           <span
-            className={`w-full h-full rounded-full flex items-center justify-center transition-all duration-300 border border-white/35 text-white ${
+            className={`w-full h-full rounded-full flex items-center justify-center transition-all duration-300 border border-white/40 text-white ${
               isScanning
-                ? 'bg-white/14 scale-95'
+                ? 'bg-stone-950/35 scale-95'
                 : isFrozen
-                ? 'bg-white/22 scale-95'
-                : 'bg-white/16 group-hover:bg-white/24 shadow-[inset_0_1px_1px_rgba(255,255,255,0.3)]'
+                ? 'bg-stone-950/45 scale-95'
+                : 'bg-white/18 group-hover:bg-white/26 shadow-[inset_0_1px_1px_rgba(255,255,255,0.3)]'
             }`}
           >
             {isFrozen && !isScanning ? (
@@ -104,7 +104,7 @@ export const ZenShutter: React.FC<ZenShutterProps> = ({
               e.stopPropagation();
               onFlipCamera();
             }}
-            className="w-11 h-11 rounded-full bg-white/14 hover:bg-white/22 active:scale-92 backdrop-blur-xl border border-white/28 flex items-center justify-center text-white shadow-[0_4px_20px_rgba(0,0,0,0.22)] transition-all duration-200 cursor-pointer"
+            className="w-11 h-11 rounded-full bg-stone-950/35 hover:bg-stone-950/50 active:scale-92 backdrop-blur-xl border border-white/30 flex items-center justify-center text-white shadow-[0_4px_20px_rgba(0,0,0,0.28)] transition-all duration-200 cursor-pointer"
             aria-label="Flip Camera"
             title="翻转摄像头"
           >

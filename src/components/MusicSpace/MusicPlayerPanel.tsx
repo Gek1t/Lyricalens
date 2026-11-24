@@ -11,6 +11,8 @@ import { db, collectWord, cycleWordMastery } from '../../db';
 import { SEED_WORDS } from '../../db/seedData';
 import { WordItem, SongItem, MasteryLevel, AudioQuality, AUDIO_QUALITY_OPTIONS } from '../../types';
 import { analyzeSongVocab } from '../../utils/vocabEngine';
+import { lookupLyricTerm, formatPartOfSpeech } from '../../utils/lyricDictionary';
+import { lookupInIeltsCorpus, estimateIpaPhonetics } from '../../utils/ieltsCorpusDictionary';
 import { resolveSongAudioClient, fetchSongLyricsClient, SupportedMusicPlatform } from '../../utils/clientMusicSync';
 import { TopHeader } from '../TopHeader';
 import { AmbientBackground } from '../AmbientBackground';
@@ -147,17 +149,37 @@ export const MusicPlayerPanel: React.FC<MusicPlayerPanelProps> = ({ onOpenNotebo
           ...matchSeed,
         } as WordItem;
       }
+      const corpusHit = lookupInIeltsCorpus(vocabStr.toLowerCase());
+      if (corpusHit) {
+        return {
+          word: vocabStr,
+          phoneticUk: corpusHit.uk || estimateIpaPhonetics(vocabStr).uk,
+          phoneticUs: corpusHit.us || estimateIpaPhonetics(vocabStr).us,
+          partOfSpeech: formatPartOfSpeech(corpusHit.pos, vocabStr),
+          definition: corpusHit.en,
+          definitionCn: corpusHit.cn,
+          examples: [{
+            en: `Featured in the song "${deferredVocabSong.title}"`,
+            cn: `收录于《${deferredVocabSong.title}》`
+          }],
+          sourceContext: `Song: ${deferredVocabSong.title}`,
+          isStarred: false,
+          addedTimestamp: Date.now()
+        } as WordItem;
+      }
+      const ph = estimateIpaPhonetics(vocabStr);
       return {
         word: vocabStr,
-        phoneticUk: `/${vocabStr}/`,
-        phoneticUs: `/${vocabStr}/`,
-        partOfSpeech: 'VOCAB',
-        definition: `Target key vocabulary in ${deferredVocabSong.title}`,
-        definitionCn: '雅思核心高频词汇',
+        phoneticUk: ph.uk,
+        phoneticUs: ph.us,
+        partOfSpeech: formatPartOfSpeech(undefined, vocabStr),
+        definition: `Key vocabulary in "${deferredVocabSong.title}".`,
+        definitionCn: `${vocabStr}`,
         examples: [{
           en: `Featured in the song "${deferredVocabSong.title}"`,
           cn: `收录于本曲核心意境`
         }],
+        sourceContext: `Song: ${deferredVocabSong.title}`,
         isStarred: false,
         addedTimestamp: Date.now()
       } as WordItem;
@@ -889,42 +911,15 @@ export const MusicPlayerPanel: React.FC<MusicPlayerPanelProps> = ({ onOpenNotebo
     const cleanWord = wordText.replace(/^[^\w]+|[^\w]+$/g, '').toLowerCase();
     if (!cleanWord || cleanWord.length < 2) return;
 
+    const wordData = await lookupLyricTerm(cleanWord, contextSentence || `From song: ${currentSong.title}`);
     const collected = await collectWord({
-      word: cleanWord,
-      phoneticUk: cleanWord === 'ephemeral' ? '/ɪˈfem.ər.əl/' : cleanWord === 'meticulous' ? '/məˈtɪk.jə.ləs/' : `/${cleanWord}/`,
-      phoneticUs: cleanWord === 'ephemeral' ? '/əˈfem.ɚ.əl/' : cleanWord === 'meticulous' ? '/məˈtɪk.jə.ləs/' : `/${cleanWord}/`,
-      partOfSpeech: cleanWord === 'ephemeral' || cleanWord === 'meticulous' ? 'adj.' : 'vocab',
-      definition: cleanWord === 'ephemeral'
-        ? 'Lasting for only a very short time; transitory.'
-        : cleanWord === 'meticulous'
-        ? 'Showing great attention to detail; very careful and precise.'
-        : `Key vocabulary in ${currentSong.title}.`,
-      definitionCn: cleanWord === 'ephemeral'
-        ? '短暂的，转瞬即逝的'
-        : cleanWord === 'meticulous'
-        ? '一丝不苟的，缜密的，精致的'
-        : '核心语境生词',
-      examples: [
-        {
-          en: contextSentence,
-          cn: cleanWord === 'ephemeral' ? '落日的晚风中，芬芳低语随风转瞬即逝。' : '如深蓝夜幕下，一丝不苟的精致回忆。',
-          source: `Song: ${currentSong.title}`
-        },
-        {
-          en: cleanWord === 'ephemeral'
-            ? 'The ephemeral blooming cycle of alpine flora enables survival in harsh urban microclimates.'
-            : 'City planners obsess over meticulously curated parks while spontaneous flora pioneers urban margins.',
-          cn: cleanWord === 'ephemeral'
-            ? '城市高山植物短暂的开花周期使其能够在严酷的微气候中生存繁衍。'
-            : '城市规划者潜心于一丝不苟规划的公园，而自生植物则在城市边缘拓荒。',
-          source: 'IELTS Academic Reading'
-        }
-      ],
+      ...wordData,
+      isStarred: true,
       sourceContext: `Song: ${currentSong.title}`,
-      categories: ['Song Lyric', 'Music Hub', 'IELTS Academic']
+      categories: Array.from(new Set([...(wordData.categories || []), 'Song Lyric', 'Music Hub']))
     });
 
-    openWordDetail(collected);
+    openWordDetail(collected, null, 'drawer');
   };
 
   const handleSeek = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -1054,7 +1049,7 @@ export const MusicPlayerPanel: React.FC<MusicPlayerPanelProps> = ({ onOpenNotebo
       {/* Top Header: keyboard_arrow_down | NOW PLAYING | more_horiz */}
       {/* Smoothly fades out & disables pointer events when FullscreenLyricsView is open to prevent header overlap */}
       <div
-        className={`relative z-40 w-full shrink-0 transition-[transform,opacity] duration-250 ease-out ${
+        className={`relative z-40 w-full shrink-0 transition-[transform,opacity] duration-[440ms] ease-[cubic-bezier(0.32,0.72,0,1)] ${
           isFullscreenLyricsOpen ? 'opacity-0 -translate-y-2 pointer-events-none' : 'opacity-100'
         }`}
       >
@@ -1066,7 +1061,7 @@ export const MusicPlayerPanel: React.FC<MusicPlayerPanelProps> = ({ onOpenNotebo
 
       {/* Center Gallery Art Frame Area (Fluid Golden Ratio & Adaptive Vertical Rhythm across all mobile heights) */}
       <div
-        className={`relative flex-1 min-h-0 flex flex-col items-center justify-center px-4 z-10 my-auto py-1 gap-y-2.5 sm:gap-y-4 overflow-hidden transition-[transform,opacity] duration-250 ease-out ${
+        className={`relative flex-1 min-h-0 flex flex-col items-center justify-center px-4 z-10 my-auto py-1 gap-y-2.5 sm:gap-y-4 overflow-hidden transition-[transform,opacity] duration-[440ms] ease-[cubic-bezier(0.32,0.72,0,1)] ${
           isFullscreenLyricsOpen ? 'opacity-0 scale-[0.95] pointer-events-none' : 'opacity-100 scale-100'
         }`}
       >
@@ -1129,19 +1124,18 @@ export const MusicPlayerPanel: React.FC<MusicPlayerPanelProps> = ({ onOpenNotebo
             }}
             className="relative w-[min(264px,68vw,35dvh)] p-[11px] pb-[38px] sm:p-[12px] sm:pb-[42px] rounded-[4px] bg-white dark:bg-[#1E242C] shadow-[0_20px_45px_-10px_rgba(0,0,0,0.18),0_6px_18px_-4px_rgba(0,0,0,0.08)] dark:shadow-[0_25px_55px_-12px_rgba(0,0,0,0.8)] select-none border border-stone-100/90 dark:border-white/5 cursor-pointer active:scale-[0.99] transition-transform hardware-accelerated"
           >
-            {/* Inner Matting Layer with Soft Color Wash (Zero GPU Gaussian Blur Re-Sampling) */}
+            {/* Inner Picture Frame Area — Full-Bleed Album Artwork */}
             <div
-              className="relative w-full aspect-[4/4.5] rounded-[2px] flex items-center justify-center overflow-hidden p-3.5 sm:p-4 transition-colors duration-500"
+              className="relative w-full aspect-square rounded-[2px] flex items-center justify-center overflow-hidden transition-colors duration-500"
               style={{
                 backgroundColor: isDark ? colorTheme.mattingBgDark : colorTheme.mattingBg,
                 backgroundImage: `radial-gradient(circle at 22% 24%, ${withColorAlpha(currentSong?.palette?.[0] || '#7C8F6E', isDark ? 0.36 : 0.45)} 0%, transparent 72%), radial-gradient(circle at 78% 76%, ${withColorAlpha(currentSong?.palette?.[1] || '#C4AC82', isDark ? 0.32 : 0.42)} 0%, transparent 72%)`,
                 contain: 'paint'
               }}
             >
-
-              {/* Upper 1:1 Album Artwork Tile with Soft Natural Shadow */}
+              {/* 1:1 Album Artwork Tile with Soft Natural Shadow */}
               <div
-                className={`relative w-full aspect-square rounded-[2px] overflow-hidden bg-stone-900 shadow-[0_4px_16px_rgba(0,0,0,0.15)] transition-transform duration-500 ${
+                className={`relative w-full h-full rounded-[2px] overflow-hidden bg-stone-900 transition-transform duration-500 ${
                   isPlaying ? 'scale-[1.015]' : 'scale-100'
                 }`}
                 style={{
@@ -1155,6 +1149,8 @@ export const MusicPlayerPanel: React.FC<MusicPlayerPanelProps> = ({ onOpenNotebo
                   decoding="async"
                   className="w-full h-full object-cover block"
                 />
+                {/* Subtle Inner Frame Hairline */}
+                <div className="pointer-events-none absolute inset-0 rounded-[2px] ring-1 ring-inset ring-black/[0.06] dark:ring-white/[0.08]" />
               </div>
             </div>
 
@@ -1209,7 +1205,7 @@ export const MusicPlayerPanel: React.FC<MusicPlayerPanelProps> = ({ onOpenNotebo
 
       {/* 4. Bottom Playback Controls Bar with timeline */}
       <div
-        className={`relative w-full max-w-[356px] mx-auto px-6 z-20 pb-2 shrink-0 transition-[transform,opacity] duration-250 ease-out ${
+        className={`relative w-full max-w-[356px] mx-auto px-6 z-20 pb-2 shrink-0 transition-[transform,opacity] duration-[440ms] ease-[cubic-bezier(0.32,0.72,0,1)] ${
           isFullscreenLyricsOpen ? 'opacity-0 translate-y-2 pointer-events-none' : 'opacity-100 translate-y-0'
         }`}
       >

@@ -1,11 +1,12 @@
 import React, { useState, useEffect, useRef, useMemo } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
-import { ChevronDown, Volume2, Music2, BookOpen, Layers, Sparkles, Compass } from 'lucide-react';
+import { ChevronDown, Volume2, Music2, BookOpen, Layers, Compass } from 'lucide-react';
 import { useAppStore } from '../store/useAppStore';
 import { speakWord, speakWordIfAutoEnabled } from '../utils/audioEngine';
 import { SubWordItem, MasteryLevel, WordItem } from '../types';
 import { cycleWordMastery } from '../db';
-import { HighlightedText } from './HighlightedText';
+import { HighlightedText, ClickableWordHeading } from './HighlightedText';
+import { ContextualImmersionSection } from './ContextualImmersionSection';
 import { getCollocationsForWord, parseStructuredDefinitions, CollocationItem } from '../utils/collocationDictionary';
 import { findSongContextInPlaylist, findIELTSAcademicContext } from '../utils/contextFinder';
 import { lookupWord, formatPartOfSpeech } from '../utils/lyricDictionary';
@@ -41,8 +42,26 @@ export const WordDetailSheet: React.FC = () => {
   // Swipe down/right detection to go back
   const touchStartRef = useRef<{ x: number; y: number } | null>(null);
 
+  // Guard async lookups against unmount, sheet close, or rapid multi-taps
+  const lookupSeqRef = useRef<number>(0);
+  const isMountedRef = useRef<boolean>(true);
+  const prevWordRef = useRef<string | undefined>(selectedWord?.word);
+
   useEffect(() => {
-    if (!isWordSheetOpen) {
+    isMountedRef.current = true;
+    return () => {
+      isMountedRef.current = false;
+      lookupSeqRef.current += 1;
+    };
+  }, []);
+
+  useEffect(() => {
+    const wordChanged = prevWordRef.current !== selectedWord?.word;
+    if (!isWordSheetOpen || wordChanged) {
+      lookupSeqRef.current += 1;
+      prevWordRef.current = selectedWord?.word;
+    }
+    if (!isWordSheetOpen || wordChanged) {
       setActiveSubWord(null);
       setPlayingUk(false);
       setPlayingUs(false);
@@ -82,8 +101,8 @@ export const WordDetailSheet: React.FC = () => {
 
   // 1. Song Playlist Check (Memoized & only evaluated when visible)
   const songContext = useMemo(
-    () => (isVisible && currentItem ? findSongContextInPlaylist(currentItem.word) : { found: false }),
-    [isVisible, currentItem?.word]
+    () => (isVisible && currentItem ? findSongContextInPlaylist(currentItem.word, currentItem) : { found: false }),
+    [isVisible, currentItem]
   );
 
   // 2. IELTS Academic Context (Memoized & only evaluated when visible)
@@ -112,9 +131,26 @@ export const WordDetailSheet: React.FC = () => {
 
   // Click any word in sentences or collocations to pop up the bottom drawer
   const handleWordClick = async (clickedWord: string, sentence?: string) => {
-    const item = await lookupWord(clickedWord, sentence || '');
-    setDrawerWord(item);
-    setIsDrawerOpen(true);
+    const cleanWord = clickedWord.trim();
+    if (!cleanWord) return;
+    const reqSeq = ++lookupSeqRef.current;
+    try {
+      const item = await lookupWord(cleanWord, sentence || '');
+      const storeState = useAppStore.getState();
+      if (
+        !isMountedRef.current ||
+        reqSeq !== lookupSeqRef.current ||
+        !storeState.isWordSheetOpen ||
+        storeState.wordViewMode !== 'fullscreen' ||
+        !item
+      ) {
+        return;
+      }
+      setDrawerWord(item);
+      setIsDrawerOpen(true);
+    } catch (err) {
+      console.error('[WordDetailSheet] Failed to look up word:', cleanWord, err);
+    }
   };
 
   const handleSpeakUk = () => {
@@ -175,7 +211,7 @@ export const WordDetailSheet: React.FC = () => {
             onAnimationStart={() => triggerHighRefreshBoost(1000)}
             onTouchStart={handleTouchStart}
             onTouchEnd={handleTouchEnd}
-            className="absolute inset-0 z-50 flex flex-col justify-between overflow-hidden select-none bg-[#FAF8F5] dark:bg-[#0E121A] text-stone-900 dark:text-stone-100 hardware-accelerated"
+            className="absolute inset-0 z-[70] flex flex-col justify-between overflow-hidden select-none bg-[#FAF8F5] dark:bg-[#0E121A] text-stone-900 dark:text-stone-100 hardware-accelerated"
           >
           {/* Luminous Soft Linen Ambient Background (Zero GPU Gaussian Blur Cost) */}
           <div className="absolute inset-0 pointer-events-none overflow-hidden" style={{ contain: 'strict' }}>
@@ -204,7 +240,7 @@ export const WordDetailSheet: React.FC = () => {
             initial={{ opacity: 0, y: -10 }}
             animate={{ opacity: 1, y: 0 }}
             transition={{ duration: 0.35, ease: [0.16, 1, 0.3, 1] }}
-            className="relative w-full z-40 pt-4 pb-2 px-5 flex items-center justify-between pointer-events-auto border-b border-stone-200/40 dark:border-white/5"
+            className="relative w-full z-40 pt-[var(--android-safe-top,max(3.25rem,calc(env(safe-area-inset-top,44px)+0.85rem)))] pb-3 px-5 flex items-center justify-between pointer-events-auto border-b border-stone-200/40 dark:border-white/5"
           >
             {/* Return Button */}
             <button
@@ -339,7 +375,7 @@ export const WordDetailSheet: React.FC = () => {
                       : 'text-[44px] sm:text-[54px]'
                   }`}
                 >
-                  {currentItem.word}
+                  <ClickableWordHeading word={currentItem.word} onWordClick={handleWordClick} />
                 </motion.h1>
                 
                 {/* Elegant Italic Part-of-Speech: Only shown for single words, completely omitted for phrases */}
@@ -465,8 +501,13 @@ export const WordDetailSheet: React.FC = () => {
               >
                 {/* Section 2: Editorial Definitions (High readability, no duplicate POS tags, clean multi-POS alignment, NO 1. 2. numbers) */}
                 <div className="space-y-3 pt-1 border-t border-stone-200/60 dark:border-white/10">
-                  <div className="text-[10px] font-sans font-semibold uppercase tracking-[0.2em] text-stone-400 dark:text-stone-500">
-                    DEFINITION
+                  <div className="flex items-center gap-2 text-[10px] font-sans font-semibold uppercase tracking-[0.2em] text-stone-400 dark:text-stone-500">
+                    <span>DEFINITION</span>
+                    {currentItem?.partOfSpeech?.includes('AI 语境释义') && (
+                      <span className="text-[10px] font-normal normal-case tracking-normal text-stone-400/90 dark:text-stone-500">
+                        AI · 语境
+                      </span>
+                    )}
                   </div>
 
                   {structuredDefs.length > 1 ? (
@@ -492,69 +533,33 @@ export const WordDetailSheet: React.FC = () => {
                   )}
 
                   {/* Extended English Definition */}
-                  {currentItem.definition && !currentItem.definition.startsWith('Idiomatic phrase expression in lyrics') && !currentItem.definition.startsWith('Vocabulary item:') && (
+                  {currentItem.definition && 
+                    !currentItem.definition.startsWith('Idiomatic phrase expression in lyrics') && 
+                    !currentItem.definition.startsWith('Vocabulary item:') &&
+                    !currentItem.definition.startsWith('Contextual expression:') &&
+                    !currentItem.definition.startsWith('Lyric expression') &&
+                    !currentItem.definition.startsWith('Specialized term ') &&
+                    !currentItem.definition.startsWith('Key vocabulary') &&
+                    !currentItem.definition.startsWith('Proper noun,') && (
                     <p className="text-[13px] text-stone-500 dark:text-stone-400 font-sans leading-relaxed pt-1">
-                      {currentItem.definition}
+                      <HighlightedText
+                        text={currentItem.definition}
+                        targetWord=""
+                        onWordClick={(word, s) => handleWordClick(word, s)}
+                      />
                     </p>
                   )}
                 </div>
 
-                {/* Section 3: Dual Context Reading (Lyrics vs IELTS Academic) */}
-                {(songContext.found || ieltsContext.found) && (
-                  <div className="space-y-4 pt-2 border-t border-stone-200/60 dark:border-white/10">
-                    <div className="text-[10px] font-sans font-semibold uppercase tracking-[0.2em] text-stone-400 dark:text-stone-500">
-                      CONTEXTUAL IMMERSION
-                    </div>
-
-                    {/* Lyrics Context Block (Left Sage Accent Bar) */}
-                    {songContext.found && (
-                      <div className="relative pl-4 py-1.5 border-l-2 border-[#516050] dark:border-[#8FB996] space-y-2">
-                        <div className="flex items-center justify-between">
-                          <div className="flex items-center gap-1.5 text-[11px] font-sans font-medium uppercase tracking-wider text-[#516050] dark:text-[#8FB996]">
-                            <Music2 className="w-3.5 h-3.5" />
-                            <span>Lyrics · {songContext.songTitle}</span>
-                          </div>
-                        </div>
-
-                        <p className="font-serif-luxury text-[17px] sm:text-[18px] text-stone-900 dark:text-stone-100 leading-[1.65]">
-                          "<HighlightedText 
-                            text={songContext.lyricEn || ''} 
-                            targetWord={currentItem.word} 
-                            onWordClick={(word, s) => handleWordClick(word, s)}
-                          />"
-                        </p>
-
-                        <p className="text-[13px] text-stone-500 dark:text-stone-400 font-sans leading-relaxed">
-                          {songContext.lyricCn}
-                        </p>
-                      </div>
-                    )}
-
-                    {/* IELTS Academic Context Block (Left Ochre/Amber Accent Bar) */}
-                    {ieltsContext.found && (
-                      <div className="relative pl-4 py-1.5 border-l-2 border-[#A86F3E] dark:border-amber-400 space-y-2">
-                        <div className="flex items-center justify-between">
-                          <div className="flex items-center gap-1.5 text-[11px] font-sans font-medium uppercase tracking-wider text-[#A86F3E] dark:text-amber-300">
-                            <span>IELTS Academic · Passage 2</span>
-                          </div>
-                        </div>
-
-                        <p className="font-serif-luxury text-[17px] sm:text-[18px] text-stone-900 dark:text-stone-100 leading-[1.65]">
-                          "<HighlightedText 
-                            text={ieltsContext.sentenceEn} 
-                            targetWord={currentItem.word} 
-                            highlightClassName="font-semibold text-stone-950 dark:text-stone-50 underline decoration-[#A86F3E] dark:decoration-amber-400 decoration-[1.75px] underline-offset-[5px] bg-[#A86F3E]/[0.08] dark:bg-amber-400/[0.15] px-1.5 py-0.5 rounded-sm cursor-pointer hover:bg-[#A86F3E]/15 transition-all"
-                            onWordClick={(word, s) => handleWordClick(word, s)}
-                          />"
-                        </p>
-
-                        <p className="text-[13px] text-stone-500 dark:text-stone-400 font-sans leading-relaxed">
-                          {ieltsContext.sentenceCn}
-                        </p>
-                      </div>
-                    )}
-                  </div>
-                )}
+                {/* Section 3: Dual Context Reading & AR Scene Examples */}
+                <ContextualImmersionSection
+                  word={currentItem.word}
+                  songContext={songContext}
+                  ieltsContext={ieltsContext}
+                  examples={currentItem.examples}
+                  variant="sheet"
+                  onWordClick={handleWordClick}
+                />
 
                 {/* Section 4: IELTS Academic Collocations (Modern Dictionary Flow) */}
                 {collocations.length > 0 && (
@@ -624,6 +629,7 @@ export const WordDetailSheet: React.FC = () => {
         wordItem={drawerWord}
         isOpen={isDrawerOpen}
         onClose={() => setIsDrawerOpen(false)}
+        zIndexClass="z-[80]"
       />
     </>
   );

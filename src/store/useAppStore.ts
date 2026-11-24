@@ -65,6 +65,8 @@ interface AppState {
   isWordSheetOpen: boolean;
   wordViewMode: 'drawer' | 'fullscreen';
   heroOriginRect: { x: number; y: number; width: number; height: number } | null;
+  wordDrawerBackHandler: (() => boolean) | null;
+  setWordDrawerBackHandler: (handler: (() => boolean) | null) => void;
   openWordDetail: (word: WordItem, heroRect?: { x: number; y: number; width: number; height: number } | null, mode?: 'drawer' | 'fullscreen') => void;
   closeWordDetail: () => void;
   toggleSelectedWordStar: () => Promise<void>;
@@ -142,6 +144,8 @@ interface AppState {
   setIsPersonalHubOpen: (open: boolean) => void;
   openPersonalHub: (initialTab?: 'compass' | 'archives' | 'settings') => void;
   closePersonalHub: () => void;
+  isAiConfigModalOpen: boolean;
+  setIsAiConfigModalOpen: (open: boolean) => void;
   activeArchiveReviewRecord: IELTSTestRecord | null;
   setActiveArchiveReviewRecord: (record: IELTSTestRecord | null) => void;
   isCheckedInToday: boolean;
@@ -302,6 +306,8 @@ export const useAppStore = create<AppState>((set, get) => ({
   isWordSheetOpen: false,
   wordViewMode: 'drawer',
   heroOriginRect: null,
+  wordDrawerBackHandler: null,
+  setWordDrawerBackHandler: (wordDrawerBackHandler) => set({ wordDrawerBackHandler }),
   openWordDetail: (word, heroRect = null, mode = 'drawer') => {
     set({ selectedWord: word, isWordSheetOpen: true, heroOriginRect: heroRect, wordViewMode: mode });
   },
@@ -568,7 +574,9 @@ export const useAppStore = create<AppState>((set, get) => ({
   setIsPersonalHubOpen: (isPersonalHubOpen) => set({ isPersonalHubOpen }),
   openPersonalHub: (initialTab = 'compass') =>
     set({ isPersonalHubOpen: true, personalHubInitialTab: initialTab }),
-  closePersonalHub: () => set({ isPersonalHubOpen: false, activeArchiveReviewRecord: null }),
+  closePersonalHub: () => set({ isPersonalHubOpen: false, isAiConfigModalOpen: false, activeArchiveReviewRecord: null }),
+  isAiConfigModalOpen: false,
+  setIsAiConfigModalOpen: (isAiConfigModalOpen) => set({ isAiConfigModalOpen }),
   activeArchiveReviewRecord: null,
   setActiveArchiveReviewRecord: (activeArchiveReviewRecord) => set({ activeArchiveReviewRecord }),
   isCheckedInToday: (() => {
@@ -600,6 +608,7 @@ export const useAppStore = create<AppState>((set, get) => ({
       activeArchivePassage: record,
       activeSpace: 2,
       isPersonalHubOpen: false,
+      isAiConfigModalOpen: false,
       activeArchiveReviewRecord: null
     });
   },
@@ -620,7 +629,8 @@ export const useAppStore = create<AppState>((set, get) => ({
       notebookInitialFilter: filter,
       notebookAutoFlashcard: autoStartFlashcard,
       isNotebookFlashcardOpen: autoStartFlashcard,
-      isPersonalHubOpen: false
+      isPersonalHubOpen: false,
+      isAiConfigModalOpen: false
     }),
   closeNotebook: () =>
     set({

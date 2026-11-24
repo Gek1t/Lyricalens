@@ -26,6 +26,17 @@ import authRouter from './src/server/routes/authRoute.ts';
 import wordsRouter from './src/server/routes/words.ts';
 import ieltsDbRouter from './src/server/routes/ieltsRoute.ts';
 import aiStreamRouter from './src/server/routes/aiStream.ts';
+import {
+  DEFAULT_BASE_URLS,
+  FALLBACK_MODELS_BY_PROVIDER,
+  PROVIDER_LABELS,
+  extractApiErrorMessage,
+  getDefaultModelForProvider,
+  isValidAiHandshakeJson,
+  normalizeProbeBaseUrl,
+  parseModelsPayload,
+  resolveMajorProvider,
+} from './src/utils/aiProviderDefaults.ts';
 
 const ncmApi: any = (ncm as any).default || ncm;
 
@@ -193,26 +204,84 @@ app.get('/api/health', async (req: Request, res: Response) => {
   });
 });
 
+interface UpstreamJsonResult {
+  ok: boolean;
+  status: number;
+  data: unknown;
+  rawText: string;
+}
+
+async function fetchUpstreamJson(
+  url: string,
+  init: RequestInit,
+  timeoutMs = 8000
+): Promise<UpstreamJsonResult> {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    const response = await fetch(url, {
+      ...init,
+      signal: controller.signal,
+    });
+    const rawText = await response.text();
+    let parsedData: unknown = null;
+    try {
+      parsedData = rawText ? JSON.parse(rawText) : null;
+    } catch {
+      parsedData = null;
+    }
+    return {
+      ok: response.ok,
+      status: response.status,
+      data: parsedData,
+      rawText,
+    };
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
 // Endpoint: Dynamic AI Connection Test & Model Detection (Ping)
 app.post('/api/ai/test-connection', async (req: Request, res: Response) => {
   const startTime = Date.now();
   try {
-    const { provider = 'gemini', majorProvider, baseUrl, apiKey, model } = req.body;
+    const {
+      provider = 'gemini',
+      majorProvider,
+      baseUrl,
+      apiKey,
+      model,
+    } = req.body as {
+      provider?: string;
+      majorProvider?: string;
+      baseUrl?: string;
+      apiKey?: string;
+      model?: string;
+    };
+
     if (baseUrl && !isSafeExternalUrl(baseUrl)) {
       return res.status(400).json({ success: false, error: 'Security restriction: Invalid or disallowed internal endpoint URL' });
     }
-    const effectiveMajor = majorProvider || (provider === 'gemini' ? 'gemini' : 'custom');
+    const effectiveMajor = resolveMajorProvider(majorProvider, provider);
+    const cleanKey = String(apiKey || '').trim();
 
     if (effectiveMajor === 'gemini' || provider === 'gemini') {
-      const keyToUse = apiKey || process.env.GEMINI_API_KEY;
-      if (!keyToUse) {
-        return res.status(400).json({ success: false, error: '未提供 Gemini API 密钥且系统未配置默认密钥' });
+      if (!cleanKey) {
+        return res.status(400).json({ success: false, error: '请先填写 Gemini API Key' });
       }
-      const testAi = new GoogleGenAI({ apiKey: keyToUse });
-      const targetModel = model || 'gemini-2.5-flash';
-      await generateContentWithFallback(testAi, {
-        contents: 'Hi',
-      }, [targetModel, 'gemini-2.5-flash', 'gemini-flash-latest']);
+      const targetModel = String(model || '').trim() || getDefaultModelForProvider('gemini');
+      const pingUrl = `${DEFAULT_BASE_URLS.gemini}/models/${encodeURIComponent(targetModel)}:generateContent?key=${encodeURIComponent(cleanKey)}`;
+      const upRes = await fetchUpstreamJson(pingUrl, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ contents: [{ parts: [{ text: 'Hi' }] }] }),
+      });
+      if (!upRes.ok || !isValidAiHandshakeJson(upRes.data)) {
+        return res.status(400).json({
+          success: false,
+          error: upRes.ok ? 'Gemini 接口返回非 JSON 响应' : extractApiErrorMessage(upRes.data, upRes.rawText, upRes.status),
+        });
+      }
       const latency = Date.now() - startTime;
       return res.json({
         success: true,
@@ -223,14 +292,18 @@ app.post('/api/ai/test-connection', async (req: Request, res: Response) => {
       });
     }
 
-    if (effectiveMajor === 'claude' && baseUrl?.includes('api.anthropic.com')) {
-      const targetUrl = 'https://api.anthropic.com/v1/messages';
-      const targetModel = model || 'claude-3-7-sonnet-20250219';
-      const response = await fetch(targetUrl, {
+    const targetUrl = normalizeProbeBaseUrl(baseUrl, effectiveMajor);
+    if (!isSafeExternalUrl(targetUrl)) {
+      return res.status(400).json({ success: false, error: 'Security restriction: Invalid or disallowed internal endpoint URL' });
+    }
+    const targetModel = String(model || '').trim() || getDefaultModelForProvider(effectiveMajor);
+
+    if (effectiveMajor === 'claude' && targetUrl.includes('api.anthropic.com')) {
+      const upRes = await fetchUpstreamJson(`${targetUrl}/messages`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
-          'x-api-key': apiKey || '',
+          'x-api-key': cleanKey,
           'anthropic-version': '2023-06-01'
         },
         body: JSON.stringify({
@@ -240,9 +313,11 @@ app.post('/api/ai/test-connection', async (req: Request, res: Response) => {
         })
       });
 
-      if (!response.ok) {
-        const errText = await response.text();
-        return res.status(400).json({ success: false, error: `Anthropic API 返回 HTTP ${response.status}: ${errText.slice(0, 120)}` });
+      if (!upRes.ok || !isValidAiHandshakeJson(upRes.data)) {
+        return res.status(400).json({
+          success: false,
+          error: upRes.ok ? '接口返回非 JSON 响应' : extractApiErrorMessage(upRes.data, upRes.rawText, upRes.status)
+        });
       }
 
       const latency = Date.now() - startTime;
@@ -255,16 +330,13 @@ app.post('/api/ai/test-connection', async (req: Request, res: Response) => {
       });
     }
 
-    // Default OpenAI-compatible (DeepSeek, OpenAI, SiliconFlow, OneAPI, Ollama, etc.)
-    const targetUrl = baseUrl ? baseUrl.replace(/\/+$/, '') : 'https://api.deepseek.com/v1';
-    const targetModel = model || (effectiveMajor === 'deepseek' ? 'deepseek-chat' : effectiveMajor === 'openai' ? 'gpt-4o-mini' : 'deepseek-chat');
-    const endpoint = targetUrl.endsWith('/chat/completions') ? targetUrl : `${targetUrl}/chat/completions`;
-
-    const response = await fetch(endpoint, {
+    // Default OpenAI-compatible (DeepSeek, OpenAI, Kimi, Qwen, GLM, SiliconFlow, etc.)
+    const endpoint = `${targetUrl}/chat/completions`;
+    const upRes = await fetchUpstreamJson(endpoint, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
-        ...(apiKey ? { 'Authorization': `Bearer ${apiKey}` } : {})
+        ...(cleanKey ? { 'Authorization': `Bearer ${cleanKey}` } : {})
       },
       body: JSON.stringify({
         model: targetModel,
@@ -273,13 +345,15 @@ app.post('/api/ai/test-connection', async (req: Request, res: Response) => {
       })
     });
 
-    if (!response.ok) {
-      const errText = await response.text();
-      return res.status(400).json({ success: false, error: `接口返回 HTTP ${response.status}: ${errText.slice(0, 120)}` });
+    if (!upRes.ok || !isValidAiHandshakeJson(upRes.data)) {
+      return res.status(400).json({
+        success: false,
+        error: upRes.ok ? '接口返回非 JSON 响应，请核对接口地址' : extractApiErrorMessage(upRes.data, upRes.rawText, upRes.status)
+      });
     }
 
     const latency = Date.now() - startTime;
-    const providerLabel = effectiveMajor === 'deepseek' ? 'DeepSeek' : effectiveMajor === 'openai' ? 'OpenAI' : effectiveMajor === 'claude' ? 'Claude' : '兼容接口';
+    const providerLabel = PROVIDER_LABELS[effectiveMajor] || '兼容接口';
     return res.json({
       success: true,
       latency,
@@ -287,8 +361,9 @@ app.post('/api/ai/test-connection', async (req: Request, res: Response) => {
       model: targetModel,
       message: `${providerLabel} (${targetModel}) 握手成功`
     });
-  } catch (error: any) {
-    return res.status(500).json({ success: false, error: error.message || '连接失败，请检查地址或网络' });
+  } catch (error: unknown) {
+    const msg = error instanceof Error ? error.message : '连接失败，请检查地址或网络';
+    return res.status(500).json({ success: false, error: msg });
   }
 });
 
@@ -296,277 +371,218 @@ app.post('/api/ai/test-connection', async (req: Request, res: Response) => {
 app.post('/api/ai/fetch-models', async (req: Request, res: Response) => {
   const startTime = Date.now();
   try {
-    const { provider = 'gemini', majorProvider, baseUrl, apiKey } = req.body;
-    const effectiveMajor = majorProvider || (provider === 'gemini' ? 'gemini' : 'custom');
+    const {
+      provider = 'gemini',
+      majorProvider,
+      baseUrl,
+      apiKey,
+    } = req.body as {
+      provider?: string;
+      majorProvider?: string;
+      baseUrl?: string;
+      apiKey?: string;
+    };
+    const effectiveMajor = resolveMajorProvider(majorProvider, provider);
+    const cleanKey = String(apiKey || '').trim();
 
     // Strict SSRF guard on custom baseUrl
     if (baseUrl && !isSafeExternalUrl(baseUrl)) {
       return res.status(400).json({ error: 'SSRF 拦截：目标接口地址不合法或指向受限内网/回环地址' });
     }
 
-    // 1. Google Gemini
+    // 1. Google Gemini (requires user-provided API key)
     if (effectiveMajor === 'gemini' || provider === 'gemini') {
-      const keyToUse = apiKey || process.env.GEMINI_API_KEY;
-      if (!keyToUse) {
-        return res.status(400).json({ error: '未提供 Gemini API 密钥且系统未配置默认密钥' });
+      if (!cleanKey) {
+        return res.status(400).json({ error: '请先填写 Gemini API Key 后再进行联网探测' });
       }
-      const testAi = new GoogleGenAI({ apiKey: keyToUse });
-      // Validate key with a quick test with fallback
-      await generateContentWithFallback(testAi, {
-        contents: 'Hi'
-      }, ['gemini-2.5-flash', 'gemini-3-flash-preview', 'gemini-flash-latest']);
+      const modelsRes = await fetchUpstreamJson(
+        `${DEFAULT_BASE_URLS.gemini}/models?key=${encodeURIComponent(cleanKey)}`,
+        { method: 'GET', headers: { 'Content-Type': 'application/json' } }
+      );
+      if (modelsRes.status === 401 || modelsRes.status === 403) {
+        return res.status(modelsRes.status).json({ error: extractApiErrorMessage(modelsRes.data, modelsRes.rawText, modelsRes.status) });
+      }
+      if (modelsRes.ok) {
+        if (modelsRes.data === null) {
+          return res.status(400).json({ error: 'Gemini 接口返回非 JSON 响应，请检查网络连接' });
+        }
+        const parsed = parseModelsPayload(modelsRes.data, 'gemini');
+        if (parsed.length > 0) {
+          const latency = Date.now() - startTime;
+          const defaultModel = parsed.includes('gemini-2.5-flash') ? 'gemini-2.5-flash' : parsed[0];
+          return res.json({
+            success: true,
+            latency,
+            models: parsed,
+            defaultModel,
+            message: `已连接 Google Gemini 官方接口 · 延迟 ${latency}ms`
+          });
+        }
+      }
+      if (modelsRes.status !== 404 && modelsRes.status !== 405 && !modelsRes.ok) {
+        const status = modelsRes.status >= 400 && modelsRes.status < 600 ? modelsRes.status : 400;
+        return res.status(status).json({ error: extractApiErrorMessage(modelsRes.data, modelsRes.rawText, modelsRes.status) });
+      }
+
+      const pingRes = await fetchUpstreamJson(
+        `${DEFAULT_BASE_URLS.gemini}/models/${getDefaultModelForProvider('gemini')}:generateContent?key=${encodeURIComponent(cleanKey)}`,
+        {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ contents: [{ parts: [{ text: 'Hi' }] }] })
+        }
+      );
+      if (!pingRes.ok) {
+        const status = pingRes.status >= 400 && pingRes.status < 600 ? pingRes.status : 400;
+        return res.status(status).json({ error: extractApiErrorMessage(pingRes.data, pingRes.rawText, pingRes.status) });
+      }
+      if (!isValidAiHandshakeJson(pingRes.data)) {
+        return res.status(400).json({ error: 'Gemini 接口返回非 JSON 响应，请检查网络连接' });
+      }
       const latency = Date.now() - startTime;
-      const geminiModels = [
-        'gemini-2.5-flash',
-        'gemini-2.5-pro',
-        'gemini-3-flash-preview',
-        'gemini-3.1-pro-preview'
-      ];
+      const geminiModels = [...FALLBACK_MODELS_BY_PROVIDER.gemini];
       return res.json({
         success: true,
         latency,
         models: geminiModels,
-        defaultModel: 'gemini-2.5-flash',
+        defaultModel: geminiModels[0],
         message: `已连接 Google Gemini 官方接口 · 延迟 ${latency}ms`
       });
     }
 
     // Require API key for all external upstream endpoints
-    if (!String(apiKey || '').trim()) {
+    if (!cleanKey) {
       return res.status(400).json({ error: '请先输入有效的 API Key 后再进行联网探测' });
     }
 
-    // 2. DeepSeek
-    if (effectiveMajor === 'deepseek') {
-      const targetUrl = (baseUrl || 'https://api.deepseek.com/v1').replace(/\/+$/, '');
-      let modelsList = ['deepseek-chat', 'deepseek-reasoner'];
-
-      try {
-        const resModels = await fetch(`${targetUrl}/models`, {
-          method: 'GET',
-          headers: {
-            'Authorization': `Bearer ${apiKey || ''}`
-          }
-        });
-        if (resModels.ok) {
-          const data = await resModels.json();
-          const rawIds: string[] = (data.data || data.models || []).map((m: any) => m.id || m.name).filter(Boolean);
-          if (rawIds.length > 0) {
-            modelsList = rawIds;
-          }
-        } else {
-          // fallback to chat ping
-          const resTest = await fetch(`${targetUrl}/chat/completions`, {
-            method: 'POST',
-            headers: {
-              'Content-Type': 'application/json',
-              'Authorization': `Bearer ${apiKey || ''}`
-            },
-            body: JSON.stringify({
-              model: 'deepseek-chat',
-              messages: [{ role: 'user', content: 'Ping' }],
-              max_tokens: 5
-            })
-          });
-
-          if (!resTest.ok) {
-            const errText = await resTest.text();
-            return res.status(resTest.status).json({ error: `DeepSeek 验证失败 (${resTest.status}): ${errText.slice(0, 120)}` });
-          }
-        }
-      } catch (err: any) {
-        return res.status(500).json({ error: `DeepSeek 网络连接失败: ${err.message}` });
-      }
-
-      const latency = Date.now() - startTime;
-      return res.json({
-        success: true,
-        latency,
-        models: modelsList,
-        defaultModel: modelsList[0] || 'deepseek-chat',
-        message: `已连通 DeepSeek 官方接口 · 延迟 ${latency}ms`
-      });
+    const cleanBase = normalizeProbeBaseUrl(baseUrl, effectiveMajor);
+    if (!isSafeExternalUrl(cleanBase)) {
+      return res.status(400).json({ error: 'SSRF 拦截：目标接口地址不合法或指向受限内网/回环地址' });
     }
 
-    // 3. OpenAI / GPT
-    if (effectiveMajor === 'openai') {
-      const cleanBase = (baseUrl || 'https://api.openai.com/v1').replace(/\/+$/, '');
-      let modelsList = ['gpt-4o-mini', 'gpt-4o', 'o3-mini', 'o1'];
-
-      try {
-        const resModels = await fetch(`${cleanBase}/models`, {
-          method: 'GET',
-          headers: {
-            'Authorization': `Bearer ${apiKey || ''}`
-          }
-        });
-        if (resModels.ok) {
-          const data = await resModels.json();
-          const rawIds: string[] = (data.data || []).map((m: any) => m.id).filter(Boolean);
-          // Filter to conversational & reasoning models
-          const gptModels = rawIds.filter(id => 
-            (id.startsWith('gpt-') || id.startsWith('o1') || id.startsWith('o3') || id.startsWith('chatgpt')) &&
-            !id.includes('realtime') && !id.includes('audio') && !id.includes('transcription')
-          );
-          if (gptModels.length > 0) {
-            modelsList = Array.from(new Set(['gpt-4o-mini', 'gpt-4o', 'o3-mini', ...gptModels])).slice(0, 15);
-          }
-        }
-      } catch {
-        // fallback to predefined list
-      }
-
-      const latency = Date.now() - startTime;
-      return res.json({
-        success: true,
-        latency,
-        models: modelsList,
-        defaultModel: 'gpt-4o-mini',
-        message: `已连通 OpenAI 接口 · 延迟 ${latency}ms`
-      });
-    }
-
-    // 4. Claude (Anthropic)
-    if (effectiveMajor === 'claude') {
-      const cleanBase = (baseUrl || 'https://api.anthropic.com/v1').replace(/\/+$/, '');
-      const claudeModels = [
-        'claude-3-7-sonnet-20250219',
-        'claude-3-5-sonnet-20241022',
-        'claude-3-5-haiku-20241022'
-      ];
-
-      // If Anthropic direct, test with Messages API
-      if (cleanBase.includes('api.anthropic.com')) {
-        const resTest = await fetch(`${cleanBase}/messages`, {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            'x-api-key': apiKey || '',
-            'anthropic-version': '2023-06-01'
-          },
-          body: JSON.stringify({
-            model: 'claude-3-7-sonnet-20250219',
-            max_tokens: 5,
-            messages: [{ role: 'user', content: 'Ping' }]
-          })
-        });
-
-        if (!resTest.ok) {
-          const errText = await resTest.text();
-          return res.status(resTest.status).json({ error: `Claude 认证失败 (${resTest.status}): ${errText.slice(0, 120)}` });
-        }
-      }
-
-      const latency = Date.now() - startTime;
-      return res.json({
-        success: true,
-        latency,
-        models: claudeModels,
-        defaultModel: 'claude-3-7-sonnet-20250219',
-        message: `已连通 Claude 接口 · 延迟 ${latency}ms`
-      });
-    }
-
-    // 5. Kimi (Moonshot)
-    if (effectiveMajor === 'kimi') {
-      const cleanBase = (baseUrl || 'https://api.moonshot.cn/v1').replace(/\/+$/, '');
-      const kimiModels = ['moonshot-v1-8k', 'moonshot-v1-32k', 'moonshot-v1-128k', 'moonshot-v1-auto'];
-      const latency = Date.now() - startTime;
-      return res.json({
-        success: true,
-        latency,
-        models: kimiModels,
-        defaultModel: 'moonshot-v1-8k',
-        message: `已连通 Moonshot Kimi 接口 · 延迟 ${latency}ms`
-      });
-    }
-
-    // 6. 通义千问 (Qwen / DashScope)
-    if (effectiveMajor === 'qwen') {
-      const cleanBase = (baseUrl || 'https://dashscope.aliyuncs.com/compatible-mode/v1').replace(/\/+$/, '');
-      const qwenModels = ['qwen-plus', 'qwen-max', 'qwen-turbo', 'qwen-plus-latest', 'qwen2.5-72b-instruct'];
-      const latency = Date.now() - startTime;
-      return res.json({
-        success: true,
-        latency,
-        models: qwenModels,
-        defaultModel: 'qwen-plus',
-        message: `已连通 阿里通义千问 (Qwen) 接口 · 延迟 ${latency}ms`
-      });
-    }
-
-    // 7. 智谱 GLM
-    if (effectiveMajor === 'glm') {
-      const cleanBase = (baseUrl || 'https://open.bigmodel.cn/api/paas/v4').replace(/\/+$/, '');
-      const glmModels = ['glm-4-flash', 'glm-4-plus', 'glm-4-air', 'glm-4-long', 'glm-4'];
-      const latency = Date.now() - startTime;
-      return res.json({
-        success: true,
-        latency,
-        models: glmModels,
-        defaultModel: 'glm-4-flash',
-        message: `已连通 智谱 GLM 开放平台 · 延迟 ${latency}ms`
-      });
-    }
-
-    // 8. Custom / Generic OpenAI-Compatible (SiliconFlow, OneAPI, Ollama, etc.)
-    const cleanBase = (baseUrl || 'https://api.siliconflow.cn/v1').replace(/\/+$/, '');
-    const endpoint = `${cleanBase}/models`;
-
-    try {
-      const resModels = await fetch(endpoint, {
+    // 2. Claude (Anthropic Direct)
+    if (effectiveMajor === 'claude' && cleanBase.includes('api.anthropic.com')) {
+      const anthropicHeaders = {
+        'Content-Type': 'application/json',
+        'x-api-key': cleanKey,
+        'anthropic-version': '2023-06-01'
+      };
+      const modelsRes = await fetchUpstreamJson(`${cleanBase}/models`, {
         method: 'GET',
-        headers: {
-          ...(apiKey ? { 'Authorization': `Bearer ${apiKey}` } : {})
-        }
+        headers: anthropicHeaders,
       });
-
-      if (resModels.ok) {
-        const data = await resModels.json();
-        const modelIds: string[] = (data.data || data.models || [])
-          .map((m: any) => m.id || m.name)
-          .filter(Boolean);
-
-        if (modelIds.length > 0) {
+      if (modelsRes.status === 401 || modelsRes.status === 403) {
+        return res.status(modelsRes.status).json({ error: extractApiErrorMessage(modelsRes.data, modelsRes.rawText, modelsRes.status) });
+      }
+      if (modelsRes.ok) {
+        if (modelsRes.data === null) {
+          return res.status(400).json({ error: '接口返回非 JSON 响应，请核对接口地址' });
+        }
+        const parsed = parseModelsPayload(modelsRes.data, 'claude');
+        if (parsed.length > 0) {
           const latency = Date.now() - startTime;
           return res.json({
             success: true,
             latency,
-            models: modelIds.slice(0, 30),
-            defaultModel: modelIds[0],
-            message: `已在线获取到 ${modelIds.length} 个可用模型 · 延迟 ${latency}ms`
+            models: parsed,
+            defaultModel: parsed[0],
+            message: `已连通 Claude 接口 · 延迟 ${latency}ms`
           });
         }
       }
-    } catch {
-      // ignore and test ping
+
+      const pingRes = await fetchUpstreamJson(`${cleanBase}/messages`, {
+        method: 'POST',
+        headers: anthropicHeaders,
+        body: JSON.stringify({
+          model: getDefaultModelForProvider('claude'),
+          max_tokens: 5,
+          messages: [{ role: 'user', content: 'Ping' }]
+        })
+      });
+      if (!pingRes.ok) {
+        const status = pingRes.status >= 400 && pingRes.status < 600 ? pingRes.status : 400;
+        return res.status(status).json({ error: extractApiErrorMessage(pingRes.data, pingRes.rawText, pingRes.status) });
+      }
+      if (!isValidAiHandshakeJson(pingRes.data)) {
+        return res.status(400).json({ error: '接口返回非 JSON 响应，请核对接口地址' });
+      }
+      const latency = Date.now() - startTime;
+      const claudeModels = [...FALLBACK_MODELS_BY_PROVIDER.claude];
+      return res.json({
+        success: true,
+        latency,
+        models: claudeModels,
+        defaultModel: claudeModels[0],
+        message: `已连通 Claude 接口 · 延迟 ${latency}ms`
+      });
     }
 
-    // Fallback: Ping standard completions to check connection
-    const compEndpoint = `${cleanBase}/chat/completions`;
-    const resPing = await fetch(compEndpoint, {
+    // 3. OpenAI-compatible upstreams (DeepSeek, OpenAI, Claude relay, Kimi, Qwen, GLM, Custom)
+    const headers: Record<string, string> = {
+      'Content-Type': 'application/json',
+      'Authorization': `Bearer ${cleanKey}`
+    };
+    const modelsRes = await fetchUpstreamJson(`${cleanBase}/models`, {
+      method: 'GET',
+      headers,
+    });
+
+    if (modelsRes.status === 401 || modelsRes.status === 403) {
+      return res.status(modelsRes.status).json({ error: extractApiErrorMessage(modelsRes.data, modelsRes.rawText, modelsRes.status) });
+    }
+
+    if (modelsRes.ok) {
+      if (modelsRes.data === null) {
+        return res.status(400).json({ error: '接口返回非 JSON 响应（可能是网页或代理拦截），请核对接口地址' });
+      }
+      const parsed = parseModelsPayload(modelsRes.data, effectiveMajor);
+      if (parsed.length > 0) {
+        const latency = Date.now() - startTime;
+        const preferredDefault = getDefaultModelForProvider(effectiveMajor);
+        const defaultModel = parsed.includes(preferredDefault) ? preferredDefault : parsed[0];
+        const providerLabel = PROVIDER_LABELS[effectiveMajor] || '兼容接口';
+        return res.json({
+          success: true,
+          latency,
+          models: parsed,
+          defaultModel,
+          message: `已连通 ${providerLabel} · 获取 ${parsed.length} 个模型 · 延迟 ${latency}ms`
+        });
+      }
+    }
+
+    const fallbackList = [...(FALLBACK_MODELS_BY_PROVIDER[effectiveMajor] || FALLBACK_MODELS_BY_PROVIDER.custom)];
+    const pingRes = await fetchUpstreamJson(`${cleanBase}/chat/completions`, {
       method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        ...(apiKey ? { 'Authorization': `Bearer ${apiKey}` } : {})
-      },
+      headers,
       body: JSON.stringify({
-        model: 'default',
+        model: fallbackList[0],
         messages: [{ role: 'user', content: 'Ping' }],
         max_tokens: 5
       })
     });
 
+    if (!pingRes.ok) {
+      const status = pingRes.status >= 400 && pingRes.status < 600 ? pingRes.status : 400;
+      return res.status(status).json({ error: extractApiErrorMessage(pingRes.data, pingRes.rawText, pingRes.status) });
+    }
+    if (!isValidAiHandshakeJson(pingRes.data)) {
+      return res.status(400).json({ error: '接口返回非 JSON 响应（可能是网页或代理拦截），请核对接口地址' });
+    }
+
     const latency = Date.now() - startTime;
+    const providerLabel = PROVIDER_LABELS[effectiveMajor] || '兼容接口';
     return res.json({
       success: true,
       latency,
-      models: ['deepseek-chat', 'gpt-4o-mini', 'claude-3-7-sonnet', 'qwen-plus'],
-      defaultModel: 'deepseek-chat',
-      message: `已完成接口连通性握手 · 延迟 ${latency}ms`
+      models: fallbackList,
+      defaultModel: fallbackList[0],
+      message: `已连通 ${providerLabel} 接口 · 延迟 ${latency}ms`
     });
-  } catch (err: any) {
-    return res.status(500).json({ error: err.message || '无法连接该接口拉取模型列表' });
+  } catch (err: unknown) {
+    const msg = err instanceof Error ? err.message : '无法连接该接口拉取模型列表';
+    return res.status(500).json({ error: msg });
   }
 });
 
@@ -2122,12 +2138,15 @@ Please generate the authentic passage and questions. Output pure JSON only.`;
         if (aiConfig.customBaseUrl && !isSafeExternalUrl(aiConfig.customBaseUrl)) {
           return res.status(400).json({ error: 'SSRF 拦截：自定义接口地址受限或指向非法目标' });
         }
-        const targetUrl = aiConfig.customBaseUrl ? aiConfig.customBaseUrl.replace(/\/+$/, '') : 'https://api.deepseek.com/v1';
-        const targetModel = aiConfig.customModel || 'deepseek-chat';
-        const endpoint = `${targetUrl}/chat/completions`;
+        const effectiveMajor = resolveMajorProvider(aiConfig.majorProvider, aiConfig.provider);
+        const targetUrl = normalizeProbeBaseUrl(aiConfig.customBaseUrl, effectiveMajor);
+        if (!isSafeExternalUrl(targetUrl)) {
+          return res.status(400).json({ error: 'SSRF 拦截：自定义接口地址受限或指向非法目标' });
+        }
+        const targetModel = String(aiConfig.customModel || '').trim() || getDefaultModelForProvider(effectiveMajor);
 
         const rawText = await callOpenAICompatibleApi(
-          endpoint,
+          targetUrl,
           aiConfig.customApiKey || '',
           targetModel,
           [

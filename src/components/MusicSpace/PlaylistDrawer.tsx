@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react';
+import React, { useState, useEffect, useLayoutEffect, useRef, useCallback, useMemo } from 'react';
 import { motion, AnimatePresence, useDragControls } from 'motion/react';
 import { useLiveQuery } from 'dexie-react-hooks';
 import { useAppStore } from '../../store/useAppStore';
@@ -12,7 +12,15 @@ import {
 } from '../../utils/vocabEngine';
 import { VocabDifficultyTag, SongItem } from '../../types';
 import { triggerHighRefreshBoost } from '../../utils/displayRefreshRate';
-import { Sparkles, ArrowUpDown, Filter, RotateCcw, Volume2, Check } from 'lucide-react';
+import { Sparkles, ArrowUpDown, Filter, RotateCcw, Volume2, Check, Search, SlidersHorizontal, X, ChevronDown } from 'lucide-react';
+import {
+  PlaylistPrimaryFilter,
+  PlaylistVocabSubFilter,
+  PlaylistLangSubFilter,
+  extractPlaylistArtistOptions,
+  filterAnalyzedSongs,
+  hasActiveSecondaryFilter
+} from '../../utils/playlistFilterEngine';
 
 // Mastery status circle indicator matching the app design system (0: hollow, 1: needle-dot, 2: mid-dot, 3: solid)
 const MasteryCircleIndicator: React.FC<{ level?: number; isDue?: boolean; size?: number }> = ({
@@ -59,8 +67,6 @@ const MasteryCircleIndicator: React.FC<{ level?: number; isDue?: boolean; size?:
   );
 };
 
-type PlaylistFilterType = 'ALL' | 'DUE_REVIEW' | 'NOTEBOOK' | 'CHINESE';
-
 export const PlaylistDrawer: React.FC = () => {
   const isPlaylistOpen = useAppStore(s => s.isPlaylistOpen);
   const setIsPlaylistOpen = useAppStore(s => s.setIsPlaylistOpen);
@@ -72,7 +78,16 @@ export const PlaylistDrawer: React.FC = () => {
   const showToast = useAppStore(s => s.showToast);
 
   const [isExpanded, setIsExpanded] = useState(false);
-  const [activeFilter, setActiveFilter] = useState<PlaylistFilterType>('ALL');
+  const [activeFilter, setActiveFilter] = useState<PlaylistPrimaryFilter>('ALL');
+  const [vocabSubFilter, setVocabSubFilter] = useState<PlaylistVocabSubFilter>('ALL');
+  const [langSubFilter, setLangSubFilter] = useState<PlaylistLangSubFilter>('ALL');
+  const [artistSubFilter, setArtistSubFilter] = useState<string>('ALL');
+  const [isArtistGridExpanded, setIsArtistGridExpanded] = useState(false);
+  const [isSearchOpen, setIsSearchOpen] = useState(false);
+  const [searchQuery, setSearchQuery] = useState('');
+  const [isFilterMenuOpen, setIsFilterMenuOpen] = useState(false);
+  const searchInputRef = useRef<HTMLInputElement | null>(null);
+  const artistGridRef = useRef<HTMLDivElement | null>(null);
   const playlistContainerRef = useRef<HTMLDivElement | null>(null);
   const activeSongItemRef = useRef<HTMLDivElement | null>(null);
   const dragControls = useDragControls();
@@ -97,7 +112,7 @@ export const PlaylistDrawer: React.FC = () => {
     return songs.map((song, originalIdx) => {
       const evalResult = evaluateSongVocabDifficulty(song, words, dueWordStrs);
       const analysis = analyzeSongVocab(song, words, dueWordStrs);
-      const isChinese = isChineseSong(song) || evalResult.isChinese;
+      const isChinese = isChineseSong(song) || Boolean(evalResult.isChinese);
 
       const matchedList = analysis.matchedNotebookWords.map(wordStr => {
         const lower = wordStr.toLowerCase();
@@ -147,16 +162,46 @@ export const PlaylistDrawer: React.FC = () => {
     return { dueCount, notebookCount, chineseCount };
   }, [analyzedSongs]);
 
+  // Only surface artists with at least 5 songs in the playlist to keep the filter strip clean
+  const MIN_ARTIST_SONG_COUNT = 5;
+  const playlistArtists = useMemo(
+    () =>
+      extractPlaylistArtistOptions(analyzedSongs)
+        .filter(opt => opt.count >= MIN_ARTIST_SONG_COUNT)
+        .map(opt => opt.name),
+    [analyzedSongs]
+  );
+
+  useEffect(() => {
+    if (isPlaylistOpen && artistSubFilter !== 'ALL' && !playlistArtists.includes(artistSubFilter)) {
+      setArtistSubFilter('ALL');
+    }
+  }, [isPlaylistOpen, artistSubFilter, playlistArtists]);
+
+  // Keep active artist visible in the first row when collapsed if selected from deeper in the grid
+  const displayedArtists = useMemo(() => {
+    if (isArtistGridExpanded || artistSubFilter === 'ALL') return playlistArtists;
+    const idx = playlistArtists.indexOf(artistSubFilter);
+    if (idx <= 0) return playlistArtists;
+    return [artistSubFilter, ...playlistArtists.filter(a => a !== artistSubFilter)];
+  }, [playlistArtists, artistSubFilter, isArtistGridExpanded]);
+
+  const isSecondaryFilterActive = hasActiveSecondaryFilter({
+    vocabSubFilter,
+    langSubFilter,
+    artistSubFilter
+  });
+
   // Filtered song list
   const filteredList = useMemo(() => {
-    return analyzedSongs.filter(item => {
-      if (activeFilter === 'ALL') return true;
-      if (activeFilter === 'DUE_REVIEW') return item.hasDueWords;
-      if (activeFilter === 'NOTEBOOK') return item.hasNotebookWords;
-      if (activeFilter === 'CHINESE') return item.isChinese;
-      return true;
+    return filterAnalyzedSongs(analyzedSongs, {
+      primaryFilter: activeFilter,
+      vocabSubFilter,
+      langSubFilter,
+      artistSubFilter,
+      searchQuery
     });
-  }, [analyzedSongs, activeFilter]);
+  }, [analyzedSongs, activeFilter, vocabSubFilter, langSubFilter, artistSubFilter, searchQuery]);
 
   // Auto-scroll to currently playing track whenever drawer opens or active song changes
   const scrollToActiveSong = useCallback((smooth: boolean = true) => {
@@ -193,8 +238,67 @@ export const PlaylistDrawer: React.FC = () => {
     } else {
       hasInitialScrolledRef.current = false;
       setIsExpanded(false);
+      setIsArtistGridExpanded(false);
+      setIsSearchOpen(false);
+      setSearchQuery('');
+      setIsFilterMenuOpen(false);
     }
   }, [isPlaylistOpen, scrollToActiveSong]);
+
+  const [collapsedArtistRowHeight, setCollapsedArtistRowHeight] = useState<number>(28);
+  const [hasArtistRowOverflow, setHasArtistRowOverflow] = useState<boolean>(false);
+
+  const measureArtistStrip = useCallback(() => {
+    const el = artistGridRef.current;
+    if (!el || el.children.length === 0) {
+      setHasArtistRowOverflow(false);
+      return;
+    }
+    const items = Array.from(el.children) as HTMLElement[];
+    const firstTop = items[0].offsetTop;
+    let maxRow1Height = 28;
+    let wrapped = false;
+    for (const child of items) {
+      const relTop = child.offsetTop - firstTop;
+      if (relTop > 4) {
+        wrapped = true;
+      } else {
+        maxRow1Height = Math.max(maxRow1Height, child.offsetTop + child.offsetHeight);
+      }
+    }
+    const nextHeight = Math.ceil(maxRow1Height);
+    setCollapsedArtistRowHeight(prev => (prev === nextHeight ? prev : nextHeight));
+    setHasArtistRowOverflow(prev => (prev === wrapped ? prev : wrapped));
+  }, []);
+
+  useLayoutEffect(() => {
+    if (!isPlaylistOpen || displayedArtists.length === 0) {
+      setHasArtistRowOverflow(false);
+      return;
+    }
+    if (!isFilterMenuOpen) return;
+    measureArtistStrip();
+    const el = artistGridRef.current;
+    if (!el || typeof ResizeObserver === 'undefined') return;
+    const ro = new ResizeObserver(() => measureArtistStrip());
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, [isPlaylistOpen, isFilterMenuOpen, displayedArtists, measureArtistStrip]);
+
+  useEffect(() => {
+    if (!isArtistGridExpanded && artistGridRef.current) {
+      artistGridRef.current.scrollTop = 0;
+    }
+  }, [isArtistGridExpanded]);
+
+  useEffect(() => {
+    if (isSearchOpen) {
+      const t = window.setTimeout(() => {
+        searchInputRef.current?.focus();
+      }, 60);
+      return () => window.clearTimeout(t);
+    }
+  }, [isSearchOpen]);
 
   useEffect(() => {
     if (isPlaylistOpen && hasInitialScrolledRef.current) {
@@ -344,47 +448,279 @@ export const PlaylistDrawer: React.FC = () => {
               </button>
             </div>
 
-            {/* Vocabulary Difficulty Filter Toolbar */}
-            <div className="flex items-center gap-1.5 overflow-x-auto no-scrollbar py-2.5 border-b border-stone-200/50 dark:border-slate-800/60 shrink-0">
-              {[
-                { id: 'ALL', label: '全部' },
-                {
-                  id: 'DUE_REVIEW',
-                  label: `待复习 (${filterCounts.dueCount})`,
-                  highlight: filterCounts.dueCount > 0,
-                  hide: filterCounts.dueCount === 0
-                },
-                {
-                  id: 'NOTEBOOK',
-                  label: `生词 (${filterCounts.notebookCount})`,
-                  hide: filterCounts.notebookCount === 0
-                },
-                {
-                  id: 'CHINESE',
-                  label: `中文 (${filterCounts.chineseCount})`,
-                  hide: filterCounts.chineseCount === 0
-                }
-              ].filter(t => !t.hide).map(tab => {
-                const isActive = activeFilter === tab.id;
-                return (
-                  <button
-                    key={tab.id}
-                    onClick={() => setActiveFilter(tab.id as PlaylistFilterType)}
-                    className={`px-3 py-1 rounded-full text-[11px] font-medium transition-all shrink-0 flex items-center gap-1 ${
-                      isActive
-                        ? tab.id === 'DUE_REVIEW'
-                          ? 'bg-amber-500 text-white shadow-2xs font-semibold'
-                          : 'bg-[#516050] text-white shadow-2xs font-semibold'
-                        : tab.highlight
-                        ? 'bg-amber-500/10 text-amber-700 dark:text-amber-300 border border-amber-500/30 hover:bg-amber-500/20'
-                        : 'bg-white dark:bg-[#1A2234] text-stone-600 dark:text-stone-400 hover:bg-stone-100 dark:hover:bg-slate-800 border border-stone-200/60 dark:border-slate-800'
-                    }`}
+            {/* Vocabulary Difficulty Filter Toolbar + Animated Horizontal Search & Secondary Filter Trigger */}
+            <div className="relative h-11 flex items-center justify-between gap-2 border-b border-stone-200/50 dark:border-slate-800/60 shrink-0 overflow-hidden">
+              <AnimatePresence initial={false} mode="wait">
+                {!isSearchOpen ? (
+                  <motion.div
+                    key="toolbar-normal"
+                    initial={{ opacity: 0, x: -6 }}
+                    animate={{ opacity: 1, x: 0 }}
+                    exit={{ opacity: 0, x: -6 }}
+                    transition={{ duration: 0.18, ease: [0.16, 1, 0.3, 1] }}
+                    className="w-full flex items-center justify-between gap-2"
                   >
-                    <span>{tab.label}</span>
-                  </button>
-                );
-              })}
+                    {/* Left Primary Filter Pills */}
+                    <div className="flex items-center gap-1.5 overflow-x-auto no-scrollbar py-1 min-w-0">
+                      {[
+                        { id: 'ALL', label: '全部' },
+                        {
+                          id: 'DUE_REVIEW',
+                          label: `待复习 (${filterCounts.dueCount})`,
+                          highlight: filterCounts.dueCount > 0,
+                          hide: filterCounts.dueCount === 0
+                        },
+                        {
+                          id: 'NOTEBOOK',
+                          label: `生词 (${filterCounts.notebookCount})`,
+                          hide: filterCounts.notebookCount === 0
+                        }
+                      ].filter(t => !t.hide).map(tab => {
+                        const isActive = activeFilter === tab.id;
+                        return (
+                          <button
+                            key={tab.id}
+                            type="button"
+                            onClick={() => setActiveFilter(tab.id as PlaylistPrimaryFilter)}
+                            className={`px-3 py-1 rounded-full text-[11px] font-medium transition-all shrink-0 flex items-center gap-1 cursor-pointer ${
+                              isActive
+                                ? tab.id === 'DUE_REVIEW'
+                                  ? 'bg-amber-500 text-white shadow-2xs font-semibold'
+                                  : 'bg-[#516050] text-white shadow-2xs font-semibold'
+                                : tab.highlight
+                                ? 'bg-amber-500/10 text-amber-700 dark:text-amber-300 border border-amber-500/30 hover:bg-amber-500/20'
+                                : 'bg-white dark:bg-[#1A2234] text-stone-600 dark:text-stone-400 hover:bg-stone-100 dark:hover:bg-slate-800 border border-stone-200/60 dark:border-slate-800'
+                            }`}
+                          >
+                            <span>{tab.label}</span>
+                          </button>
+                        );
+                      })}
+                    </div>
+
+                    {/* Right Minimalist Icon Triggers: Search & Secondary Filter */}
+                    <div className="flex items-center gap-1.5 shrink-0">
+                      <button
+                        type="button"
+                        aria-label="Search playlist"
+                        onClick={() => setIsSearchOpen(true)}
+                        className={`w-7 h-7 rounded-full flex items-center justify-center transition-all cursor-pointer active:scale-95 ${
+                          searchQuery.trim()
+                            ? 'bg-[#516050] text-white border border-[#516050] shadow-2xs'
+                            : 'bg-white dark:bg-[#1A2234] text-stone-600 dark:text-stone-400 hover:bg-stone-100 dark:hover:bg-slate-800 border border-stone-200/60 dark:border-slate-800'
+                        }`}
+                      >
+                        <Search className="w-3.5 h-3.5" />
+                      </button>
+
+                      <button
+                        type="button"
+                        aria-label="Filter playlist"
+                        aria-expanded={isFilterMenuOpen}
+                        onClick={() => setIsFilterMenuOpen(prev => !prev)}
+                        className={`relative w-7 h-7 rounded-full flex items-center justify-center transition-all cursor-pointer active:scale-95 ${
+                          isFilterMenuOpen || isSecondaryFilterActive
+                            ? 'bg-[#516050] text-white border border-[#516050] shadow-2xs'
+                            : 'bg-white dark:bg-[#1A2234] text-stone-600 dark:text-stone-400 hover:bg-stone-100 dark:hover:bg-slate-800 border border-stone-200/60 dark:border-slate-800'
+                        }`}
+                      >
+                        <SlidersHorizontal className="w-3.5 h-3.5" />
+                      </button>
+                    </div>
+                  </motion.div>
+                ) : (
+                  <motion.div
+                    key="toolbar-search"
+                    initial={{ opacity: 0, scaleX: 0.78 }}
+                    animate={{ opacity: 1, scaleX: 1 }}
+                    exit={{ opacity: 0, scaleX: 0.85 }}
+                    transition={{ duration: 0.22, ease: [0.16, 1, 0.3, 1] }}
+                    style={{ transformOrigin: 'right center' }}
+                    className="w-full h-7.5 px-3 rounded-full bg-white dark:bg-[#1A2234] border border-[#516050]/45 dark:border-[#8FB996]/45 flex items-center gap-2 shadow-2xs"
+                  >
+                    <Search className="w-3.5 h-3.5 text-[#516050] dark:text-[#8FB996] shrink-0" />
+                    <input
+                      ref={searchInputRef}
+                      type="text"
+                      value={searchQuery}
+                      onChange={(e) => setSearchQuery(e.target.value)}
+                      onKeyDown={(e) => {
+                        if (e.key === 'Escape') {
+                          setSearchQuery('');
+                          setIsSearchOpen(false);
+                        }
+                      }}
+                      aria-label="Search tracks"
+                      className="flex-1 min-w-0 bg-transparent text-xs text-stone-800 dark:text-stone-100 focus:outline-hidden"
+                    />
+                    <button
+                      type="button"
+                      aria-label="Close search"
+                      onClick={() => {
+                        setSearchQuery('');
+                        setIsSearchOpen(false);
+                      }}
+                      className="p-0.5 text-stone-400 hover:text-stone-700 dark:hover:text-stone-200 transition-colors shrink-0 cursor-pointer"
+                    >
+                      <X className="w-3.5 h-3.5" />
+                    </button>
+                  </motion.div>
+                )}
+              </AnimatePresence>
             </div>
+
+            {/* Expandable Secondary Filter Menu (Smooth Motion Height & Opacity Accordion) */}
+            <AnimatePresence initial={false}>
+              {isFilterMenuOpen && (
+                <motion.div
+                  key="playlist-secondary-filter-panel"
+                  initial={{ height: 0, opacity: 0 }}
+                  animate={{ height: 'auto', opacity: 1 }}
+                  exit={{ height: 0, opacity: 0 }}
+                  transition={{ duration: 0.26, ease: [0.22, 1, 0.36, 1] }}
+                  className="overflow-hidden shrink-0"
+                >
+                  <motion.div
+                    initial={{ y: -6 }}
+                    animate={{ y: 0 }}
+                    exit={{ y: -6 }}
+                    transition={{ duration: 0.26, ease: [0.22, 1, 0.36, 1] }}
+                    className="py-2.5 border-b border-stone-200/50 dark:border-slate-800/60 flex flex-col gap-2"
+                  >
+                    {/* Row 1: Mastery, Corpus & Language */}
+                    <div className="min-h-7 py-0.5 flex items-center justify-between gap-1.5 overflow-x-auto no-scrollbar">
+                      <div className="flex items-center gap-1.5 shrink-0">
+                        {(
+                          [
+                            { id: 'UNMASTERED', label: '未掌握' },
+                            { id: 'MASTERED', label: '已掌握' },
+                            { id: 'IELTS', label: 'IELTS' }
+                          ] as { id: PlaylistVocabSubFilter; label: string }[]
+                        ).map(opt => {
+                          const active = vocabSubFilter === opt.id;
+                          return (
+                            <button
+                              key={opt.id}
+                              type="button"
+                              onClick={() => setVocabSubFilter(prev => (prev === opt.id ? 'ALL' : opt.id))}
+                              className={`px-2.5 py-1 rounded-full text-[11px] font-medium border transition-all shrink-0 cursor-pointer ${
+                                active
+                                  ? 'bg-[#516050] text-white border-transparent font-semibold shadow-2xs'
+                                  : 'bg-white/80 dark:bg-[#1A2234]/80 text-stone-600 dark:text-stone-400 hover:bg-stone-100 dark:hover:bg-slate-800 border-stone-200/60 dark:border-slate-800'
+                              }`}
+                            >
+                              {opt.label}
+                            </button>
+                          );
+                        })}
+
+                        <div className="w-px h-3.5 bg-stone-200/80 dark:bg-slate-700/80 mx-0.5 shrink-0" />
+
+                        {(
+                          [
+                            { id: 'EN', label: '英文' },
+                            { id: 'ZH', label: '中文' }
+                          ] as { id: PlaylistLangSubFilter; label: string }[]
+                        ).map(opt => {
+                          const active = langSubFilter === opt.id;
+                          return (
+                            <button
+                              key={opt.id}
+                              type="button"
+                              onClick={() => setLangSubFilter(prev => (prev === opt.id ? 'ALL' : opt.id))}
+                              className={`px-2.5 py-1 rounded-full text-[11px] font-medium border transition-all shrink-0 cursor-pointer ${
+                                active
+                                  ? 'bg-[#516050] text-white border-transparent font-semibold shadow-2xs'
+                                  : 'bg-white/80 dark:bg-[#1A2234]/80 text-stone-600 dark:text-stone-400 hover:bg-stone-100 dark:hover:bg-slate-800 border-stone-200/60 dark:border-slate-800'
+                              }`}
+                            >
+                              {opt.label}
+                            </button>
+                          );
+                        })}
+                      </div>
+
+                      <button
+                        type="button"
+                        aria-label="Reset filters"
+                        onClick={() => {
+                          setVocabSubFilter('ALL');
+                          setLangSubFilter('ALL');
+                          setArtistSubFilter('ALL');
+                        }}
+                        className={`w-6.5 h-6.5 rounded-full flex items-center justify-center text-stone-400 hover:text-stone-700 dark:hover:text-stone-200 bg-white/80 dark:bg-[#1A2234]/80 border border-stone-200/60 dark:border-slate-800 transition-all duration-200 shrink-0 cursor-pointer ${
+                          isSecondaryFilterActive
+                            ? 'opacity-100 scale-100 pointer-events-auto'
+                            : 'opacity-0 scale-75 pointer-events-none'
+                        }`}
+                      >
+                        <RotateCcw className="w-3 h-3" />
+                      </button>
+                    </div>
+
+                    {/* Row 2: Artist Filter Strip (Animated Expandable Multi-Row Grid for Artists >= 5 Songs) */}
+                    {displayedArtists.length > 0 && (
+                      <div
+                        className="flex items-start justify-between gap-1.5"
+                        onPointerDown={(e) => e.stopPropagation()}
+                        onTouchStart={(e) => e.stopPropagation()}
+                        onTouchMove={(e) => e.stopPropagation()}
+                      >
+                        <motion.div
+                          initial={false}
+                          animate={{ height: isArtistGridExpanded ? 'auto' : collapsedArtistRowHeight }}
+                          transition={{ duration: 0.26, ease: [0.22, 1, 0.36, 1] }}
+                          className="flex-1 min-w-0 overflow-hidden"
+                        >
+                          <div
+                            ref={artistGridRef}
+                            className={`relative flex flex-wrap items-center gap-1.5 no-scrollbar max-h-[140px] ${
+                              isArtistGridExpanded
+                                ? 'overflow-y-auto touch-pan-y pb-0.5'
+                                : 'overflow-hidden'
+                            }`}
+                          >
+                            {displayedArtists.map(artist => {
+                              const active = artistSubFilter === artist;
+                              return (
+                                <button
+                                  key={artist}
+                                  type="button"
+                                  onClick={() => setArtistSubFilter(prev => (prev === artist ? 'ALL' : artist))}
+                                  className={`px-2.5 py-1 rounded-full text-[11px] font-medium border transition-all shrink-0 cursor-pointer max-w-[150px] truncate ${
+                                    active
+                                      ? 'bg-[#516050] text-white border-transparent font-semibold shadow-2xs'
+                                      : 'bg-white/80 dark:bg-[#1A2234]/80 text-stone-600 dark:text-stone-400 hover:bg-stone-100 dark:hover:bg-slate-800 border-stone-200/60 dark:border-slate-800'
+                                  }`}
+                                >
+                                  {artist}
+                                </button>
+                              );
+                            })}
+                          </div>
+                        </motion.div>
+
+                        {hasArtistRowOverflow && (
+                          <button
+                            type="button"
+                            aria-label={isArtistGridExpanded ? 'Collapse artists' : 'Expand artists'}
+                            aria-expanded={isArtistGridExpanded}
+                            onClick={() => setIsArtistGridExpanded(prev => !prev)}
+                            className="w-6.5 h-6.5 mt-0.5 rounded-full flex items-center justify-center text-stone-400 hover:text-stone-700 dark:hover:text-stone-200 bg-white/80 dark:bg-[#1A2234]/80 border border-stone-200/60 dark:border-slate-800 transition-all shrink-0 cursor-pointer"
+                          >
+                            <ChevronDown
+                              className={`w-3.5 h-3.5 transition-transform duration-200 ${
+                                isArtistGridExpanded ? 'rotate-180' : ''
+                              }`}
+                            />
+                          </button>
+                        )}
+                      </div>
+                    )}
+                  </motion.div>
+                </motion.div>
+              )}
+            </AnimatePresence>
 
             {/* Track list with smooth scrolling & auto-scroll support */}
             <div
@@ -513,7 +849,13 @@ export const PlaylistDrawer: React.FC = () => {
                   <p>当前分类下暂无匹配歌曲</p>
                   <button
                     type="button"
-                    onClick={() => setActiveFilter('ALL')}
+                    onClick={() => {
+                      setActiveFilter('ALL');
+                      setVocabSubFilter('ALL');
+                      setLangSubFilter('ALL');
+                      setArtistSubFilter('ALL');
+                      setSearchQuery('');
+                    }}
                     className="mt-2 text-[#516050] dark:text-[#8FB996] underline cursor-pointer"
                   >
                     查看全部曲目

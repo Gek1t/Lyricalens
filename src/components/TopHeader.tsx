@@ -57,15 +57,17 @@ export const TopHeader: React.FC<TopHeaderProps> = ({
 
   return (
     <header
-      className={`relative w-full z-40 pt-[var(--android-safe-top,max(3.25rem,calc(env(safe-area-inset-top,44px)+0.85rem)))] pb-2.5 px-5 flex items-center justify-between shrink-0 pointer-events-auto transition-all duration-300 ${className}`}
+      className={`relative w-full z-40 pt-[var(--android-safe-top,max(3.25rem,calc(env(safe-area-inset-top,44px)+0.85rem)))] pb-2.5 px-4 sm:px-5 grid grid-cols-[minmax(36px,1fr)_minmax(0,auto)_minmax(max-content,1fr)] items-center gap-1.5 sm:gap-2 shrink-0 pointer-events-auto transition-all duration-300 ${
+        isCamera ? 'bg-gradient-to-b from-black/50 via-black/22 to-transparent' : ''
+      } ${className}`}
     >
       {/* Left circular button */}
       <button
         id="top-header-left-btn"
         onClick={handleLeftButtonClick}
-        className={`w-9 h-9 rounded-full flex items-center justify-center active:scale-90 transition-all cursor-pointer group overflow-hidden focus:outline-none ${
+        className={`justify-self-start w-9 h-9 rounded-full flex items-center justify-center active:scale-90 transition-all cursor-pointer group overflow-hidden focus:outline-none ${
           isCamera
-            ? 'text-white bg-white/14 hover:bg-white/22 backdrop-blur-xl border border-white/25 shadow-[0_2px_10px_rgba(0,0,0,0.18)]'
+            ? 'text-white bg-stone-950/30 hover:bg-stone-950/45 backdrop-blur-xl border border-white/25 shadow-[0_2px_10px_rgba(0,0,0,0.22)]'
             : 'text-stone-700 dark:text-stone-300 hover:text-stone-950 dark:hover:text-white hover:bg-stone-500/10 dark:hover:bg-white/10'
         }`}
         title={leftTitle || "Open Personal Hub & Archives (个人中心与试卷档案)"}
@@ -86,7 +88,7 @@ export const TopHeader: React.FC<TopHeaderProps> = ({
       </button>
 
       {/* Center tracking-spaced metadata / Animated Center Node */}
-      <div className="flex-1 flex items-center justify-center text-center px-2 overflow-visible h-8">
+      <div className="justify-self-center flex items-center justify-center text-center px-1 overflow-visible h-8 min-w-0 max-w-full">
         <AnimatePresence mode="wait" initial={false}>
           {centerContent ? (
             <motion.div
@@ -95,7 +97,7 @@ export const TopHeader: React.FC<TopHeaderProps> = ({
               animate={{ opacity: 1, y: 0, scale: 1 }}
               exit={{ opacity: 0, y: -8, scale: 0.96 }}
               transition={{ duration: 0.22, ease: [0.16, 1, 0.3, 1] }}
-              className="flex items-center justify-center"
+              className="flex items-center justify-center min-w-0 max-w-full"
             >
               {centerContent}
             </motion.div>
@@ -106,12 +108,12 @@ export const TopHeader: React.FC<TopHeaderProps> = ({
               animate={{ opacity: 1, y: 0, scale: 1 }}
               exit={{ opacity: 0, y: -6, scale: 0.96 }}
               transition={{ duration: 0.22, ease: [0.16, 1, 0.3, 1] }}
-              className="flex items-center justify-center"
+              className="flex items-center justify-center min-w-0 max-w-full"
             >
               <span
-                className={`uppercase text-[11px] font-sans font-medium tracking-[0.25em] select-none truncate ${
+                className={`uppercase text-[11px] font-sans font-medium tracking-[0.2em] sm:tracking-[0.25em] select-none truncate block max-w-full ${
                   isCamera
-                    ? 'text-white/90 drop-shadow-[0_1px_6px_rgba(0,0,0,0.45)]'
+                    ? 'text-white/95 drop-shadow-[0_1px_6px_rgba(0,0,0,0.55)]'
                     : 'text-[#78716C] dark:text-stone-400'
                 }`}
               >
@@ -123,7 +125,7 @@ export const TopHeader: React.FC<TopHeaderProps> = ({
       </div>
 
       {/* Right circular buttons */}
-      <div className="relative flex items-center gap-2">
+      <div className="justify-self-end relative flex items-center gap-1.5 sm:gap-2 shrink-0">
         {rightSlot}
 
         <button
@@ -131,7 +133,7 @@ export const TopHeader: React.FC<TopHeaderProps> = ({
           onClick={() => setIsMenuOpen(!isMenuOpen)}
           className={`w-9 h-9 rounded-full flex items-center justify-center active:scale-90 transition-all duration-200 cursor-pointer ${
             isCamera
-              ? 'text-white bg-white/14 hover:bg-white/22 backdrop-blur-xl border border-white/25 shadow-[0_2px_10px_rgba(0,0,0,0.18)]'
+              ? 'text-white bg-stone-950/30 hover:bg-stone-950/45 backdrop-blur-xl border border-white/25 shadow-[0_2px_10px_rgba(0,0,0,0.22)]'
               : isMenuOpen
               ? 'text-stone-950 dark:text-white bg-stone-500/15 dark:bg-white/15'
               : 'text-stone-700 dark:text-stone-300 hover:text-stone-950 dark:hover:text-white hover:bg-stone-500/10 dark:hover:bg-white/10'

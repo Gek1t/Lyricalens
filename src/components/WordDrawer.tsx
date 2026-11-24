@@ -1,20 +1,23 @@
 import React, { useState, useEffect, useRef, useLayoutEffect, useMemo, useCallback } from 'react';
 import { motion, AnimatePresence, useMotionValue, animate } from 'motion/react';
-import { Volume2, Music2, Layers, Sparkles, Compass } from 'lucide-react';
+import { Volume2, Layers, Compass } from 'lucide-react';
 import { WordItem, MasteryLevel, SubWordItem } from '../types';
 import { speakWord, isAutoPronounceEnabled, getStoredAccentPreference } from '../utils/audioEngine';
-import { cycleWordMastery } from '../db';
-import { HighlightedText } from './HighlightedText';
+import { cycleWordMastery, db } from '../db';
+import { HighlightedText, ClickableWordHeading } from './HighlightedText';
+import { ContextualImmersionSection } from './ContextualImmersionSection';
 import { getCollocationsForWord, parseStructuredDefinitions, CollocationItem } from '../utils/collocationDictionary';
 import { findSongContextInPlaylist, findIELTSAcademicContext } from '../utils/contextFinder';
-import { lookupWord, formatPartOfSpeech } from '../utils/lyricDictionary';
+import { lookupWord, formatPartOfSpeech, ONLINE_LOOKUP_LOADING_TEXT } from '../utils/lyricDictionary';
 import { triggerHighRefreshBoost } from '../utils/displayRefreshRate';
+import { useAppStore } from '../store/useAppStore';
 
 interface WordDrawerProps {
   wordItem: WordItem | null;
   isOpen: boolean;
   onClose: () => void;
   onSelectSubWord?: (word: string) => void;
+  zIndexClass?: string;
 }
 
 interface DrawerStackItem {
@@ -82,8 +85,8 @@ const DrawerCardView: React.FC<DrawerCardViewProps> = React.memo(({
   }, [stackItem.wordItem.word, stackItem.activeSubWord?.word, cardIndex, currentStackIndex, isTopCard, getSavedScrollTop]);
 
   const songContext = useMemo(
-    () => findSongContextInPlaylist(currentItem.word),
-    [currentItem.word]
+    () => findSongContextInPlaylist(currentItem.word, currentItem),
+    [currentItem]
   );
   const ieltsContext = useMemo(
     () => findIELTSAcademicContext(currentItem.word),
@@ -148,7 +151,7 @@ const DrawerCardView: React.FC<DrawerCardViewProps> = React.memo(({
                     : 'text-[36px] sm:text-[42px]'
                 }`}
               >
-                {currentItem.word}
+                <ClickableWordHeading word={currentItem.word} onWordClick={onPushWord} />
               </h1>
               
               {/* 优雅斜体词性：仅单词显示，短语自动隐藏 */}
@@ -261,7 +264,24 @@ const DrawerCardView: React.FC<DrawerCardViewProps> = React.memo(({
               DEFINITION
             </div>
 
-            {structuredDefs.length > 1 ? (
+            {currentItem.definitionCn === ONLINE_LOOKUP_LOADING_TEXT || currentItem.definitionCn === '正在联网查询释义…' ? (
+              <div className="space-y-2.5 py-1.5">
+                <div className="flex items-center gap-2 text-stone-500 dark:text-stone-400">
+                  <span className="relative flex h-2 w-2">
+                    <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-[#516050] dark:bg-[#8FB996] opacity-75"></span>
+                    <span className="relative inline-flex rounded-full h-2 w-2 bg-[#516050] dark:bg-[#8FB996]"></span>
+                  </span>
+                  <span className="text-[13.5px] font-sans font-medium text-stone-600 dark:text-stone-300 animate-pulse tracking-wide">
+                    正在联网检索释义…
+                  </span>
+                </div>
+                {/* 优雅柔和的双行骨架条 */}
+                <div className="space-y-1.5 pt-0.5 max-w-[85%] animate-pulse">
+                  <div className="h-3.5 bg-stone-200/80 dark:bg-white/[0.08] rounded-full w-4/5"></div>
+                  <div className="h-3 bg-stone-200/50 dark:bg-white/[0.05] rounded-full w-1/2"></div>
+                </div>
+              </div>
+            ) : structuredDefs.length > 1 ? (
               <div className="space-y-1.5 pt-0.5">
                 {structuredDefs.map((defItem, idx) => (
                   <div key={idx} className="flex items-baseline gap-2.5 text-stone-900 dark:text-stone-100">
@@ -282,9 +302,21 @@ const DrawerCardView: React.FC<DrawerCardViewProps> = React.memo(({
               </p>
             )}
 
-            {currentItem.definition && !currentItem.definition.startsWith('Vocabulary item:') && (
+            {currentItem.definitionCn !== ONLINE_LOOKUP_LOADING_TEXT &&
+              currentItem.definitionCn !== '正在联网查询释义…' &&
+              currentItem.definition && 
+              !currentItem.definition.startsWith('Vocabulary item:') &&
+              !currentItem.definition.startsWith('Contextual expression:') &&
+              !currentItem.definition.startsWith('Lyric expression') &&
+              !currentItem.definition.startsWith('Specialized term ') &&
+              !currentItem.definition.startsWith('Key vocabulary') &&
+              !currentItem.definition.startsWith('Proper noun,') && (
               <p className="text-[13px] text-stone-500 dark:text-stone-400 font-sans leading-relaxed pt-0.5">
-                {currentItem.definition}
+                <HighlightedText
+                  text={currentItem.definition}
+                  targetWord=""
+                  onWordClick={(word, s) => onPushWord(word, s)}
+                />
               </p>
             )}
           </div>
@@ -334,57 +366,14 @@ const DrawerCardView: React.FC<DrawerCardViewProps> = React.memo(({
           <div className="w-full border-t border-stone-200/80 dark:border-white/10 my-3.5" />
 
           {/* SECTION 2: 语境浸润 (CONTEXTUAL IMMERSION) */}
-          {(songContext.found || ieltsContext.found) && (
-            <div className="space-y-4 pt-1">
-              <div className="text-[10px] font-sans font-semibold uppercase tracking-[0.2em] text-stone-400 dark:text-stone-500">
-                CONTEXTUAL IMMERSION
-              </div>
-
-              {/* 歌词语境 */}
-              {songContext.found && (
-                <div className="relative pl-3.5 py-1 border-l-2 border-[#516050] dark:border-[#8FB996] space-y-1.5">
-                  <div className="flex items-center gap-1.5 text-[11px] font-sans font-medium uppercase tracking-wider text-[#516050] dark:text-[#8FB996]">
-                    <Music2 className="w-3.5 h-3.5" />
-                    <span>LYRICS · {songContext.songTitle}</span>
-                  </div>
-
-                  <p className="font-serif-luxury text-[16px] text-stone-900 dark:text-stone-100 leading-[1.6]">
-                    "<HighlightedText 
-                      text={songContext.lyricEn || ''} 
-                      targetWord={currentItem.word} 
-                      onWordClick={(word, s) => onPushWord(word, s)}
-                    />"
-                  </p>
-
-                  <p className="text-[12.5px] text-stone-500 dark:text-stone-400 font-sans leading-relaxed">
-                    {songContext.lyricCn}
-                  </p>
-                </div>
-              )}
-
-              {/* 雅思学术例句语境 */}
-              {ieltsContext.found && (
-                <div className="relative pl-3.5 py-1 border-l-2 border-[#A86F3E] dark:border-amber-400 space-y-1.5">
-                  <div className="flex items-center gap-1.5 text-[11px] font-sans font-medium uppercase tracking-wider text-[#A86F3E] dark:text-amber-300">
-                    <span>IELTS ACADEMIC · PASSAGE 2</span>
-                  </div>
-
-                  <p className="font-serif-luxury text-[16px] text-stone-900 dark:text-stone-100 leading-[1.6]">
-                    "<HighlightedText 
-                      text={ieltsContext.sentenceEn} 
-                      targetWord={currentItem.word} 
-                      highlightClassName="font-semibold text-stone-950 dark:text-stone-50 underline decoration-[#A86F3E] dark:decoration-amber-400 decoration-[1.75px] underline-offset-[5px] bg-[#A86F3E]/[0.08] dark:bg-amber-400/[0.15] px-1.5 py-0.5 rounded-sm cursor-pointer hover:bg-[#A86F3E]/15 transition-all"
-                      onWordClick={(word, s) => onPushWord(word, s)}
-                    />"
-                  </p>
-
-                  <p className="text-[12.5px] text-stone-500 dark:text-stone-400 font-sans leading-relaxed">
-                    {ieltsContext.sentenceCn}
-                  </p>
-                </div>
-              )}
-            </div>
-          )}
+          <ContextualImmersionSection
+            word={currentItem.word}
+            songContext={songContext}
+            ieltsContext={ieltsContext}
+            examples={currentItem.examples}
+            variant="drawer"
+            onWordClick={onPushWord}
+          />
 
           {/* SECTION 3: 雅思核心搭配 (COLLOCATIONS) */}
           {collocations.length > 0 && (
@@ -449,7 +438,8 @@ const DrawerCardView: React.FC<DrawerCardViewProps> = React.memo(({
 export const WordDrawer: React.FC<WordDrawerProps> = ({
   wordItem,
   isOpen,
-  onClose
+  onClose,
+  zIndexClass = 'z-[60]'
 }) => {
   // 抽屉多级堆叠历史栈（Level 1 -> Level 2 -> Level 3...）
   const [drawerStack, setDrawerStack] = useState<DrawerStackItem[]>(() =>
@@ -458,6 +448,22 @@ export const WordDrawer: React.FC<WordDrawerProps> = ({
   
   // 核心两态：false = 初始预览态 (PEEK), true = 完全展开态 (EXPANDED)
   const [isExpanded, setIsExpanded] = useState<boolean>(false);
+
+  // 内部挂载状态，确保 Android 全面屏手势返回时能完整播放退场动画
+  const [isMounted, setIsMounted] = useState<boolean>(() => Boolean(isOpen && wordItem));
+  const backdropOpacity = useMotionValue(0);
+  const isClosingRef = useRef<boolean>(false);
+  const isPoppingRef = useRef<boolean>(false);
+  const lookupSeqRef = useRef<number>(0);
+  const isMountedRef = useRef<boolean>(true);
+  const pollTimersRef = useRef<Set<ReturnType<typeof setInterval>>>(new Set());
+  const isOpenRef = useRef<boolean>(isOpen);
+  isOpenRef.current = isOpen;
+  const drawerStackRef = useRef<DrawerStackItem[]>(drawerStack);
+  drawerStackRef.current = drawerStack;
+  const onCloseRef = useRef<() => void>(onClose);
+  onCloseRef.current = onClose;
+  const handlePopDrawerRef = useRef<() => void>(() => {});
 
   const containerRef = useRef<HTMLDivElement>(null);
   const sheetRef = useRef<HTMLDivElement>(null);
@@ -539,13 +545,34 @@ export const WordDrawer: React.FC<WordDrawerProps> = ({
     return () => ro.disconnect();
   }, [isOpen, isExpanded, drawerStack.length, drawerStack[drawerStack.length - 1]?.wordItem.word, drawerStack[drawerStack.length - 1]?.activeSubWord?.word, calculateOffsetFromContentHeight, y]);
 
-  // 当外部 wordItem 改变或打开时，初始化抽屉并以与二级抽屉完全一致的轻柔丝滑无过冲动画弹出
+  const clearAllPollTimers = useCallback(() => {
+    pollTimersRef.current.forEach(timer => clearInterval(timer));
+    pollTimersRef.current.clear();
+  }, []);
+
+  useEffect(() => {
+    isMountedRef.current = true;
+    return () => {
+      isMountedRef.current = false;
+      lookupSeqRef.current += 1;
+      clearAllPollTimers();
+    };
+  }, [clearAllPollTimers]);
+
+  // 当外部 wordItem 改变或打开时，初始化抽屉并执行平滑入场动画；当 isOpen 变为 false 时执行完整退场动画
   useLayoutEffect(() => {
     if (wordItem && isOpen) {
+      isClosingRef.current = false;
+      isPoppingRef.current = false;
+      lookupSeqRef.current += 1;
+      clearAllPollTimers();
+      setIsMounted(true);
       triggerHighRefreshBoost(1000);
       scrollTopMapRef.current.clear();
       setDrawerStack([{ wordItem, activeSubWord: null, wasExpanded: false, scrollTop: 0 }]);
       setIsExpanded(false);
+
+      animate(backdropOpacity, 1, { duration: 0.22, ease: 'easeOut' });
       
       const offset = measureOffsets() || 360;
       isEntryAnimatingRef.current = true;
@@ -555,19 +582,123 @@ export const WordDrawer: React.FC<WordDrawerProps> = ({
         ease: [0.22, 1, 0.36, 1]
       });
       controls.then(() => {
+        if (!isMountedRef.current) return;
         isEntryAnimatingRef.current = false;
         const latestOffset = measureOffsets();
         if (Math.abs(latestOffset - offset) >= 2 && !isDraggingRef.current) {
           animate(y, latestOffset, { duration: 0.14, ease: 'easeOut' });
         }
       });
-    } else if (!isOpen) {
-      isEntryAnimatingRef.current = false;
-      scrollTopMapRef.current.clear();
-      setDrawerStack([]);
-      setIsExpanded(false);
+    } else if (!isOpen && isMounted) {
+      // 外部将 isOpen 置为 false（例如 Android 全面屏手势返回触发 closeWordDetail）
+      if (!isClosingRef.current) {
+        isClosingRef.current = true;
+        isPoppingRef.current = false;
+        lookupSeqRef.current += 1;
+        clearAllPollTimers();
+        triggerHighRefreshBoost(800);
+        animate(backdropOpacity, 0, { duration: 0.22, ease: 'easeIn' });
+        animate(y, peekOffsetPxRef.current + 380, {
+          duration: 0.22,
+          ease: [0.32, 0, 0.67, 0]
+        }).then(() => {
+          if (isMountedRef.current && !isOpenRef.current) {
+            setIsMounted(false);
+            setDrawerStack([]);
+            setIsExpanded(false);
+            scrollTopMapRef.current.clear();
+            isClosingRef.current = false;
+            isPoppingRef.current = false;
+          }
+        });
+      }
     }
-  }, [wordItem?.word, isOpen, measureOffsets, y]);
+  }, [wordItem?.word, isOpen, isMounted, measureOffsets, y, backdropOpacity, clearAllPollTimers]);
+
+  // Register top-priority Android hardware back handler while drawer is open
+  useEffect(() => {
+    const setBackHandler = useAppStore.getState().setWordDrawerBackHandler;
+    if (!isOpen) return;
+
+    const handler = () => {
+      if (!isOpenRef.current || isClosingRef.current) {
+        return false;
+      }
+      if (isPoppingRef.current) {
+        return true;
+      }
+      if (drawerStackRef.current.length > 1) {
+        handlePopDrawerRef.current();
+        return true;
+      }
+      onCloseRef.current();
+      return true;
+    };
+
+    setBackHandler(handler);
+    return () => {
+      if (useAppStore.getState().wordDrawerBackHandler === handler) {
+        setBackHandler(null);
+      }
+    };
+  }, [isOpen]);
+
+  // 监听外部 wordItem 的字段更新（如联网查询或 AI 语境释义在后台完成），原地合并更新 drawerStack，绝不打断动画与展开状态
+  useEffect(() => {
+    if (isOpen && wordItem) {
+      setDrawerStack(prev => {
+        let changed = false;
+        const next = prev.map(entry => {
+          if (entry.wordItem.word.toLowerCase() === wordItem.word.toLowerCase()) {
+            if (
+              entry.wordItem.definitionCn !== wordItem.definitionCn ||
+              entry.wordItem.definition !== wordItem.definition ||
+              entry.wordItem.partOfSpeech !== wordItem.partOfSpeech ||
+              entry.wordItem.phoneticUk !== wordItem.phoneticUk ||
+              entry.wordItem.phoneticUs !== wordItem.phoneticUs
+            ) {
+              changed = true;
+              return {
+                ...entry,
+                wordItem: { ...entry.wordItem, ...wordItem }
+              };
+            }
+          }
+          return entry;
+        });
+        return changed ? next : prev;
+      });
+    }
+  }, [isOpen, wordItem?.word, wordItem?.definitionCn, wordItem?.definition, wordItem?.partOfSpeech, wordItem?.phoneticUk, wordItem?.phoneticUs]);
+
+  // 监听全局词汇更新广播（供二级推进抽屉及后台查询异步更新）
+  useEffect(() => {
+    const handleWordUpdated = (e: Event) => {
+      const customEvent = e as CustomEvent<WordItem>;
+      const updated = customEvent.detail;
+      if (!updated || !updated.word) return;
+      const lower = updated.word.toLowerCase();
+      setDrawerStack(prev => {
+        let changed = false;
+        const next = prev.map(entry => {
+          if (entry.wordItem.word.toLowerCase() === lower) {
+            changed = true;
+            return {
+              ...entry,
+              wordItem: { ...entry.wordItem, ...updated }
+            };
+          }
+          return entry;
+        });
+        return changed ? next : prev;
+      });
+    };
+
+    window.addEventListener('lyriclens:wordUpdated', handleWordUpdated);
+    return () => {
+      window.removeEventListener('lyriclens:wordUpdated', handleWordUpdated);
+    };
+  }, []);
 
   const stackLength = drawerStack.length;
   const currentStackIndex = Math.max(0, stackLength - 1);
@@ -607,7 +738,7 @@ export const WordDrawer: React.FC<WordDrawerProps> = ({
     return scrollTopMapRef.current.get(cardIdx) || 0;
   }, []);
 
-  if (!isOpen || !currentStackItem) return null;
+  if (!isMounted || !currentStackItem) return null;
 
   const handleToggleMastery = async (e: React.MouseEvent) => {
     e.stopPropagation();
@@ -629,15 +760,49 @@ export const WordDrawer: React.FC<WordDrawerProps> = ({
 
   // 点击例句/搭配/成分中的单词：推入新的一级抽屉（上一级抽屉保持并在底层停留，新抽屉以半展开 Peek 态轻柔滑入）
   const handlePushNewDrawer = async (clickedWord: string, sentence?: string) => {
+    const cleanWord = clickedWord.trim();
+    if (!cleanWord || !isOpenRef.current || isClosingRef.current || isPoppingRef.current) {
+      return;
+    }
+    const currentTopWord = drawerStackRef.current[drawerStackRef.current.length - 1]?.wordItem.word;
+    if (currentTopWord && currentTopWord.toLowerCase() === cleanWord.toLowerCase()) {
+      return;
+    }
+
+    const reqSeq = ++lookupSeqRef.current;
     triggerHighRefreshBoost(1000);
-    const item = await lookupWord(clickedWord, sentence || '');
-    if (item) {
-      const nextIdx = drawerStack.length;
+    try {
+      const item = await lookupWord(cleanWord, sentence || '');
+      if (
+        !isMountedRef.current ||
+        reqSeq !== lookupSeqRef.current ||
+        !isOpenRef.current ||
+        isClosingRef.current ||
+        isPoppingRef.current ||
+        !item
+      ) {
+        return;
+      }
+
+      const latestStack = drawerStackRef.current;
+      const latestTop = latestStack[latestStack.length - 1];
+      if (latestTop && latestTop.wordItem.word.toLowerCase() === item.word.toLowerCase()) {
+        return;
+      }
+
+      const nextIdx = latestStack.length;
       scrollTopMapRef.current.set(nextIdx, 0);
-      setDrawerStack(prev => [
-        ...prev.map((it, i) => (i === prev.length - 1 ? { ...it, wasExpanded: isExpanded } : it)),
-        { wordItem: item, activeSubWord: null, wasExpanded: false, scrollTop: 0 }
-      ]);
+      setDrawerStack(prev => {
+        if (prev.length === 0) return prev;
+        const top = prev[prev.length - 1];
+        if (top && top.wordItem.word.toLowerCase() === item.word.toLowerCase()) {
+          return prev;
+        }
+        return [
+          ...prev.map((it, i) => (i === prev.length - 1 ? { ...it, wasExpanded: isExpanded } : it)),
+          { wordItem: item, activeSubWord: null, wasExpanded: false, scrollTop: 0 }
+        ];
+      });
       setIsExpanded(false);
       const offset = measureOffsets() || 360;
       isEntryAnimatingRef.current = true;
@@ -646,54 +811,122 @@ export const WordDrawer: React.FC<WordDrawerProps> = ({
         duration: 0.28,
         ease: [0.22, 1, 0.36, 1]
       }).then(() => {
-        isEntryAnimatingRef.current = false;
+        if (isMountedRef.current) {
+          isEntryAnimatingRef.current = false;
+        }
       });
+
+      // 如果推送的新单词处于后台联网查询中，启动轻量兜底轮询确保更新（哪怕事件在切换前偶发错过）
+      if (item.definitionCn === ONLINE_LOOKUP_LOADING_TEXT || item.definitionCn === '正在联网查询释义…') {
+        const checkLower = item.word.toLowerCase();
+        let attempts = 0;
+        const timer = setInterval(async () => {
+          attempts++;
+          if (!isMountedRef.current || !isOpenRef.current || attempts > 12) {
+            clearInterval(timer);
+            pollTimersRef.current.delete(timer);
+            return;
+          }
+          try {
+            const dbWord = await db.words.where('word').equalsIgnoreCase(checkLower).first();
+            if (!isMountedRef.current || !isOpenRef.current) {
+              clearInterval(timer);
+              pollTimersRef.current.delete(timer);
+              return;
+            }
+            if (dbWord && dbWord.definitionCn && dbWord.definitionCn !== ONLINE_LOOKUP_LOADING_TEXT && dbWord.definitionCn !== '正在联网查询释义…') {
+              clearInterval(timer);
+              pollTimersRef.current.delete(timer);
+              setDrawerStack(prev => {
+                let changed = false;
+                const next = prev.map(entry => {
+                  if (entry.wordItem.word.toLowerCase() === checkLower) {
+                    changed = true;
+                    return {
+                      ...entry,
+                      wordItem: { ...entry.wordItem, ...dbWord }
+                    };
+                  }
+                  return entry;
+                });
+                return changed ? next : prev;
+              });
+            }
+          } catch {}
+        }, 300);
+        pollTimersRef.current.add(timer);
+      }
+    } catch (err) {
+      console.error('[WordDrawer] Failed to push word drawer:', cleanWord, err);
     }
   };
 
   // 返回上一级抽屉（上一级抽屉恢复其原本的展开状态）
   const handlePopDrawer = (e?: React.MouseEvent) => {
     e?.stopPropagation();
+    if (isClosingRef.current || isPoppingRef.current) return;
+    lookupSeqRef.current += 1;
     triggerHighRefreshBoost(1000);
-    if (drawerStack.length > 1) {
-      const prevIdx = drawerStack.length - 2;
-      const prevTarget = drawerStack[prevIdx];
+    const currentStack = drawerStackRef.current;
+    if (currentStack.length > 1) {
+      isPoppingRef.current = true;
+      const prevIdx = currentStack.length - 2;
+      const prevTarget = currentStack[prevIdx];
       const shouldExpand = prevTarget?.wasExpanded !== false;
       const targetY = shouldExpand ? prevIdx * STACK_STEP_PX : (measureOffsets() || 360);
 
       animate(y, peekOffsetPxRef.current + 260, { duration: 0.2, ease: [0.32, 0, 0.67, 0] }).then(() => {
-        scrollTopMapRef.current.delete(drawerStack.length - 1);
-        setDrawerStack(prev => prev.slice(0, prev.length - 1));
+        if (!isMountedRef.current || !isOpenRef.current || isClosingRef.current) {
+          isPoppingRef.current = false;
+          return;
+        }
+        scrollTopMapRef.current.delete(drawerStackRef.current.length - 1);
+        setDrawerStack(prev => (prev.length > 1 ? prev.slice(0, prev.length - 1) : prev));
         setIsExpanded(shouldExpand);
         y.set(targetY);
+        isPoppingRef.current = false;
       });
     } else {
-      animate(y, peekOffsetPxRef.current + 360, { duration: 0.22, ease: [0.32, 0, 0.67, 0] }).then(onClose);
+      onCloseRef.current();
     }
   };
+  handlePopDrawerRef.current = () => handlePopDrawer();
 
   // 点击背景遮罩空白区域：多层时返回上一级，单层时关闭抽屉
   const handleBackdropClick = () => {
+    if (isClosingRef.current || isPoppingRef.current) return;
     triggerHighRefreshBoost(1000);
-    if (drawerStack.length > 1) {
+    if (drawerStackRef.current.length > 1) {
       handlePopDrawer();
     } else {
-      animate(y, peekOffsetPxRef.current + 360, { duration: 0.22, ease: [0.32, 0, 0.67, 0] }).then(onClose);
+      onCloseRef.current();
     }
   };
 
   // 点击底层露出的堆叠卡片边缘，直接快速回退到该层
   const handleJumpToLayer = (targetIndex: number) => {
-    if (targetIndex >= 0 && targetIndex < drawerStack.length - 1) {
+    if (isClosingRef.current || isPoppingRef.current) return;
+    const currentStack = drawerStackRef.current;
+    if (targetIndex >= 0 && targetIndex < currentStack.length - 1) {
+      isPoppingRef.current = true;
+      lookupSeqRef.current += 1;
       triggerHighRefreshBoost(1000);
-      const targetItem = drawerStack[targetIndex];
+      const targetItem = currentStack[targetIndex];
       const shouldExpand = targetItem?.wasExpanded !== false;
       const targetY = shouldExpand ? targetIndex * STACK_STEP_PX : (measureOffsets() || 360);
 
       animate(y, peekOffsetPxRef.current + 260, { duration: 0.2, ease: [0.32, 0, 0.67, 0] }).then(() => {
-        setDrawerStack(prev => prev.slice(0, targetIndex + 1));
+        if (!isMountedRef.current || !isOpenRef.current || isClosingRef.current) {
+          isPoppingRef.current = false;
+          return;
+        }
+        for (let i = targetIndex + 1; i < drawerStackRef.current.length; i++) {
+          scrollTopMapRef.current.delete(i);
+        }
+        setDrawerStack(prev => (prev.length > targetIndex + 1 ? prev.slice(0, targetIndex + 1) : prev));
         setIsExpanded(shouldExpand);
         y.set(targetY);
+        isPoppingRef.current = false;
       });
     }
   };
@@ -701,6 +934,7 @@ export const WordDrawer: React.FC<WordDrawerProps> = ({
   // 手势引擎：把手与顶部安全区拖拽
   const handleDragStart = (e: React.PointerEvent<HTMLDivElement>) => {
     e.preventDefault();
+    if (isClosingRef.current || isPoppingRef.current) return;
     triggerHighRefreshBoost(1200);
     isDraggingRef.current = true;
     hasDraggedRef.current = false;
@@ -749,10 +983,10 @@ export const WordDrawer: React.FC<WordDrawerProps> = ({
 
       // 1. 关闭/弹出判定：大幅下滑则关闭或弹出当前层
       if (currentY > peekOffsetPx + 40 || (currentY > peekOffsetPx - 30 && velocity > 0.65)) {
-        if (drawerStack.length > 1) {
+        if (drawerStackRef.current.length > 1) {
           handlePopDrawer();
         } else {
-          animate(y, peekOffsetPx + 400, { duration: 0.22, ease: [0.32, 0, 0.67, 0] }).then(onClose);
+          onCloseRef.current();
         }
         return;
       }
@@ -774,7 +1008,7 @@ export const WordDrawer: React.FC<WordDrawerProps> = ({
   };
 
   const handleTopBarClick = () => {
-    if (ignoreClickRef.current) return;
+    if (ignoreClickRef.current || isClosingRef.current || isPoppingRef.current) return;
     animateToState(!isExpanded);
   };
 
@@ -782,13 +1016,11 @@ export const WordDrawer: React.FC<WordDrawerProps> = ({
     <div 
       ref={containerRef}
       id="word-drawer-mobile-wrapper"
-      className="absolute inset-0 z-[60] pointer-events-none flex flex-col justify-end overflow-hidden rounded-[inherit]"
+      className={`absolute inset-0 ${zIndexClass} pointer-events-none flex flex-col justify-end overflow-hidden rounded-[inherit]`}
     >
       {/* 背景遮罩 */}
       <motion.div
-        initial={{ opacity: 0 }}
-        animate={{ opacity: 1 }}
-        exit={{ opacity: 0 }}
+        style={{ opacity: backdropOpacity }}
         onClick={handleBackdropClick}
         className="absolute inset-0 bg-stone-900/50 dark:bg-black/75 pointer-events-auto"
       />

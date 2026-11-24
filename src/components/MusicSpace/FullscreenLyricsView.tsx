@@ -530,7 +530,7 @@ export const FullscreenLyricsView: React.FC<FullscreenLyricsViewProps> = React.m
     };
     touchCurrentPosRef.current = { x: point.clientX, y: point.clientY };
 
-    // Long press 250ms threshold
+    // Long press 380ms threshold
     if (longPressTimerRef.current) clearTimeout(longPressTimerRef.current);
     longPressTimerRef.current = window.setTimeout(() => {
       triggerHaptic(20);
@@ -557,7 +557,7 @@ export const FullscreenLyricsView: React.FC<FullscreenLyricsViewProps> = React.m
 
       // Schedule dwell lock (200ms stationary)
       scheduleDwellLock(point.clientX, point.clientY);
-    }, 250);
+    }, 380);
   };
 
   // Blank area touch start
@@ -925,10 +925,10 @@ export const FullscreenLyricsView: React.FC<FullscreenLyricsViewProps> = React.m
   return (
     <motion.div
       id="fullscreen-flowing-lyrics-view"
-      initial={{ opacity: 0, y: 18 }}
-      animate={{ opacity: 1, y: 0 }}
-      exit={{ opacity: 0, y: 18 }}
-      transition={{ duration: 0.24, ease: [0.22, 1, 0.36, 1] }}
+      initial={{ opacity: 0, y: 24, scale: 0.98 }}
+      animate={{ opacity: 1, y: 0, scale: 1 }}
+      exit={{ opacity: 0, y: 20, scale: 0.985 }}
+      transition={{ duration: 0.44, ease: [0.32, 0.72, 0, 1] }}
       style={{
         willChange: 'transform, opacity',
         backfaceVisibility: 'hidden',
@@ -1129,9 +1129,6 @@ export const FullscreenLyricsView: React.FC<FullscreenLyricsViewProps> = React.m
           )}
         </AnimatePresence>
 
-        {/* Lightweight Top & Bottom Gradient Fade Overlays (Replaces expensive CSS mask-image so Android WebView uses 120Hz hardware fast-scroll tiles) */}
-        <div className="pointer-events-none absolute top-0 left-0 right-0 h-8 bg-gradient-to-b from-[#FAF8F5] dark:from-[#0D1117] to-transparent z-30" />
-        <div className="pointer-events-none absolute bottom-0 left-0 right-0 h-14 bg-gradient-to-t from-[#FAF8F5] dark:from-[#0D1117] to-transparent z-30" />
 
         {/* Main Flowing Lyrics Canvas (Safe horizontal gutters px-16 sm:px-20 ensure zero boundary bleed) */}
         <div

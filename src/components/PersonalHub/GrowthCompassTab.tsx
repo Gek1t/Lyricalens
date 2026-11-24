@@ -11,7 +11,6 @@ import {
   Music2,
   Camera,
   Check,
-  Sparkles,
   RotateCcw,
   Headphones,
   BrainCircuit,
@@ -559,7 +558,7 @@ export const GrowthCompassTab: React.FC = () => {
           <button
             type="button"
             onClick={() => openNotebook(ebbinghausMetrics.dueCount > 0 ? 'DUE_REVIEW' : 'ALL')}
-            className={`flex-1 py-2.5 px-3.5 rounded-2xl text-xs font-medium flex items-center justify-between transition-all cursor-pointer active:scale-[0.99] ${
+            className={`flex-1 min-w-0 py-2.5 px-3.5 rounded-2xl text-xs font-medium flex items-center justify-between transition-all cursor-pointer active:scale-[0.99] ${
               ebbinghausMetrics.dueCount > 0
                 ? 'bg-amber-500/[0.08] hover:bg-amber-500/[0.14] dark:bg-amber-500/[0.12] dark:hover:bg-amber-500/[0.18] border border-amber-500/20 text-amber-800 dark:text-amber-200'
                 : 'bg-stone-900/[0.03] hover:bg-stone-900/[0.06] dark:bg-white/[0.04] dark:hover:bg-white/[0.08] border border-stone-900/[0.05] dark:border-white/[0.06] text-stone-700 dark:text-stone-200'
@@ -573,8 +572,8 @@ export const GrowthCompassTab: React.FC = () => {
               />
               <span className="truncate">
                 {ebbinghausMetrics.dueCount > 0
-                  ? `今日 ${ebbinghausMetrics.dueCount} 词待复习`
-                  : '今日待复习已完成'}
+                  ? `${ebbinghausMetrics.dueCount}词待复习`
+                  : '待复习已完成'}
               </span>
             </div>
             <div className="flex items-center gap-0.5 font-semibold text-[11px] shrink-0 ml-2">
@@ -586,9 +585,8 @@ export const GrowthCompassTab: React.FC = () => {
           <button
             type="button"
             onClick={() => openNotebook(ebbinghausMetrics.dueCount > 0 ? 'DUE_REVIEW' : 'ALL', true)}
-            className="py-2.5 px-3.5 rounded-2xl bg-[#516050] hover:bg-[#3F4C3E] dark:bg-[#8FB996] dark:text-stone-950 text-white text-xs font-semibold flex items-center gap-1.5 shadow-xs transition-all cursor-pointer active:scale-95 shrink-0"
+            className="py-2.5 px-4 rounded-2xl bg-[#516050] hover:bg-[#3F4C3E] dark:bg-[#8FB996] dark:text-stone-950 text-white text-xs font-semibold flex items-center justify-center whitespace-nowrap border border-transparent shadow-xs transition-all cursor-pointer active:scale-95 shrink-0"
           >
-            <Sparkles className="w-3.5 h-3.5 text-amber-200 dark:text-stone-900" />
             <span>闪卡速刷</span>
           </button>
         </div>

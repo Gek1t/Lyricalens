@@ -12,7 +12,6 @@ import { triggerHighRefreshBoost } from '../utils/displayRefreshRate';
 import {
   Search,
   Volume2,
-  Sparkles,
   X,
   BookOpen,
   Trash2,
@@ -89,6 +88,8 @@ export const NotebookModal: React.FC<NotebookModalProps> = ({ isOpen, onClose })
   const longPressTimerRef = useRef<NodeJS.Timeout | null>(null);
   const isLongPressTriggeredRef = useRef(false);
   const touchStartPosRef = useRef<{ x: number; y: number } | null>(null);
+  const isMovedRef = useRef(false);
+  const lastPointerEndRef = useRef(0);
   const activeLongPressWordRef = useRef<string | null>(null);
   const [elevatedWord, setElevatedWord] = useState<string | null>(null);
 
@@ -371,6 +372,7 @@ export const NotebookModal: React.FC<NotebookModalProps> = ({ isOpen, onClose })
       return;
     }
 
+    isMovedRef.current = false;
     isLongPressTriggeredRef.current = false;
     activeLongPressWordRef.current = item.word;
 
@@ -414,14 +416,19 @@ export const NotebookModal: React.FC<NotebookModalProps> = ({ isOpen, onClose })
     const clientY = 'touches' in e ? e.touches[0].clientY : (e as React.MouseEvent).clientY;
     const distance = Math.hypot(clientX - touchStartPosRef.current.x, clientY - touchStartPosRef.current.y);
 
-    // If user scrolled > 8px, cancel long-press
-    if (distance > 8 && longPressTimerRef.current) {
-      clearTimeout(longPressTimerRef.current);
-      longPressTimerRef.current = null;
+    // If user scrolled > 8px, cancel long-press and mark scroll move
+    if (distance > 8) {
+      isMovedRef.current = true;
+      if (longPressTimerRef.current) {
+        clearTimeout(longPressTimerRef.current);
+        longPressTimerRef.current = null;
+      }
     }
   };
 
   const handleTouchEnd = (item: WordItem, e?: React.TouchEvent | React.MouseEvent) => {
+    // Mark touch/mouse-end so the synthetic onClick that follows does not double-trigger
+    lastPointerEndRef.current = Date.now();
     if (longPressTimerRef.current) {
       clearTimeout(longPressTimerRef.current);
       longPressTimerRef.current = null;
@@ -431,8 +438,16 @@ export const NotebookModal: React.FC<NotebookModalProps> = ({ isOpen, onClose })
       const target = e.target as HTMLElement | null;
       if (target && target.closest('button, [role="button"], input, a')) {
         touchStartPosRef.current = null;
+        isMovedRef.current = false;
         return;
       }
+    }
+
+    // If user scrolled > 8px, cancel tap action
+    if (isMovedRef.current) {
+      isMovedRef.current = false;
+      touchStartPosRef.current = null;
+      return;
     }
 
     // If long press was not started on card body, ignore
@@ -447,11 +462,11 @@ export const NotebookModal: React.FC<NotebookModalProps> = ({ isOpen, onClose })
       return;
     }
 
-    // Normal Tap Action on Card
+    // Normal Tap Action on Card -> Open Fullscreen WordDetailSheet
     if (isBatchMode) {
       toggleSelectWord(item.word);
     } else {
-      openWordDetail(item);
+      openWordDetail(item, null, 'fullscreen');
     }
   };
 
@@ -575,30 +590,27 @@ export const NotebookModal: React.FC<NotebookModalProps> = ({ isOpen, onClose })
       className="absolute inset-0 z-50 flex flex-col bg-[#FAF8F5] dark:bg-[#0F1523] text-stone-900 dark:text-stone-100 select-none overflow-hidden hardware-accelerated"
     >
           {/* Top Header Bar */}
-          <div className="relative w-full px-5 pt-11 pb-3.5 border-b border-stone-200/70 dark:border-slate-800/80 flex items-center justify-between bg-white/95 dark:bg-[#151D2E]/95 z-30">
+          <div className="relative w-full px-4 sm:px-5 pt-[var(--android-safe-top,max(3.25rem,calc(env(safe-area-inset-top,44px)+0.85rem)))] pb-3.5 border-b border-stone-200/70 dark:border-slate-800/80 flex items-center justify-between gap-2 bg-white/95 dark:bg-[#151D2E]/95 z-30">
             {!isBatchMode ? (
               // Normal Header
               <>
-                <div className="flex items-center shrink-0">
-                  <div>
-                    <h2 className="font-serif-luxury text-xl font-semibold text-stone-900 dark:text-stone-50 leading-tight whitespace-nowrap">
-                      Vocabulary Vault
-                    </h2>
-                    <span className="text-[10px] font-sans text-stone-500 dark:text-stone-400 block whitespace-nowrap">
-                      生词本中枢 · {allWords?.length || 0} 词收录
-                    </span>
-                  </div>
+                <div className="min-w-0 flex-1 pr-1">
+                  <h2 className="font-serif-luxury text-lg sm:text-xl font-semibold text-stone-900 dark:text-stone-50 leading-tight truncate">
+                    Vocabulary Vault
+                  </h2>
+                  <span className="text-[10px] font-sans text-stone-500 dark:text-stone-400 block truncate">
+                    生词本中枢 · {allWords?.length || 0} 词收录
+                  </span>
                 </div>
 
-                <div className="flex items-center gap-1.5 shrink-0">
+                <div className="flex items-center gap-1 sm:gap-1.5 shrink-0">
                   {/* Flashcard Rapid Review Button */}
                   <button
                     type="button"
                     onClick={handleStartFlashcardReview}
-                    className="px-3 py-1.5 text-white bg-[#516050] hover:bg-[#3F4C3E] dark:bg-[#8FB996] dark:text-stone-950 rounded-full flex items-center gap-1.5 text-xs font-medium transition-all active:scale-95 shrink-0 cursor-pointer shadow-xs"
+                    className="px-2.5 sm:px-3 py-1.5 text-white bg-[#516050] hover:bg-[#3F4C3E] dark:bg-[#8FB996] dark:text-stone-950 rounded-full flex items-center gap-1 sm:gap-1.5 text-xs font-medium transition-all active:scale-95 shrink-0 cursor-pointer shadow-xs"
                     title="艾宾浩斯闪卡速刷复习"
                   >
-                    <Sparkles className="w-3.5 h-3.5 text-amber-200 dark:text-stone-900 shrink-0" />
                     <span>闪卡速刷</span>
                     {dueWordsCount > 0 && (
                       <span className="px-1.5 py-0.2 rounded-full bg-amber-400/25 dark:bg-stone-900/20 text-amber-100 dark:text-stone-950 font-mono text-[10px] font-bold tabular-nums">
@@ -611,7 +623,7 @@ export const NotebookModal: React.FC<NotebookModalProps> = ({ isOpen, onClose })
                   <button
                     id="vault-enter-batch-mode-btn"
                     onClick={() => setIsBatchMode(true)}
-                    className="p-2 text-stone-600 hover:text-stone-900 dark:text-stone-400 dark:hover:text-stone-100 hover:bg-stone-200/50 dark:hover:bg-slate-800/60 rounded-full flex items-center justify-center transition-all active:scale-95 shrink-0 cursor-pointer"
+                    className="p-1.5 sm:p-2 text-stone-600 hover:text-stone-900 dark:text-stone-400 dark:hover:text-stone-100 hover:bg-stone-200/50 dark:hover:bg-slate-800/60 rounded-full flex items-center justify-center transition-all active:scale-95 shrink-0 cursor-pointer"
                     title="多选批量操作"
                     aria-label="多选批量操作"
                   >
@@ -622,7 +634,7 @@ export const NotebookModal: React.FC<NotebookModalProps> = ({ isOpen, onClose })
                   <button
                     id="vault-close-btn"
                     onClick={onClose}
-                    className="p-2 rounded-full hover:bg-stone-200/60 dark:hover:bg-slate-800 text-stone-500 hover:text-stone-800 dark:hover:text-stone-200 transition-colors shrink-0"
+                    className="p-1.5 sm:p-2 rounded-full hover:bg-stone-200/60 dark:hover:bg-slate-800 text-stone-500 hover:text-stone-800 dark:hover:text-stone-200 transition-colors shrink-0"
                   >
                     <X className="w-5 h-5" />
                   </button>
@@ -776,11 +788,30 @@ export const NotebookModal: React.FC<NotebookModalProps> = ({ isOpen, onClose })
                         clearTimeout(longPressTimerRef.current);
                         longPressTimerRef.current = null;
                       }
+                      touchStartPosRef.current = null;
+                      isMovedRef.current = false;
+                      isLongPressTriggeredRef.current = false;
+                      setElevatedWord(null);
                     }}
                     onTouchStart={(e) => handleTouchStart(item, e)}
                     onTouchMove={handleTouchMove}
                     onTouchEnd={(e) => handleTouchEnd(item, e)}
                     onContextMenu={(e) => e.preventDefault()}
+                    onClick={(e) => {
+                      const target = e.target as HTMLElement | null;
+                      if (target && target.closest('button, [role="button"], input, a')) {
+                        return;
+                      }
+                      // Already handled by touchend/mouseup handler
+                      if (Date.now() - lastPointerEndRef.current < 700) {
+                        return;
+                      }
+                      if (isBatchMode) {
+                        toggleSelectWord(item.word);
+                      } else {
+                        openWordDetail(item, null, 'fullscreen');
+                      }
+                    }}
                     className={`relative p-3.5 sm:p-4 rounded-2xl transition-[transform,background-color,border-color] duration-150 cursor-pointer select-none flex items-center justify-between gap-3 ${
                       isSelected
                         ? 'bg-[#516050]/[0.05] dark:bg-[#8FB996]/[0.08] border border-[#516050]/60 dark:border-[#8FB996]/50 shadow-xs ring-1 ring-[#516050]/20 dark:ring-[#8FB996]/20'
@@ -1102,7 +1133,7 @@ export const NotebookModal: React.FC<NotebookModalProps> = ({ isOpen, onClose })
                 animate={{ opacity: 1, y: 0 }}
                 exit={{ opacity: 0, y: 16 }}
                 transition={{ duration: 0.2 }}
-                className="absolute inset-0 z-50 flex flex-col bg-[#FAF8F5] dark:bg-[#0F1523] p-5 pt-12 select-none overflow-hidden"
+                className="absolute inset-0 z-50 flex flex-col bg-[#FAF8F5] dark:bg-[#0F1523] p-5 pt-[var(--android-safe-top,max(3.25rem,calc(env(safe-area-inset-top,44px)+0.85rem)))] select-none overflow-hidden"
               >
                 {/* Minimalist Top Header */}
                 <div className="flex items-center justify-between pb-3.5">

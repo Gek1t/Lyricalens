@@ -1,3 +1,4 @@
+import { lookupInIeltsCorpus } from './ieltsCorpusDictionary';
 /**
  * Rich collocations and morphological breakdowns for academic and lyric vocabulary
  */
@@ -305,7 +306,9 @@ export const VOCAB_COLLOCATIONS: Record<string, CollocationItem[]> = {
     { phrase: 'embark on a journey', cn: '踏上征程 / 开启旅途', type: 'v. + prep.' }
   ],
   'silence': [
+    { phrase: 'eeriness of silence', cn: '死一般的沉寂 / 寂静的诡谲感', type: 'n. + prep.' },
     { phrase: 'break the silence', cn: '打破沉默', type: 'v. + n.' },
+    { phrase: 'golden silence', cn: '宝贵的沉寂 / 沉默是金', type: 'adj. + n.' },
     { phrase: 'silent space', cn: '宁静的空间', type: 'adj. + n.' },
     { phrase: 'moment of silence', cn: '静默片刻', type: 'phrase' }
   ],
@@ -315,8 +318,10 @@ export const VOCAB_COLLOCATIONS: Record<string, CollocationItem[]> = {
     { phrase: 'vivid memory', cn: '历历在目的记忆', type: 'adj. + n.' }
   ],
   'dream': [
+    { phrase: 'chase dreams', cn: '追逐梦想', type: 'v. + n.' },
+    { phrase: 'beyond dreams', cn: '超乎想象 / 梦寐难求', type: 'prep. + n.' },
+    { phrase: 'sweet dreams', cn: '美梦 / 好梦', type: 'adj. + n.' },
     { phrase: 'fleeting dreams', cn: '浮光掠影的梦想 / 飘忽之梦', type: 'adj. + n.' },
-    { phrase: 'pursue a dream', cn: '追逐梦想', type: 'v. + n.' },
     { phrase: 'dream come true', cn: '美梦成真', type: 'phrase' }
   ],
   'pulse': [
@@ -377,7 +382,176 @@ export const VOCAB_COLLOCATIONS: Record<string, CollocationItem[]> = {
   'run around': [
     { phrase: 'run around the city', cn: '在城市中东奔西跑', type: 'phrase' },
     { phrase: 'stop running around', cn: '别再到处瞎忙了', type: 'phrase' }
-  ]
+  ],
+  'know': [
+    { phrase: 'get to know', cn: '逐渐了解 / 认识', type: 'v. + v.' },
+    { phrase: 'know by heart', cn: '牢记于心 / 熟记', type: 'v. + prep.' },
+    { phrase: 'as far as I know', cn: '据我所知', type: 'phrase' },
+    { phrase: 'make known', cn: '公布 / 使人知晓', type: 'v. + adj.' }
+  ],
+  'girl': [
+    { phrase: 'golden girl', cn: '宠儿 / 出类拔萃的女孩', type: 'adj. + n.' },
+    { phrase: 'baby girl', cn: '小宝贝 / 亲爱的小姑娘', type: 'n. + n.' },
+    { phrase: 'girl next door', cn: '邻家女孩 / 清纯少女', type: 'n. + prep.' }
+  ],
+  'speak': [
+    { phrase: 'speak up', cn: '大声说出 / 勇敢发声', type: 'v. + adv.' },
+    { phrase: 'speak volume', cn: '胜过千言万语 / 意味深长', type: 'v. + n.' },
+    { phrase: 'speak for oneself', cn: '不言自明 / 代表自己表态', type: 'phrase' }
+  ],
+  'say': [
+    { phrase: 'needless to say', cn: '不用说 / 显而易见', type: 'phrase' },
+    { phrase: 'that is to say', cn: '也就是说 / 换言之', type: 'phrase' },
+    { phrase: 'have a say', cn: '有发言权 / 有决定权', type: 'v. + n.' }
+  ],
+  'tell': [
+    { phrase: 'tell the truth', cn: '讲出真相 / 说实话', type: 'v. + n.' },
+    { phrase: 'tell apart', cn: '分辨 / 区分开来', type: 'v. + adv.' },
+    { phrase: 'only time will tell', cn: '唯有时间会给出答案', type: 'phrase' }
+  ],
+  'think': [
+    { phrase: 'think twice', cn: '三思而后行 / 慎重考虑', type: 'v. + adv.' },
+    { phrase: 'think through', cn: '彻底想透 / 周密考虑', type: 'v. + prep.' },
+    { phrase: 'think out of the box', cn: '跳出固有思维 / 创新思考', type: 'phrase' }
+  ],
+  'feel': [
+    { phrase: 'feel at home', cn: '感觉自如 / 宾至如归', type: 'phrase' },
+    { phrase: 'feel like', cn: '想要 / 觉得好似', type: 'v. + prep.' },
+    { phrase: 'feel blue', cn: '感到忧郁 / 情绪低落', type: 'v. + adj.' }
+  ],
+  'feeling': [
+    { phrase: 'gut feeling', cn: '直觉 / 预感', type: 'n. + n.' },
+    { phrase: 'mixed feelings', cn: '百感交集 / 矛盾心情', type: 'adj. + n.' },
+    { phrase: 'feeling of uncertainty', cn: '不确定感 / 迷惘情绪', type: 'n. + prep.' }
+  ],
+  'love': [
+    { phrase: 'fall in love', cn: '坠入爱河 / 倾心', type: 'v. + prep.' },
+    { phrase: 'unconditional love', cn: '无条件的爱', type: 'adj. + n.' },
+    { phrase: 'for the love of', cn: '看在……的份上', type: 'prep. + n.' }
+  ],
+  'life': [
+    { phrase: 'bring to life', cn: '赋予生机 / 唤醒活力', type: 'v. + prep.' },
+    { phrase: 'way of life', cn: '生活方式', type: 'n. + prep.' },
+    { phrase: 'quality of life', cn: '生活品质', type: 'n. + prep.' }
+  ],
+  'world': [
+    { phrase: 'all over the world', cn: '全世界 / 遍及全球', type: 'phrase' },
+    { phrase: 'real world', cn: '现实世界', type: 'adj. + n.' },
+    { phrase: 'out of this world', cn: '极其美妙 / 绝妙非凡', type: 'phrase' }
+  ],
+  'mind': [
+    { phrase: 'keep in mind', cn: '铭记在心 / 牢记', type: 'v. + prep.' },
+    { phrase: 'peace of mind', cn: '内心的宁静 / 踏实从容', type: 'n. + prep.' },
+    { phrase: 'open-minded', cn: '思想开明 / 兼容并蓄', type: 'adj. 复合词' }
+  ],
+  'truth': [
+    { phrase: 'moment of truth', cn: '关键时刻 / 真相大白关头', type: 'n. + prep.' },
+    { phrase: 'unvarnished truth', cn: '未经掩饰的真相', type: 'adj. + n.' },
+    { phrase: 'seek truth', cn: '探寻真理 / 追求真相', type: 'v. + n.' }
+  ],
+  'uncertainty': [
+    { phrase: 'economic uncertainty', cn: '经济不确定性', type: 'adj. + n.' },
+    { phrase: 'cope with uncertainty', cn: '应对不确定性', type: 'v. + prep.' },
+    { phrase: 'degree of uncertainty', cn: '不确定程度', type: 'n. + prep.' }
+  ],
+  'quiet': [
+    { phrase: 'quiet moment', cn: '静谧时光', type: 'adj. + n.' },
+    { phrase: 'keep quiet', cn: '保持安静 / 守口如瓶', type: 'v. + adj.' },
+    { phrase: 'peace and quiet', cn: '宁静与祥和', type: 'phrase' }
+  ],
+  'answer': [
+    { phrase: 'definitive answer', cn: '明确答复 / 确切答案', type: 'adj. + n.' },
+    { phrase: 'answer for', cn: '对……负责 / 承担后果', type: 'v. + prep.' },
+    { phrase: 'in answer to', cn: '回应 / 作为答复', type: 'prep. + n.' }
+  ],
+  'question': [
+    { phrase: 'call into question', cn: '对……提出质疑', type: 'phrase' },
+    { phrase: 'beyond question', cn: '毫无疑问 / 不容置疑', type: 'prep. + n.' },
+    { phrase: 'burning question', cn: '紧迫问题 / 焦点疑问', type: 'adj. + n.' }
+  ],
+  'legend': [
+    { phrase: 'living legend', cn: '当代传奇 / 活着的传奇', type: 'adj. + n.' },
+    { phrase: 'legend has it', cn: '相传 / 据传说', type: 'phrase' },
+    { phrase: 'all legends fall', cn: '所有传奇终将陨落', type: 'phrase' }
+  ],
+  'legends': [
+    { phrase: 'urban legends', cn: '都市传说', type: 'adj. + n.' },
+    { phrase: 'legends never die', cn: '传奇永不褪色 / 传奇永存', type: 'phrase' },
+    { phrase: 'fall in the making', cn: '在缔造中陨落', type: 'phrase' }
+  ],
+  'energy': [
+    { phrase: 'positive energy', cn: '正能量 / 积极气场', type: 'adj. + n.' },
+    { phrase: 'renewable energy', cn: '可再生能源', type: 'adj. + n.' },
+    { phrase: 'channel energy', cn: '引导能量 / 倾注精力', type: 'v. + n.' }
+  ],
+  'hold': [
+    { phrase: 'hold on', cn: '坚持住 / 稍等', type: 'v. + adv.' },
+    { phrase: 'hold back', cn: '抑制 / 阻挡', type: 'v. + adv.' },
+    { phrase: 'hold tight', cn: '紧紧抓住 / 抓牢', type: 'v. + adv.' }
+  ],
+  'keep': [
+    { phrase: 'keep going', cn: '继续前行 / 坚持下去', type: 'v. + v.' },
+    { phrase: 'keep in touch', cn: '保持联系', type: 'phrase' },
+    { phrase: 'keep promise', cn: '信守诺言', type: 'v. + n.' }
+  ],
+  'leave': [
+    { phrase: 'leave behind', cn: '抛在脑后 / 留下痕迹', type: 'v. + adv.' },
+    { phrase: 'leave alone', cn: '别管 / 顺其自然', type: 'v. + adj.' },
+    { phrase: 'leave a mark', cn: '留下深远印记', type: 'v. + n.' }
+  ],
+  'stay': [
+    { phrase: 'stay true', cn: '坚守初心 / 忠于自我', type: 'v. + adj.' },
+    { phrase: 'stay alive', cn: '活下去 / 存活', type: 'v. + adj.' },
+    { phrase: 'stay calm', cn: '保持冷静', type: 'v. + adj.' }
+  ],
+  'fall': [
+    { phrase: 'fall apart', cn: '土崩瓦解 / 崩溃破碎', type: 'v. + adv.' },
+    { phrase: 'fall behind', cn: '落后', type: 'v. + adv.' },
+    { phrase: 'fall in line', cn: '步调一致 / 服从', type: 'phrase' }
+  ],
+  'break': [
+    { phrase: 'break through', cn: '取得突破 / 冲破阻碍', type: 'v. + prep.' },
+    { phrase: 'break down', cn: '瓦解 / 情绪失控', type: 'v. + adv.' },
+    { phrase: 'break the ice', cn: '破冰 / 打破僵局', type: 'v. + n.' }
+  ],
+  'change': [
+    { phrase: 'catalyst for change', cn: '变革催化剂', type: 'n. + prep.' },
+    { phrase: 'change mind', cn: '改变心意', type: 'v. + n.' },
+    { phrase: 'drastic change', cn: '剧烈变化', type: 'adj. + n.' }
+  ],
+  'hope': [
+    { phrase: 'ray of hope', cn: '一线希望', type: 'n. + prep.' },
+    { phrase: 'hold out hope', cn: '心怀期冀 / 抱有希望', type: 'v. + n.' },
+    { phrase: 'hope for the best', cn: '做最好的打算', type: 'phrase' }
+  ],
+  'fear': [
+    { phrase: 'overcome fear', cn: '战胜恐惧', type: 'v. + n.' },
+    { phrase: 'for fear of', cn: '唯恐 / 生怕', type: 'prep. + n.' },
+    { phrase: 'deepest fear', cn: '内心最深处的恐惧', type: 'adj. + n.' }
+  ],
+  'trust': [
+    { phrase: 'build trust', cn: '建立信任', type: 'v. + n.' },
+    { phrase: 'breach of trust', cn: '辜负信任 / 违背信任', type: 'n. + prep.' },
+    { phrase: 'trust the process', cn: '相信过程 / 静待花开', type: 'v. + n.' }
+  ],
+  'believe': [
+    { phrase: 'believe in oneself', cn: '相信自己', type: 'v. + prep.' },
+    { phrase: 'hard to believe', cn: '难以置信', type: 'adj. + v.' },
+    { phrase: 'make believe', cn: '假装 / 虚构幻觉', type: 'v. + v.' }
+  ],
+  'eeriness': [
+    { phrase: 'sense of eeriness', cn: '诡谲感 / 阴森奇异的感觉', type: 'n. + prep.' },
+    { phrase: 'eeriness of silence', cn: '死寂的诡异感', type: 'n. + prep.' }
+  ],
+  'manifest': [
+    { phrase: 'manifest destiny', cn: '天命 / 彰显的使命', type: 'adj. + n.' },
+    { phrase: 'manifest energy', cn: '具象化能量 / 显现活力', type: 'v. + n.' },
+    { phrase: 'manifest reality', cn: '显化现实', type: 'v. + n.' }
+  ],
+  'usually': [
+    { phrase: 'as is usually the case', cn: '通常情况下 / 正如通常那样', type: 'phrase' },
+    { phrase: 'more than usually', cn: '异乎寻常地 / 比平时更甚', type: 'phrase' }
+  ],
 };
 
 /**
@@ -444,12 +618,30 @@ export function getCollocationsForWord(word?: string | null): CollocationItem[] 
     }
   }
 
-  // 4. Guaranteed high-utility default collocations for any custom word
-  return [
-    { phrase: `${clean} in context`, cn: `在当前语境中的核心用法`, type: 'phrase' },
-    { phrase: `essential ${clean}`, cn: `关键的核心考点表达`, type: 'adj. + n.' },
-    { phrase: `explore ${clean}`, cn: `深入探究与理解`, type: 'v. + n.' }
+  // 4. Check lemmatized candidates and IELTS corpus stems
+  const candidateStems = [
+    baseKey,
+    clean.replace(/(?:ing|ed|es|s|ly|tion|ence|ance)$/i, ''),
+    clean.replace(/e?s$/i, ''),
+    clean.replace(/ed$/i, ''),
+    clean.replace(/ing$/i, '')
   ];
+  for (const stem of candidateStems) {
+    if (stem && VOCAB_COLLOCATIONS[stem] && VOCAB_COLLOCATIONS[stem].length > 0) {
+      return VOCAB_COLLOCATIONS[stem];
+    }
+  }
+  const corpusHit = lookupInIeltsCorpus(clean) || lookupInIeltsCorpus(baseKey);
+  if (corpusHit) {
+    for (const stem of candidateStems) {
+      if (stem && VOCAB_COLLOCATIONS[stem] && VOCAB_COLLOCATIONS[stem].length > 0) {
+        return VOCAB_COLLOCATIONS[stem];
+      }
+    }
+  }
+
+  // 5. Clean termination: return empty array when no genuine collocations exist (no fake template items)
+  return [];
 }
 
 /**

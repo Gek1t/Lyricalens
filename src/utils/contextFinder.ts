@@ -1,5 +1,7 @@
 import { SEED_SONGS, SEED_PASSAGE } from '../db/seedData';
 import { getLyricLineTranslation } from './lyricDictionary';
+import { useAppStore } from '../store/useAppStore';
+import { WordItem, SubWordItem, SongItem } from '../types';
 
 export interface LyricContextResult {
   found: boolean;
@@ -69,22 +71,72 @@ function escapeRegExp(string: string): string {
 }
 
 /**
+ * Helper to parse time [mm:ss.xx] into seconds
+ */
+function parseLrcTimestamp(tag: string): number {
+  const m = tag.match(/\[(\d{2}):(\d{2})(?:\.(\d{2,3}))?\]/);
+  if (!m) return -1;
+  const mins = parseInt(m[1], 10);
+  const secs = parseInt(m[2], 10);
+  const ms = m[3] ? parseInt(m[3].padEnd(3, '0').slice(0, 3), 10) : 0;
+  return mins * 60 + secs + ms / 1000;
+}
+
+/**
  * Searches the user's playlist songs to check if the word actually appears in any song
  */
-export function findSongContextInPlaylist(targetWord: string): LyricContextResult {
+export function findSongContextInPlaylist(
+  targetWord: string,
+  wordItem?: WordItem | SubWordItem | null
+): LyricContextResult {
   if (!targetWord) return { found: false };
   const clean = targetWord.toLowerCase().trim();
   const stem = clean.replace(/(?:ing|ed|es|s|ly|tion|ence|ance)$/i, '');
 
-  for (const song of SEED_SONGS) {
-    // Split lyric lines
-    const rawLines = song.lrcText.split('\n');
+  // 1. Gather all available songs starting with current playing song, active playlist, then seed songs
+  const activeSongs: SongItem[] = useAppStore.getState().songs || [];
+  const currentSongIndex = useAppStore.getState().currentSongIndex;
+
+  const candidateSongs: SongItem[] = [];
+  if (activeSongs[currentSongIndex]) {
+    candidateSongs.push(activeSongs[currentSongIndex]);
+  }
+  for (let i = 0; i < activeSongs.length; i++) {
+    if (i !== currentSongIndex && activeSongs[i]) {
+      candidateSongs.push(activeSongs[i]);
+    }
+  }
+  for (const seed of SEED_SONGS) {
+    if (!candidateSongs.some(s => s.id === seed.id || (s.title === seed.title && s.artist === seed.artist))) {
+      candidateSongs.push(seed);
+    }
+  }
+
+  for (const song of candidateSongs) {
+    const rawLines = (song.lrcText || '').split('\n');
+
+    // Parse translated lines with timestamp for NetEase songs if available
+    const parsedTLyrics: { timeSec: number; text: string }[] = [];
+    if (song.tlyricText) {
+      for (const tline of song.tlyricText.split('\n')) {
+        const timeMatch = tline.match(/\[\d{2}:\d{2}(?:\.\d{2,3})?\]/);
+        if (timeMatch) {
+          const tSec = parseLrcTimestamp(timeMatch[0]);
+          const tText = tline.replace(/\[\d{2}:\d{2}(?:\.\d{2,3})?\]/g, '').trim();
+          if (tSec >= 0 && tText) {
+            parsedTLyrics.push({ timeSec: tSec, text: tText });
+          }
+        }
+      }
+    }
+
     for (const line of rawLines) {
-      const textOnly = line.replace(/\[\d{2}:\d{2}\.\d{2}\]/g, '').trim();
+      const timeMatch = line.match(/\[\d{2}:\d{2}(?:\.\d{2,3})?\]/);
+      const lineTimeSec = timeMatch ? parseLrcTimestamp(timeMatch[0]) : -1;
+      const textOnly = line.replace(/\[\d{2}:\d{2}(?:\.\d{2,3})?\]/g, '').trim();
       if (!textOnly) continue;
 
       const lowerText = textOnly.toLowerCase();
-      // Check word boundary or stem match
       let isMatch = false;
       if (clean.includes(' ')) {
         isMatch = lowerText.includes(clean);
@@ -96,7 +148,18 @@ export function findSongContextInPlaylist(targetWord: string): LyricContextResul
       }
 
       if (isMatch) {
-        const cnTrans = getLyricLineTranslation(textOnly) || `收录于《${song.title}》歌曲原声。`;
+        let cnTrans = '';
+        // Match tlyric translation by timestamp within 1.8s
+        if (lineTimeSec >= 0 && parsedTLyrics.length > 0) {
+          const matchedTrans = parsedTLyrics.find(t => Math.abs(t.timeSec - lineTimeSec) <= 1.8);
+          if (matchedTrans) {
+            cnTrans = matchedTrans.text;
+          }
+        }
+        if (!cnTrans) {
+          cnTrans = getLyricLineTranslation(textOnly) || `收录于《${song.title}》歌曲原声。`;
+        }
+
         return {
           found: true,
           songTitle: song.title,
@@ -105,6 +168,26 @@ export function findSongContextInPlaylist(targetWord: string): LyricContextResul
           lyricCn: cnTrans
         };
       }
+    }
+  }
+
+  // 2. Fallback to wordItem's own metadata if recorded from song context
+  if (wordItem) {
+    const isSongSource =
+      wordItem.sourceContext?.startsWith('Song') ||
+      wordItem.examples?.some(e => e.source?.includes('Song') || e.source?.includes('Lyric'));
+
+    if (isSongSource) {
+      const titleMatch = wordItem.sourceContext?.match(/Song(?:\s*Lyric)?:\s*(.+)/i);
+      const title = titleMatch ? titleMatch[1].trim() : '当前播放歌曲';
+      const example = wordItem.examples?.find(e => e.source?.includes('Song') || e.source?.includes('Lyric')) || wordItem.examples?.[0];
+      return {
+        found: true,
+        songTitle: title,
+        artist: 'Song Lyrics',
+        lyricEn: example?.en || `Included in song lyrics: "${clean}"`,
+        lyricCn: example?.cn || `收录于《${title}》原声语境。`
+      };
     }
   }
 
