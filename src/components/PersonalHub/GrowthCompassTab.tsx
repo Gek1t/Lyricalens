@@ -1,29 +1,27 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
 import { useLiveQuery } from 'dexie-react-hooks';
 import { useAppStore } from '../../store/useAppStore';
 import { db } from '../../db';
-import { getEbbinghausMetrics, EBBINGHAUS_INTERVAL_DAYS } from '../../utils/vocabEngine';
+import { getEbbinghausMetrics } from '../../utils/vocabEngine';
 import {
   Flame,
   ChevronRight,
+  ChevronDown,
   BookOpen,
   Music2,
   Camera,
   Check,
-  RotateCcw,
-  Headphones,
-  BrainCircuit,
-  AlertCircle
+  Layers
 } from 'lucide-react';
 
 /**
- * Concentric Circular Activity Rings (Apple Fitness style)
+ * Concentric Circular Activity Rings (Apple Watch Fitness Style)
  */
 interface ActivityRingsProps {
-  ring1Pct: number; // Mastered (Green)
-  ring2Pct: number; // Learning (Cyan/Blue)
-  ring3Pct: number; // Collected (Coral/Amber)
+  ring1Pct: number; // Mastered (Vibrant Green)
+  ring2Pct: number; // Learning (Cyan/Teal)
+  ring3Pct: number; // Collected (Coral/Red)
   size?: number;
 }
 
@@ -33,7 +31,7 @@ const ActivityRings: React.FC<ActivityRingsProps> = ({
   ring3Pct,
   size = 110
 }) => {
-  const strokeWidth = 8.5;
+  const strokeWidth = 8;
   const gap = 3.5;
 
   // Radii for 3 concentric rings
@@ -62,7 +60,7 @@ const ActivityRings: React.FC<ActivityRingsProps> = ({
           stroke="currentColor"
           strokeWidth={strokeWidth}
           fill="none"
-          className="text-rose-500/15 dark:text-rose-500/20"
+          className="text-[#FA2D48]/15 dark:text-[#FA2D48]/20"
         />
         <circle
           cx={size / 2}
@@ -71,7 +69,7 @@ const ActivityRings: React.FC<ActivityRingsProps> = ({
           stroke="currentColor"
           strokeWidth={strokeWidth}
           fill="none"
-          className="text-cyan-500/15 dark:text-cyan-500/20"
+          className="text-[#00C7BE]/15 dark:text-[#00C7BE]/20"
         />
         <circle
           cx={size / 2}
@@ -80,10 +78,10 @@ const ActivityRings: React.FC<ActivityRingsProps> = ({
           stroke="currentColor"
           strokeWidth={strokeWidth}
           fill="none"
-          className="text-emerald-500/15 dark:text-emerald-500/20"
+          className="text-[#30D158]/15 dark:text-[#30D158]/20"
         />
 
-        {/* Outer Ring: Collected / Starred (Apple Rose / Coral) */}
+        {/* Outer Ring: Collected / Starred (Apple Pink/Red) */}
         <motion.circle
           cx={size / 2}
           cy={size / 2}
@@ -93,12 +91,12 @@ const ActivityRings: React.FC<ActivityRingsProps> = ({
           strokeDasharray={c3}
           initial={{ strokeDashoffset: c3 }}
           animate={{ strokeDashoffset: offset3 }}
-          transition={{ duration: 1.1, ease: [0.16, 1, 0.3, 1] }}
+          transition={{ duration: 0.9, ease: [0.16, 1, 0.3, 1] }}
           strokeLinecap="round"
           fill="none"
         />
 
-        {/* Middle Ring: Learning (Apple Electric Cyan) */}
+        {/* Middle Ring: Learning (Apple Cyan/Teal) */}
         <motion.circle
           cx={size / 2}
           cy={size / 2}
@@ -108,12 +106,12 @@ const ActivityRings: React.FC<ActivityRingsProps> = ({
           strokeDasharray={c2}
           initial={{ strokeDashoffset: c2 }}
           animate={{ strokeDashoffset: offset2 }}
-          transition={{ duration: 1.2, delay: 0.1, ease: [0.16, 1, 0.3, 1] }}
+          transition={{ duration: 1.0, delay: 0.08, ease: [0.16, 1, 0.3, 1] }}
           strokeLinecap="round"
           fill="none"
         />
 
-        {/* Inner Ring: Mastered (Apple Activity Lime / Emerald) */}
+        {/* Inner Ring: Mastered (Apple Vibrant Green) */}
         <motion.circle
           cx={size / 2}
           cy={size / 2}
@@ -123,7 +121,7 @@ const ActivityRings: React.FC<ActivityRingsProps> = ({
           strokeDasharray={c1}
           initial={{ strokeDashoffset: c1 }}
           animate={{ strokeDashoffset: offset1 }}
-          transition={{ duration: 1.3, delay: 0.2, ease: [0.16, 1, 0.3, 1] }}
+          transition={{ duration: 1.1, delay: 0.16, ease: [0.16, 1, 0.3, 1] }}
           strokeLinecap="round"
           fill="none"
         />
@@ -141,15 +139,15 @@ export const GrowthCompassTab: React.FC = () => {
 
   // Mastery metrics (strictly aligned with Vocabulary Vault)
   const masteryStats = React.useMemo(() => {
-    let level3 = 0; // ◉ 已完全掌握 (Mastered)
-    let level2 = 0; // ⊙ 正在复习中 (Learning)
-    let level1 = 0; // ◎ 已加入词单 (Collected)
+    let level3 = 0; // 已完全掌握 (Mastered)
+    let level2 = 0; // 正在复习中 (Learning)
+    let level1 = 0; // 已加入词单 (Collected)
 
     words.forEach(w => {
       const lvl = w.masteryLevel ?? (w.isStarred ? 1 : 0);
       if (lvl === 3) level3++;
       else if (lvl === 2) level2++;
-      else level1++; // Words in vault with level 0 or 1 count as newly collected in vault
+      else level1++;
     });
 
     const total = words.length;
@@ -166,7 +164,6 @@ export const GrowthCompassTab: React.FC = () => {
       pct3,
       pct2,
       pct1,
-      // Visual ring progress: 0 when count is 0; minimum 6% arc when non-zero so small counts remain visible
       ring3: level3 > 0 ? Math.max(6, pct3) : 0,
       ring2: level2 > 0 ? Math.max(6, pct2) : 0,
       ring1: level1 > 0 ? Math.max(6, pct1) : 0
@@ -221,8 +218,8 @@ export const GrowthCompassTab: React.FC = () => {
         key: 'music',
         label: '歌词听力',
         icon: Music2,
-        iconColor: 'text-indigo-500',
-        barColor: 'bg-indigo-500',
+        iconColor: 'text-[#30D158]',
+        barColor: 'bg-[#30D158]',
         count: musicCount,
         pct: total > 0 ? Math.round((musicCount / denom) * 100) : 0
       },
@@ -230,8 +227,8 @@ export const GrowthCompassTab: React.FC = () => {
         key: 'ielts',
         label: '雅思真题',
         icon: BookOpen,
-        iconColor: 'text-sky-500',
-        barColor: 'bg-sky-500',
+        iconColor: 'text-[#FA2D48]',
+        barColor: 'bg-[#FA2D48]',
         count: ieltsCount,
         pct: total > 0 ? Math.round((ieltsCount / denom) * 100) : 0
       },
@@ -239,8 +236,8 @@ export const GrowthCompassTab: React.FC = () => {
         key: 'ar',
         label: '实景拍照',
         icon: Camera,
-        iconColor: 'text-teal-500',
-        barColor: 'bg-teal-500',
+        iconColor: 'text-[#00C7BE]',
+        barColor: 'bg-[#00C7BE]',
         count: arCount,
         pct: total > 0 ? Math.round((arCount / denom) * 100) : 0
       }
@@ -250,8 +247,18 @@ export const GrowthCompassTab: React.FC = () => {
   const isCheckedInToday = useAppStore(s => s.isCheckedInToday);
   const checkInToday = useAppStore(s => s.checkInToday);
 
-  // Check-in state & sparkling animation
-  const [isSparkling, setIsSparkling] = useState(false);
+  // Check-in celebration & compact single-row collapse state
+  const [justCheckedIn, setJustCheckedIn] = useState(false);
+  const [isCalendarExpanded, setIsCalendarExpanded] = useState(false);
+  const collapseTimerRef = useRef<number | null>(null);
+
+  useEffect(() => {
+    return () => {
+      if (collapseTimerRef.current !== null) {
+        window.clearTimeout(collapseTimerRef.current);
+      }
+    };
+  }, []);
 
   // Real weekly check-in calendar & streak computation backed by localStorage
   const { currentStreak, weekDays } = React.useMemo(() => {
@@ -267,7 +274,6 @@ export const GrowthCompassTab: React.FC = () => {
     let storedDates: string[] = [];
 
     try {
-      // Clean slate reset: ensure new installation or upgraded APK starts strictly from Day 0
       if (localStorage.getItem('lyricalens_streak_fresh_v3') !== 'true') {
         localStorage.removeItem('lyricalens_checkin_history');
         localStorage.removeItem('lyricalens_checked_in_date');
@@ -290,7 +296,6 @@ export const GrowthCompassTab: React.FC = () => {
       dateSet.add(todayKey);
     }
 
-    // Calculate consecutive days streak up to today (or yesterday if not checked in yet today)
     let streak = 0;
     const cursor = new Date(now);
     if (!dateSet.has(todayKey)) {
@@ -301,8 +306,7 @@ export const GrowthCompassTab: React.FC = () => {
       cursor.setDate(cursor.getDate() - 1);
     }
 
-    // Build Monday -> Sunday of the current real week
-    const dayOfWeek = now.getDay(); // 0 (Sun) .. 6 (Sat)
+    const dayOfWeek = now.getDay();
     const mondayOffset = dayOfWeek === 0 ? -6 : 1 - dayOfWeek;
     const monday = new Date(now);
     monday.setDate(now.getDate() + mondayOffset);
@@ -321,6 +325,8 @@ export const GrowthCompassTab: React.FC = () => {
   }, [isCheckedInToday]);
 
   const isCheckedIn = isCheckedInToday;
+  const showExpanded = !isCheckedIn || justCheckedIn || isCalendarExpanded;
+  const isCompactMode = isCheckedIn && !showExpanded;
 
   const handleCheckIn = () => {
     if (isCheckedIn) return;
@@ -336,186 +342,301 @@ export const GrowthCompassTab: React.FC = () => {
     } catch {
       // Ignore storage error
     }
+    setJustCheckedIn(true);
+    setIsCalendarExpanded(false);
     checkInToday();
-    setIsSparkling(true);
-    setTimeout(() => setIsSparkling(false), 1200);
+    if (collapseTimerRef.current !== null) {
+      window.clearTimeout(collapseTimerRef.current);
+    }
+    collapseTimerRef.current = window.setTimeout(() => {
+      setJustCheckedIn(false);
+      collapseTimerRef.current = null;
+    }, 950);
+  };
+
+  const handleToggleCompactCalendar = () => {
+    if (!isCheckedIn || justCheckedIn) return;
+    setIsCalendarExpanded(prev => !prev);
   };
 
   return (
     <div className="space-y-3.5 pb-6 animate-in fade-in duration-300">
-      {/* 1. Streak Activity Widget */}
-      <div className="relative overflow-hidden rounded-3xl bg-white/80 dark:bg-[#151C28]/88 border border-stone-900/[0.06] dark:border-white/[0.07] p-5 shadow-[0_4px_24px_-4px_rgba(0,0,0,0.03)] dark:shadow-[0_4px_24px_-4px_rgba(0,0,0,0.3)]">
-        {/* Floating Sparkles Burst on Check-in */}
+      {/* 1. Streak Activity Widget (Full when unchecked; celebrates & collapses to 1-line bar after check-in) */}
+      <div
+        className={`relative overflow-hidden bg-white/85 dark:bg-[#151C28]/88 border border-stone-900/[0.06] dark:border-white/[0.07] shadow-[0_2px_18px_-4px_rgba(28,25,23,0.04)] dark:shadow-[0_4px_24px_-4px_rgba(0,0,0,0.3)] transition-[padding,border-radius] duration-400 ease-[cubic-bezier(0.22,1,0.36,1)] ${
+          isCompactMode ? 'rounded-2xl px-4 py-3' : 'rounded-3xl p-5'
+        }`}
+      >
+        {/* Soft Warm Sheen Sweep on Check-in */}
         <AnimatePresence>
-          {isSparkling && (
+          {justCheckedIn && (
             <motion.div
-              initial={{ opacity: 0, scale: 0.6 }}
-              animate={{ opacity: 1, scale: 1.15 }}
-              exit={{ opacity: 0, scale: 1.4 }}
-              transition={{ duration: 0.7, ease: 'easeOut' }}
-              className="absolute inset-0 pointer-events-none flex items-center justify-center z-20"
+              initial={{ x: '-110%', opacity: 0.9 }}
+              animate={{ x: '120%', opacity: 0 }}
+              exit={{ opacity: 0 }}
+              transition={{ duration: 0.85, ease: [0.22, 1, 0.36, 1] }}
+              className="pointer-events-none absolute inset-0 z-10 bg-gradient-to-r from-transparent via-orange-400/14 dark:via-orange-400/12 to-transparent"
+            />
+          )}
+        </AnimatePresence>
+
+        {/* Header Row (Never remounts, so flame badge & streak number interpolate smoothly during collapse) */}
+        <div className="relative flex items-center justify-between gap-3">
+          {/* Full-row native toggle button once checked in and settled */}
+          {isCheckedIn && !justCheckedIn && (
+            <button
+              type="button"
+              onClick={handleToggleCompactCalendar}
+              aria-expanded={showExpanded}
+              aria-label={showExpanded ? '收起本周签到记录' : '展开本周签到记录'}
+              className="peer absolute -inset-x-2 -inset-y-1.5 z-10 rounded-xl cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-stone-900/20 dark:focus-visible:ring-white/25"
+            />
+          )}
+
+          <div className={`flex items-center min-w-0 transition-all duration-350 ease-[cubic-bezier(0.22,1,0.36,1)] ${isCompactMode ? 'gap-2.5' : 'gap-3'}`}>
+            {/* Flame Badge with Ignition Burst */}
+            <div className="relative shrink-0">
+              <AnimatePresence>
+                {justCheckedIn && (
+                  <motion.span
+                    initial={{ scale: 0.85, opacity: 0.65 }}
+                    animate={{ scale: 1.6, opacity: 0 }}
+                    exit={{ opacity: 0 }}
+                    transition={{ duration: 0.65, ease: [0.16, 1, 0.3, 1] }}
+                    className="pointer-events-none absolute inset-0 rounded-xl bg-orange-500/35"
+                  />
+                )}
+              </AnimatePresence>
+              <motion.div
+                animate={justCheckedIn ? { scale: [0.8, 1.14, 1] } : { scale: 1 }}
+                transition={{ duration: 0.45, ease: [0.22, 1, 0.36, 1] }}
+                className={`relative flex items-center justify-center transition-all duration-350 ease-[cubic-bezier(0.22,1,0.36,1)] ${
+                  isCompactMode ? 'w-7 h-7 rounded-lg' : 'w-10 h-10 rounded-xl'
+                } ${
+                  isCheckedIn
+                    ? 'bg-gradient-to-br from-orange-500 to-rose-500 text-white shadow-sm shadow-orange-500/20'
+                    : 'bg-stone-900/[0.04] dark:bg-white/[0.06] text-stone-400 dark:text-stone-500 border border-stone-900/[0.05] dark:border-white/[0.06]'
+                }`}
+              >
+                <Flame
+                  className={`transition-all duration-350 ${
+                    isCompactMode ? 'w-3.5 h-3.5' : 'w-4.5 h-4.5'
+                  } ${isCheckedIn ? 'fill-current' : 'fill-transparent'}`}
+                />
+              </motion.div>
+            </div>
+
+            <div className="flex items-baseline gap-1.5 min-w-0">
+              <motion.span
+                key={currentStreak}
+                initial={justCheckedIn ? { y: 10, opacity: 0, scale: 0.85 } : false}
+                animate={{ y: 0, opacity: 1, scale: 1 }}
+                transition={{ duration: 0.38, ease: [0.22, 1, 0.36, 1] }}
+                className={`font-bold font-mono tabular-nums tracking-tight text-stone-900 dark:text-white inline-block transition-[font-size,line-height] duration-350 ease-[cubic-bezier(0.22,1,0.36,1)] ${
+                  isCompactMode ? 'text-[17px] leading-6' : 'text-2xl leading-8'
+                }`}
+              >
+                {currentStreak}
+              </motion.span>
+              <span className="text-xs font-medium text-stone-500 dark:text-stone-400 truncate">
+                天连续学习
+              </span>
+            </div>
+          </div>
+
+          {/* Right Action Area */}
+          {isCheckedIn && !justCheckedIn ? (
+            <div className="flex items-center gap-2.5 shrink-0 pointer-events-none">
+              {/* Mini 7-day Dot Rhythm (visible only when collapsed to 1 line) */}
+              <AnimatePresence initial={false}>
+                {isCompactMode && (
+                  <motion.div
+                    initial={{ opacity: 0, x: 6 }}
+                    animate={{ opacity: 1, x: 0 }}
+                    exit={{ opacity: 0, x: 4 }}
+                    transition={{ duration: 0.25, ease: 'easeOut' }}
+                    className="flex items-center gap-1"
+                    aria-hidden="true"
+                  >
+                    {weekDays.map((d, i) => (
+                      <span
+                        key={i}
+                        className={`w-1.5 h-1.5 rounded-full transition-colors ${
+                          d.done
+                            ? 'bg-stone-900 dark:bg-stone-100'
+                            : 'bg-stone-900/12 dark:bg-white/15'
+                        }`}
+                      />
+                    ))}
+                  </motion.div>
+                )}
+              </AnimatePresence>
+
+              <span className="inline-flex items-center gap-1 text-[11px] font-medium text-emerald-700 dark:text-[#30D158]">
+                <Check className="w-3.5 h-3.5 stroke-[2.4]" />
+                <span>已签到</span>
+              </span>
+
+              <ChevronDown
+                className={`w-3.5 h-3.5 text-stone-400 dark:text-stone-500 peer-hover:text-stone-700 dark:peer-hover:text-stone-200 transition-transform duration-300 ${
+                  showExpanded ? 'rotate-180' : 'rotate-0'
+                }`}
+              />
+            </div>
+          ) : (
+            <motion.button
+              type="button"
+              onClick={handleCheckIn}
+              disabled={isCheckedIn}
+              whileTap={!isCheckedIn ? { scale: 0.96 } : undefined}
+              className={`h-8 px-3 rounded-xl text-xs font-medium inline-flex items-center gap-1.5 shrink-0 transition-colors duration-300 ${
+                isCheckedIn
+                  ? 'bg-[#30D158]/14 text-emerald-700 dark:text-[#30D158] cursor-default select-none'
+                  : 'bg-stone-900/[0.04] hover:bg-stone-900/[0.08] dark:bg-white/[0.06] dark:hover:bg-white/[0.11] text-stone-700 dark:text-stone-200 border border-stone-900/[0.06] dark:border-white/[0.07] cursor-pointer'
+              }`}
             >
-              <div className="relative">
-                <span className="absolute -top-12 -left-16 text-xs font-bold font-mono px-3 py-1 rounded-full bg-gradient-to-r from-amber-500 to-orange-500 text-white shadow-lg shadow-orange-500/30 animate-bounce whitespace-nowrap">
-                  达成 {currentStreak} 天连续学习
-                </span>
-                <div className="w-48 h-48 rounded-full bg-amber-400/15 blur-xl pointer-events-none" />
+              <AnimatePresence mode="wait" initial={false}>
+                {isCheckedIn ? (
+                  <motion.span
+                    key="checked-label"
+                    initial={{ opacity: 0, scale: 0.85 }}
+                    animate={{ opacity: 1, scale: 1 }}
+                    transition={{ duration: 0.24, ease: [0.22, 1, 0.36, 1] }}
+                    className="inline-flex items-center gap-1"
+                  >
+                    <Check className="w-3.5 h-3.5 stroke-[2.4]" />
+                    <span>已签到</span>
+                  </motion.span>
+                ) : (
+                  <motion.span
+                    key="unchecked-label"
+                    exit={{ opacity: 0, scale: 0.85 }}
+                    transition={{ duration: 0.16 }}
+                    className="inline-flex items-center gap-1.5"
+                  >
+                    <Flame className="w-3.5 h-3.5 text-orange-500" />
+                    <span>今日签到</span>
+                  </motion.span>
+                )}
+              </AnimatePresence>
+            </motion.button>
+          )}
+        </div>
+
+        {/* 7-day Real Weekly Calendar Dots (Collapsible with Smooth Height & Fade Transition) */}
+        <AnimatePresence initial={false}>
+          {showExpanded && (
+            <motion.div
+              key="weekly-calendar-strip"
+              initial={{ height: 0, opacity: 0 }}
+              animate={{ height: 'auto', opacity: 1 }}
+              exit={{ height: 0, opacity: 0 }}
+              transition={{ duration: 0.38, ease: [0.22, 1, 0.36, 1] }}
+              className="overflow-hidden"
+            >
+              <div className="grid grid-cols-7 gap-2 pt-4 mt-4 border-t border-stone-900/[0.05] dark:border-white/[0.06] text-center">
+                {weekDays.map((item, idx) => (
+                  <div key={idx} className="flex flex-col items-center gap-1.5">
+                    <span
+                      className={`text-[10px] font-mono ${
+                        item.isToday
+                          ? 'text-stone-900 dark:text-stone-100 font-semibold'
+                          : 'text-stone-400 dark:text-stone-500'
+                      }`}
+                    >
+                      {item.label}
+                    </span>
+                    <div className="relative flex items-center justify-center">
+                      {/* Expanding Ring Ripple on Today's Circle upon Check-in */}
+                      {item.isToday && justCheckedIn && (
+                        <motion.span
+                          initial={{ scale: 0.85, opacity: 0.75 }}
+                          animate={{ scale: 1.75, opacity: 0 }}
+                          transition={{ duration: 0.65, ease: [0.16, 1, 0.3, 1] }}
+                          className="pointer-events-none absolute inset-0 rounded-full border-2 border-orange-500/70 dark:border-orange-400/70"
+                        />
+                      )}
+                      <motion.div
+                        animate={
+                          item.isToday && justCheckedIn
+                            ? { scale: [0.82, 1.16, 1] }
+                            : { scale: 1 }
+                        }
+                        transition={{ duration: 0.42, ease: [0.22, 1, 0.36, 1] }}
+                        className={`w-7 h-7 rounded-full flex items-center justify-center transition-colors duration-300 ${
+                          item.done
+                            ? 'bg-stone-900 dark:bg-stone-100 text-white dark:text-stone-950'
+                            : item.isToday
+                              ? 'border border-amber-600/60 dark:border-amber-400/70 bg-amber-50/90 dark:bg-amber-500/15'
+                              : 'bg-stone-900/[0.04] dark:bg-white/[0.05]'
+                        }`}
+                      >
+                        {item.done ? (
+                          <motion.span
+                            initial={item.isToday && justCheckedIn ? { scale: 0, rotate: -25 } : false}
+                            animate={{ scale: 1, rotate: 0 }}
+                            transition={{ duration: 0.32, delay: item.isToday && justCheckedIn ? 0.08 : 0, ease: [0.22, 1, 0.36, 1] }}
+                            className="inline-flex items-center justify-center"
+                          >
+                            <Check className="w-3.5 h-3.5 stroke-[2.5]" />
+                          </motion.span>
+                        ) : item.isToday ? (
+                          <span className="w-1.5 h-1.5 rounded-full bg-orange-500" />
+                        ) : null}
+                      </motion.div>
+                    </div>
+                  </div>
+                ))}
               </div>
             </motion.div>
           )}
         </AnimatePresence>
-
-        <div className="flex items-center justify-between">
-          <div className="flex items-center gap-3">
-            {/* Flame Badge */}
-            <motion.div
-              key={isCheckedIn ? 'flame-ignited' : 'flame-extinguished'}
-              initial={isCheckedIn ? { scale: 0.8, rotate: -15 } : false}
-              animate={
-                isCheckedIn
-                  ? { scale: [0.8, 1.25, 1], rotate: [-15, 8, 0] }
-                  : { scale: 1, rotate: 0 }
-              }
-              transition={{ duration: 0.5, ease: 'easeOut' }}
-              className={`w-10 h-10 rounded-2xl flex items-center justify-center transition-colors duration-500 ${
-                isCheckedIn
-                  ? 'bg-gradient-to-br from-amber-500 to-orange-600 text-white shadow-md shadow-orange-500/25'
-                  : 'bg-stone-900/[0.04] dark:bg-white/[0.06] text-stone-400 dark:text-stone-500 border border-stone-900/[0.05] dark:border-white/6'
-              }`}
-            >
-              <Flame
-                className={`w-5 h-5 transition-all duration-500 ${
-                  isCheckedIn ? 'fill-white text-white' : 'fill-transparent text-stone-400 dark:text-stone-500'
-                }`}
-              />
-            </motion.div>
-
-            <div>
-              <div className="flex items-baseline gap-1.5">
-                <motion.span
-                  key={currentStreak}
-                  initial={{ y: -10, opacity: 0 }}
-                  animate={{ y: 0, opacity: 1 }}
-                  transition={{ type: 'spring', damping: 15, stiffness: 250 }}
-                  className="text-2xl font-bold font-mono tracking-tight text-stone-900 dark:text-white"
-                >
-                  {currentStreak}
-                </motion.span>
-                <span className="text-xs font-semibold text-stone-500 dark:text-stone-400">
-                  天连续学习
-                </span>
-              </div>
-            </div>
-          </div>
-
-          {/* Interactive Check-in Button */}
-          <motion.button
-            type="button"
-            onClick={handleCheckIn}
-            disabled={isCheckedIn}
-            whileHover={!isCheckedIn ? { scale: 1.04 } : {}}
-            whileTap={!isCheckedIn ? { scale: 0.94 } : {}}
-            className={`px-3.5 py-1.5 rounded-full text-xs font-semibold flex items-center gap-1.5 transition-all shadow-xs ${
-              isCheckedIn
-                ? 'bg-emerald-500/15 dark:bg-emerald-500/20 text-emerald-600 dark:text-emerald-400 border border-emerald-500/30 cursor-default select-none'
-                : 'bg-stone-900/[0.04] dark:bg-white/[0.06] hover:bg-stone-900/[0.07] dark:hover:bg-white/[0.1] text-stone-600 dark:text-stone-300 border border-stone-900/[0.06] dark:border-white/6 cursor-pointer'
-            }`}
-          >
-            {isCheckedIn ? (
-              <>
-                <Check className="w-3.5 h-3.5 stroke-[2.5]" />
-                <span>已签到</span>
-              </>
-            ) : (
-              <>
-                <Flame className="w-3.5 h-3.5 text-stone-400 dark:text-stone-500" />
-                <span>今日签到</span>
-              </>
-            )}
-          </motion.button>
-        </div>
-
-        {/* 7-day Real Weekly Calendar Dots */}
-        <div className="grid grid-cols-7 gap-2 pt-4 mt-4 border-t border-stone-900/[0.05] dark:border-white/5 text-center">
-          {weekDays.map((item, idx) => (
-            <div key={idx} className="flex flex-col items-center gap-1.5">
-              <span
-                className={`text-[10px] font-mono font-medium ${
-                  item.isToday
-                    ? 'text-stone-800 dark:text-stone-200 font-bold'
-                    : 'text-stone-400 dark:text-stone-500'
-                }`}
-              >
-                {item.label}
-              </span>
-              <motion.div
-                key={`${item.label}-${item.done}`}
-                initial={item.isToday && item.done ? { scale: 0.5, rotate: -45 } : false}
-                animate={item.isToday && item.done ? { scale: [0.5, 1.2, 1], rotate: 0 } : { scale: 1 }}
-                transition={{ duration: 0.4 }}
-                className={`w-7 h-7 rounded-full flex items-center justify-center transition-all ${
-                  item.done
-                    ? 'bg-gradient-to-tr from-emerald-500 to-teal-400 text-white shadow-xs shadow-emerald-500/25'
-                    : item.isToday
-                      ? 'border-2 border-dashed border-amber-500/60 dark:border-amber-400/50 bg-amber-500/5 text-amber-500'
-                      : 'bg-stone-900/[0.04] dark:bg-white/[0.05] text-stone-300'
-                }`}
-              >
-                {item.done ? (
-                  <Check className="w-3.5 h-3.5 stroke-[2.5]" />
-                ) : item.isToday ? (
-                  <span className="w-1.5 h-1.5 rounded-full bg-amber-500 animate-ping" />
-                ) : null}
-              </motion.div>
-            </div>
-          ))}
-        </div>
       </div>
 
-      {/* 2. Apple Health Activity Rings (Vocabulary Mastery + Integrated Review Entry) */}
-      <div className="rounded-3xl bg-white/80 dark:bg-[#151C28]/88 border border-stone-900/[0.06] dark:border-white/[0.07] p-5 shadow-[0_4px_24px_-4px_rgba(0,0,0,0.03)] dark:shadow-[0_4px_24px_-4px_rgba(0,0,0,0.3)] space-y-4">
+      {/* 2. Vocabulary Mastery & Integrated Spaced Review */}
+      <div className="rounded-3xl bg-white/85 dark:bg-[#151C28]/88 border border-stone-900/[0.06] dark:border-white/[0.07] p-5 shadow-[0_2px_18px_-4px_rgba(28,25,23,0.04)] dark:shadow-[0_4px_24px_-4px_rgba(0,0,0,0.3)] space-y-4">
         <div className="flex items-center justify-between">
-          <h3 className="text-base font-semibold text-stone-800 dark:text-stone-100">
+          <h3 className="text-[15px] font-semibold text-stone-900 dark:text-stone-100 tracking-tight">
             生词掌握度
           </h3>
 
           <button
             type="button"
             onClick={() => openNotebook('ALL')}
-            className="flex items-center gap-1 text-xs font-semibold text-stone-600 dark:text-stone-300 hover:text-stone-900 dark:hover:text-white bg-stone-900/[0.04] dark:bg-white/[0.06] px-2.5 py-1.5 rounded-full border border-stone-900/[0.05] dark:border-white/4 transition-all cursor-pointer"
+            className="inline-flex items-center gap-0.5 text-xs font-medium text-stone-500 hover:text-stone-900 dark:text-stone-400 dark:hover:text-stone-100 transition-colors cursor-pointer tabular-nums"
           >
-            <span>单词库 ({masteryStats.total})</span>
+            <span>单词库 · {masteryStats.total}</span>
             <ChevronRight className="w-3.5 h-3.5" />
           </button>
         </div>
 
         {/* Rings & Legend Layout */}
-        <div className="flex items-center gap-5 pt-1">
+        <div className="flex items-center gap-5 pt-0.5">
           {/* Concentric Rings Visual */}
           <div className="shrink-0">
             <ActivityRings
               ring1Pct={masteryStats.ring3}
               ring2Pct={masteryStats.ring2}
               ring3Pct={masteryStats.ring1}
-              size={110}
+              size={106}
             />
           </div>
 
           {/* Metric Legend Tiers */}
-          <div className="flex-1 space-y-2">
+          <div className="flex-1 space-y-1.5">
             {/* Mastered */}
             <button
               type="button"
               onClick={() => openNotebook('MASTERED')}
-              className="w-full flex items-center justify-between p-1.5 rounded-xl hover:bg-stone-900/[0.04] dark:hover:bg-white/4 transition-colors cursor-pointer text-left"
+              className="w-full flex items-center justify-between px-2 py-1.5 rounded-xl hover:bg-stone-900/[0.035] dark:hover:bg-white/[0.04] transition-colors cursor-pointer text-left"
             >
               <div className="flex items-center gap-2">
-                <span className="w-2.5 h-2.5 rounded-full bg-[#30D158] shadow-xs shadow-emerald-500/40" />
+                <span className="w-2.5 h-2.5 rounded-full bg-[#30D158]" />
                 <span className="text-xs font-medium text-stone-700 dark:text-stone-300">已完全掌握</span>
               </div>
-              <div className="flex items-baseline gap-1.5">
-                <span className="text-sm font-bold font-mono text-stone-900 dark:text-white">{masteryStats.level3}</span>
-                <span className="text-[10px] font-mono text-stone-400">({masteryStats.pct3}%)</span>
+              <div className="flex items-baseline gap-1.5 font-mono tabular-nums">
+                <span className="text-sm font-semibold text-stone-900 dark:text-white">{masteryStats.level3}</span>
+                <span className="text-[10px] text-stone-400">{masteryStats.pct3}%</span>
               </div>
             </button>
 
@@ -523,15 +644,15 @@ export const GrowthCompassTab: React.FC = () => {
             <button
               type="button"
               onClick={() => openNotebook('UNMASTERED')}
-              className="w-full flex items-center justify-between p-1.5 rounded-xl hover:bg-stone-900/[0.04] dark:hover:bg-white/4 transition-colors cursor-pointer text-left"
+              className="w-full flex items-center justify-between px-2 py-1.5 rounded-xl hover:bg-stone-900/[0.035] dark:hover:bg-white/[0.04] transition-colors cursor-pointer text-left"
             >
               <div className="flex items-center gap-2">
-                <span className="w-2.5 h-2.5 rounded-full bg-[#00C7BE] shadow-xs shadow-cyan-500/40" />
+                <span className="w-2.5 h-2.5 rounded-full bg-[#00C7BE]" />
                 <span className="text-xs font-medium text-stone-700 dark:text-stone-300">正在复习中</span>
               </div>
-              <div className="flex items-baseline gap-1.5">
-                <span className="text-sm font-bold font-mono text-stone-900 dark:text-white">{masteryStats.level2}</span>
-                <span className="text-[10px] font-mono text-stone-400">({masteryStats.pct2}%)</span>
+              <div className="flex items-baseline gap-1.5 font-mono tabular-nums">
+                <span className="text-sm font-semibold text-stone-900 dark:text-white">{masteryStats.level2}</span>
+                <span className="text-[10px] text-stone-400">{masteryStats.pct2}%</span>
               </div>
             </button>
 
@@ -539,63 +660,57 @@ export const GrowthCompassTab: React.FC = () => {
             <button
               type="button"
               onClick={() => openNotebook('LEVEL_1')}
-              className="w-full flex items-center justify-between p-1.5 rounded-xl hover:bg-stone-900/[0.04] dark:hover:bg-white/4 transition-colors cursor-pointer text-left"
+              className="w-full flex items-center justify-between px-2 py-1.5 rounded-xl hover:bg-stone-900/[0.035] dark:hover:bg-white/[0.04] transition-colors cursor-pointer text-left"
             >
               <div className="flex items-center gap-2">
-                <span className="w-2.5 h-2.5 rounded-full bg-[#FA2D48] shadow-xs shadow-rose-500/40" />
+                <span className="w-2.5 h-2.5 rounded-full bg-[#FA2D48]" />
                 <span className="text-xs font-medium text-stone-700 dark:text-stone-300">已加入词单</span>
               </div>
-              <div className="flex items-baseline gap-1.5">
-                <span className="text-sm font-bold font-mono text-stone-900 dark:text-white">{masteryStats.level1}</span>
-                <span className="text-[10px] font-mono text-stone-400">({masteryStats.pct1}%)</span>
+              <div className="flex items-baseline gap-1.5 font-mono tabular-nums">
+                <span className="text-sm font-semibold text-stone-900 dark:text-white">{masteryStats.level1}</span>
+                <span className="text-[10px] text-stone-400">{masteryStats.pct1}%</span>
               </div>
             </button>
           </div>
         </div>
 
-        {/* Integrated Spaced Repetition Review & Flashcard Entry Bar */}
-        <div className="pt-3 border-t border-stone-900/[0.05] dark:border-white/[0.06] flex items-center gap-2">
+        {/* Quiet Editorial Spaced-Repetition Footer */}
+        <div className="pt-3.5 border-t border-stone-900/[0.06] dark:border-white/[0.06] flex items-center justify-between gap-3">
           <button
             type="button"
             onClick={() => openNotebook(ebbinghausMetrics.dueCount > 0 ? 'DUE_REVIEW' : 'ALL')}
-            className={`flex-1 min-w-0 py-2.5 px-3.5 rounded-2xl text-xs font-medium flex items-center justify-between transition-all cursor-pointer active:scale-[0.99] ${
-              ebbinghausMetrics.dueCount > 0
-                ? 'bg-amber-500/[0.08] hover:bg-amber-500/[0.14] dark:bg-amber-500/[0.12] dark:hover:bg-amber-500/[0.18] border border-amber-500/20 text-amber-800 dark:text-amber-200'
-                : 'bg-stone-900/[0.03] hover:bg-stone-900/[0.06] dark:bg-white/[0.04] dark:hover:bg-white/[0.08] border border-stone-900/[0.05] dark:border-white/[0.06] text-stone-700 dark:text-stone-200'
-            }`}
+            className="group min-w-0 flex items-center gap-2 py-1 text-left transition-colors cursor-pointer"
           >
-            <div className="flex items-center gap-2 min-w-0">
-              <RotateCcw
-                className={`w-3.5 h-3.5 shrink-0 ${
-                  ebbinghausMetrics.dueCount > 0 ? 'text-amber-500' : 'text-emerald-500'
-                }`}
-              />
-              <span className="truncate">
-                {ebbinghausMetrics.dueCount > 0
-                  ? `${ebbinghausMetrics.dueCount}词待复习`
-                  : '待复习已完成'}
-              </span>
-            </div>
-            <div className="flex items-center gap-0.5 font-semibold text-[11px] shrink-0 ml-2">
-              <span>词表</span>
-              <ChevronRight className="w-3.5 h-3.5" />
-            </div>
+            <span
+              className={`w-2 h-2 rounded-full shrink-0 ${
+                ebbinghausMetrics.dueCount > 0
+                  ? 'bg-[#FA2D48]'
+                  : 'bg-[#30D158]'
+              }`}
+            />
+            <span className="text-xs font-medium text-stone-700 dark:text-stone-200 group-hover:text-stone-950 dark:group-hover:text-white truncate tabular-nums">
+              {ebbinghausMetrics.dueCount > 0
+                ? `${ebbinghausMetrics.dueCount} 词待复习`
+                : '今日复习已完成'}
+            </span>
+            <ChevronRight className="w-3.5 h-3.5 text-stone-400 group-hover:text-stone-700 dark:group-hover:text-stone-200 group-hover:translate-x-0.5 transition-all shrink-0" />
           </button>
 
           <button
             type="button"
             onClick={() => openNotebook(ebbinghausMetrics.dueCount > 0 ? 'DUE_REVIEW' : 'ALL', true)}
-            className="py-2.5 px-4 rounded-2xl bg-[#516050] hover:bg-[#3F4C3E] dark:bg-[#8FB996] dark:text-stone-950 text-white text-xs font-semibold flex items-center justify-center whitespace-nowrap border border-transparent shadow-xs transition-all cursor-pointer active:scale-95 shrink-0"
+            className="h-9 px-3.5 rounded-[10px] bg-stone-900 hover:bg-stone-800 dark:bg-stone-100 dark:hover:bg-white text-stone-50 dark:text-stone-900 text-xs font-medium inline-flex items-center justify-center gap-1.5 whitespace-nowrap transition-colors active:scale-[0.98] cursor-pointer shrink-0"
           >
-            <span>闪卡速刷</span>
+            <Layers className="w-3.5 h-3.5 opacity-80" />
+            <span>闪卡复习</span>
           </button>
         </div>
       </div>
 
       {/* 3. IELTS Academic Performance Widget */}
-      <div className="rounded-3xl bg-white/80 dark:bg-[#151C28]/88 border border-stone-900/[0.06] dark:border-white/[0.07] p-5 shadow-[0_4px_24px_-4px_rgba(0,0,0,0.03)] dark:shadow-[0_4px_24px_-4px_rgba(0,0,0,0.3)] space-y-4">
+      <div className="rounded-3xl bg-white/85 dark:bg-[#151C28]/88 border border-stone-900/[0.06] dark:border-white/[0.07] p-5 shadow-[0_2px_18px_-4px_rgba(28,25,23,0.04)] dark:shadow-[0_4px_24px_-4px_rgba(0,0,0,0.3)] space-y-4">
         <div className="flex items-center justify-between">
-          <h3 className="text-base font-semibold text-stone-800 dark:text-stone-100">
+          <h3 className="text-[15px] font-semibold text-stone-900 dark:text-stone-100 tracking-tight">
             雅思模考表现
           </h3>
 
@@ -605,42 +720,42 @@ export const GrowthCompassTab: React.FC = () => {
               closePersonalHub();
               setActiveSpace(2);
             }}
-            className="flex items-center gap-1 text-xs font-semibold text-sky-600 dark:text-sky-400 hover:text-sky-700 bg-sky-500/10 dark:bg-sky-500/15 px-2.5 py-1.5 rounded-full transition-all cursor-pointer"
+            className="inline-flex items-center gap-0.5 text-xs font-medium text-stone-500 hover:text-stone-900 dark:text-stone-400 dark:hover:text-stone-100 transition-colors cursor-pointer"
           >
             <span>进入真题精读</span>
             <ChevronRight className="w-3.5 h-3.5" />
           </button>
         </div>
 
-        <div className="grid grid-cols-3 gap-2.5 pt-1">
+        <div className="grid grid-cols-3 gap-2.5">
           {/* Average Band */}
-          <div className="p-3 rounded-2xl bg-stone-900/[0.03] dark:bg-white/[0.04] border border-stone-900/[0.04] dark:border-white/[0.05] text-center">
+          <div className="p-3 rounded-2xl bg-stone-900/[0.025] dark:bg-white/[0.035] border border-stone-900/[0.04] dark:border-white/[0.05] text-center">
             <span className="text-[11px] font-medium text-stone-400 dark:text-stone-500 block mb-1">
               平均总分
             </span>
-            <span className="text-2xl font-bold font-mono text-sky-600 dark:text-sky-400">
+            <span className="text-2xl font-bold font-mono tabular-nums text-stone-900 dark:text-white">
               {ieltsStats.avgBand}
             </span>
             <span className="text-[10px] font-mono text-stone-400 block mt-0.5">Band</span>
           </div>
 
           {/* Passages Practiced */}
-          <div className="p-3 rounded-2xl bg-stone-900/[0.03] dark:bg-white/[0.04] border border-stone-900/[0.04] dark:border-white/[0.05] text-center">
+          <div className="p-3 rounded-2xl bg-stone-900/[0.025] dark:bg-white/[0.035] border border-stone-900/[0.04] dark:border-white/[0.05] text-center">
             <span className="text-[11px] font-medium text-stone-400 dark:text-stone-500 block mb-1">
               完成篇数
             </span>
-            <span className="text-2xl font-bold font-mono text-stone-900 dark:text-white">
+            <span className="text-2xl font-bold font-mono tabular-nums text-stone-900 dark:text-white">
               {ieltsStats.totalPassages}
             </span>
             <span className="text-[10px] text-stone-400 block mt-0.5">篇</span>
           </div>
 
           {/* Total Reading Time */}
-          <div className="p-3 rounded-2xl bg-stone-900/[0.03] dark:bg-white/[0.04] border border-stone-900/[0.04] dark:border-white/[0.05] text-center">
+          <div className="p-3 rounded-2xl bg-stone-900/[0.025] dark:bg-white/[0.035] border border-stone-900/[0.04] dark:border-white/[0.05] text-center">
             <span className="text-[11px] font-medium text-stone-400 dark:text-stone-500 block mb-1">
               精读时长
             </span>
-            <span className="text-2xl font-bold font-mono text-stone-900 dark:text-white">
+            <span className="text-2xl font-bold font-mono tabular-nums text-stone-900 dark:text-white">
               {ieltsStats.totalTimeMin}
             </span>
             <span className="text-[10px] text-stone-400 block mt-0.5">分钟</span>
@@ -649,17 +764,17 @@ export const GrowthCompassTab: React.FC = () => {
       </div>
 
       {/* 4. Dynamic Word Acquisition Sources Gauge */}
-      <div className="rounded-3xl bg-white/80 dark:bg-[#151C28]/88 border border-stone-900/[0.06] dark:border-white/[0.07] p-5 shadow-[0_4px_24px_-4px_rgba(0,0,0,0.03)] dark:shadow-[0_4px_24px_-4px_rgba(0,0,0,0.3)] space-y-3.5">
+      <div className="rounded-3xl bg-white/85 dark:bg-[#151C28]/88 border border-stone-900/[0.06] dark:border-white/[0.07] p-5 shadow-[0_2px_18px_-4px_rgba(28,25,23,0.04)] dark:shadow-[0_4px_24px_-4px_rgba(0,0,0,0.3)] space-y-3.5">
         <div className="flex items-center justify-between">
-          <h3 className="text-base font-semibold text-stone-800 dark:text-stone-100">
+          <h3 className="text-[15px] font-semibold text-stone-900 dark:text-stone-100 tracking-tight">
             单词来源
           </h3>
-          <span className="text-[11px] font-mono text-stone-400 dark:text-stone-500">
+          <span className="text-[11px] font-mono tabular-nums text-stone-400 dark:text-stone-500">
             共 {words.length} 词
           </span>
         </div>
 
-        <div className="space-y-3 pt-1">
+        <div className="space-y-3 pt-0.5">
           {sourceStats.map(src => {
             const Icon = src.icon;
             return (
@@ -669,16 +784,16 @@ export const GrowthCompassTab: React.FC = () => {
                     <Icon className={`w-3.5 h-3.5 ${src.iconColor}`} />
                     <span>{src.label}</span>
                   </span>
-                  <div className="flex items-baseline gap-1.5 font-mono">
+                  <div className="flex items-baseline gap-1.5 font-mono tabular-nums">
                     <span className="text-[11px] text-stone-400 dark:text-stone-500">{src.count} 词</span>
-                    <span className="font-bold text-stone-900 dark:text-white">{src.pct}%</span>
+                    <span className="font-semibold text-stone-900 dark:text-white">{src.pct}%</span>
                   </div>
                 </div>
-                <div className="w-full h-2 rounded-full bg-stone-900/[0.06] dark:bg-stone-800 overflow-hidden">
+                <div className="w-full h-1.5 rounded-full bg-stone-900/[0.06] dark:bg-white/[0.07] overflow-hidden">
                   <motion.div
                     initial={{ width: 0 }}
                     animate={{ width: `${src.pct}%` }}
-                    transition={{ duration: 0.8, ease: [0.16, 1, 0.3, 1] }}
+                    transition={{ duration: 0.7, ease: [0.16, 1, 0.3, 1] }}
                     className={`h-full ${src.barColor} rounded-full`}
                   />
                 </div>

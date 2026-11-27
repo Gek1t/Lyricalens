@@ -74,6 +74,11 @@ import {
 import { useAppStore } from '../../store/useAppStore';
 import { Capacitor } from '@capacitor/core';
 import { searchAndCompileIeltsVolumeClient } from '../../utils/clientIeltsSearch';
+import type { WordItem } from '../../types';
+
+const EMPTY_WORDS: WordItem[] = [];
+const EMPTY_CUSTOM_PASSAGES: CambridgePassage[] = [];
+const EMPTY_CUSTOM_LISTENING: IELTSListeningSection[] = [];
 
 interface OnlineIELTSSearchModalProps {
   isOpen?: boolean;
@@ -210,10 +215,19 @@ export const OnlineIELTSSearchModal: React.FC<OnlineIELTSSearchModalProps> = ({
     return [];
   }, [foundRealArticles, compiledVolume]);
 
-  // Live DB queries
-  const allDbWords = useLiveQuery(() => db.words.toArray()) || [];
-  const customPassages = useLiveQuery(() => db.customPassages.toArray()) || [];
-  const customListening = useLiveQuery(() => db.customListening.toArray()) || [];
+  // Live DB queries (suspended when modal is closed so background DB updates don't re-render hidden modal)
+  const allDbWords = useLiveQuery(
+    () => (effectiveIsOpen ? db.words.toArray() : EMPTY_WORDS),
+    [effectiveIsOpen]
+  ) ?? EMPTY_WORDS;
+  const customPassages = useLiveQuery(
+    () => (effectiveIsOpen ? db.customPassages.toArray() : EMPTY_CUSTOM_PASSAGES),
+    [effectiveIsOpen]
+  ) ?? EMPTY_CUSTOM_PASSAGES;
+  const customListening = useLiveQuery(
+    () => (effectiveIsOpen ? db.customListening.toArray() : EMPTY_CUSTOM_LISTENING),
+    [effectiveIsOpen]
+  ) ?? EMPTY_CUSTOM_LISTENING;
 
   const userWordStrings = useMemo(() => allDbWords.map(w => w.word.toLowerCase()), [allDbWords]);
   const savedPassageIds = useMemo(() => new Set(customPassages.map(p => p.id)), [customPassages]);
@@ -946,8 +960,8 @@ export const OnlineIELTSSearchModal: React.FC<OnlineIELTSSearchModalProps> = ({
                   className="flex-1 overflow-y-auto overscroll-contain px-5 pt-3.5 pb-24 no-scrollbar"
                 >
                   <div className="max-w-2xl mx-auto space-y-4">
-                    {/* Layer 1: Recessed Region Filter Tray + Unsaved Filter Toggle & Sync */}
-                    <div className="flex items-center justify-between gap-2 flex-wrap">
+                    {/* Layer 1: Single-Row Compact Region Tray + Filter Toggles & Sync */}
+                    <div className="flex items-center justify-between gap-1.5 flex-nowrap">
                       {/* Left: Recessed Region Tray */}
                       <div className="p-0.5 rounded-xl bg-stone-900/[0.05] dark:bg-white/[0.06] flex items-center gap-0.5 shrink-0">
                         {[
@@ -966,9 +980,9 @@ export const OnlineIELTSSearchModal: React.FC<OnlineIELTSSearchModalProps> = ({
                                 setTimelineRegionFilter(newReg);
                                 fetchSeasonalFeed(false, feedSearchQuery, newReg);
                               }}
-                              className={`h-7 px-2.5 rounded-[10px] text-xs cursor-pointer transition-all whitespace-nowrap ${
+                              className={`h-7 px-2 rounded-[10px] text-[11px] cursor-pointer transition-all whitespace-nowrap ${
                                 isActive
-                                  ? 'bg-[#FDFBF7] dark:bg-stone-800 text-stone-900 dark:text-white font-bold shadow-2xs'
+                                  ? 'bg-[#FDFCF9] dark:bg-stone-800 text-stone-900 dark:text-white font-bold shadow-2xs'
                                   : 'text-stone-500 dark:text-stone-400 hover:text-stone-900 dark:hover:text-white font-medium'
                               }`}
                             >
@@ -978,37 +992,37 @@ export const OnlineIELTSSearchModal: React.FC<OnlineIELTSSearchModalProps> = ({
                         })}
                       </div>
 
-                      {/* Right: New Topic Toggle + Only Unsaved Toggle + Sync Button */}
-                      <div className="flex items-center gap-1.5 shrink-0">
+                      {/* Right: Compact Filter Toggles + Sync Button */}
+                      <div className="flex items-center gap-1 shrink-0">
                         <button
                           type="button"
                           onClick={() => setOnlyNewTopics(!onlyNewTopics)}
-                          className={`h-7 px-2.5 rounded-xl text-xs font-medium flex items-center gap-1 cursor-pointer transition-all whitespace-nowrap border ${
+                          className={`h-7 px-2 rounded-xl text-[11px] font-medium flex items-center cursor-pointer transition-all whitespace-nowrap border ${
                             onlyNewTopics
                               ? 'bg-amber-700 text-[#FAF7F2] dark:bg-amber-500 dark:text-stone-950 border-amber-700 dark:border-amber-500 shadow-2xs'
-                              : 'bg-[#FDFBF7] dark:bg-white/[0.04] text-stone-600 dark:text-stone-300 border-stone-900/[0.08] dark:border-white/[0.08] hover:text-stone-900 dark:hover:text-white'
+                              : 'bg-[#FDFCF9] dark:bg-white/[0.04] text-stone-600 dark:text-stone-300 border-stone-900/[0.08] dark:border-white/[0.08] hover:text-stone-900 dark:hover:text-white'
                           }`}
                         >
-                          <span>新题首发</span>
+                          <span>仅新题</span>
                         </button>
 
                         <button
                           type="button"
                           onClick={() => setOnlyUnsaved(!onlyUnsaved)}
-                          className={`h-7 px-2.5 rounded-xl text-xs font-medium flex items-center gap-1 cursor-pointer transition-all whitespace-nowrap border ${
+                          className={`h-7 px-2 rounded-xl text-[11px] font-medium flex items-center cursor-pointer transition-all whitespace-nowrap border ${
                             onlyUnsaved
-                              ? 'bg-stone-900 text-[#FAF7F2] dark:bg-white dark:text-stone-900 border-stone-900 dark:border-white shadow-2xs'
-                              : 'bg-[#FDFBF7] dark:bg-white/[0.04] text-stone-600 dark:text-stone-300 border-stone-900/[0.08] dark:border-white/[0.08] hover:text-stone-900 dark:hover:text-white'
+                              ? 'bg-stone-900 text-[#FAF7F2] dark:bg-stone-100 dark:text-stone-950 border-stone-900 dark:border-stone-100 shadow-2xs'
+                              : 'bg-[#FDFCF9] dark:bg-white/[0.04] text-stone-600 dark:text-stone-300 border-stone-900/[0.08] dark:border-white/[0.08] hover:text-stone-900 dark:hover:text-white'
                           }`}
                         >
-                          <span>仅看未收</span>
+                          <span>未收录</span>
                         </button>
 
                         <button
                           type="button"
                           onClick={() => fetchSeasonalFeed(true, feedSearchQuery, timelineRegionFilter)}
                           disabled={isLoadingFeeds}
-                          className="w-7 h-7 rounded-xl bg-[#FDFBF7] dark:bg-white/[0.04] border border-stone-900/[0.08] dark:border-white/[0.08] flex items-center justify-center text-stone-500 hover:text-stone-900 dark:hover:text-white cursor-pointer transition-all"
+                          className="w-7 h-7 rounded-xl bg-[#FDFCF9] dark:bg-white/[0.04] border border-stone-900/[0.08] dark:border-white/[0.08] flex items-center justify-center text-stone-500 hover:text-stone-900 dark:hover:text-white cursor-pointer transition-all shrink-0"
                           title="同步最新实考回忆"
                         >
                           <RefreshCw className={`w-3.5 h-3.5 ${isLoadingFeeds ? 'animate-spin text-stone-900 dark:text-white' : ''}`} />
@@ -1058,7 +1072,7 @@ export const OnlineIELTSSearchModal: React.FC<OnlineIELTSSearchModalProps> = ({
                                 setWebQuery(q);
                                 handleSearchAndCompile(q);
                               }}
-                              className="inline-flex items-center gap-1.5 px-3.5 py-1.5 rounded-xl bg-[#516050] text-white text-xs font-semibold cursor-pointer hover:bg-[#3F4C3E] transition-colors"
+                              className="inline-flex items-center gap-1.5 px-3.5 py-1.5 rounded-xl bg-stone-900 hover:bg-stone-800 dark:bg-stone-100 dark:hover:bg-white text-white dark:text-stone-950 text-xs font-semibold cursor-pointer transition-colors"
                             >
                               <Globe className="w-3.5 h-3.5" />
                               <span>去全网题库检索「{feedSearchQuery.trim()}」</span>
@@ -1155,17 +1169,22 @@ export const OnlineIELTSSearchModal: React.FC<OnlineIELTSSearchModalProps> = ({
                               key={session.id}
                               className="rounded-[24px] bg-[#FDFBF7] dark:bg-stone-900/60 border border-stone-900/[0.07] dark:border-white/[0.08] p-5 shadow-[0_8px_24px_-12px_rgba(28,25,23,0.05)] space-y-3"
                             >
-                              {/* Editorial Session Masthead: 2 Clean Full-Width Rows (Zero Column Collision) */}
-                              <div className="space-y-1.5 pb-3 border-b border-stone-900/[0.08] dark:border-white/[0.08]">
-                                {/* Row 1: Editorial Serif Date + Region Title on Left, Soft Sage Batch Action on Right */}
+                              {/* Editorial Session Masthead: 2 Crisp Non-Wrapping Rows */}
+                              <div className="space-y-1 pb-3 border-b border-stone-900/[0.08] dark:border-white/[0.08]">
+                                {/* Row 1: Editorial Serif Date + Region Title on Left, Quiet Batch Action on Right */}
                                 <div className="flex items-center justify-between gap-2 min-w-0">
                                   <div className="flex items-baseline gap-2 min-w-0">
                                     <h3 className="font-serif-luxury text-xl font-bold tracking-tight text-stone-900 dark:text-white tabular-nums shrink-0">
                                       {monthNumStr}月{dayStr}日
                                     </h3>
-                                    <span className="text-xs font-semibold text-stone-700 dark:text-stone-200 shrink-0">
+                                    <span className="text-xs font-semibold text-stone-700 dark:text-stone-200 truncate">
                                       {regionTitle}
                                     </span>
+                                    {session.isLatest && (
+                                      <span className="px-1.5 py-0.5 rounded-md bg-amber-500/12 text-[10px] font-semibold text-amber-700 dark:text-amber-400 shrink-0">
+                                        最新
+                                      </span>
+                                    )}
                                   </div>
 
                                   <button
@@ -1199,46 +1218,33 @@ export const OnlineIELTSSearchModal: React.FC<OnlineIELTSSearchModalProps> = ({
                                         setImportingVolumeId(null);
                                       }
                                     }}
-                                    className={`shrink-0 px-2.5 py-1 rounded-xl text-[11px] font-medium flex items-center gap-1 transition-colors cursor-pointer whitespace-nowrap ${
+                                    className={`shrink-0 py-1 px-1.5 -mr-1.5 rounded-md text-[11.5px] font-medium inline-flex items-center gap-1 transition-colors cursor-pointer whitespace-nowrap ${
                                       isAllSaved
-                                        ? 'bg-[#516050]/15 text-[#516050] dark:text-[#8FB996]'
-                                        : 'bg-[#516050]/[0.09] hover:bg-[#516050]/[0.16] text-[#516050] dark:bg-[#8FB996]/[0.12] dark:hover:bg-[#8FB996]/[0.2] dark:text-[#8FB996]'
+                                        ? 'text-[#2D5A40] dark:text-[#78B894] hover:bg-[#2D5A40]/[0.06] dark:hover:bg-[#78B894]/10'
+                                        : 'text-stone-500 hover:text-stone-950 dark:text-stone-400 dark:hover:text-white hover:bg-stone-900/[0.04] dark:hover:bg-white/[0.06]'
                                     }`}
                                   >
                                     {isImportingThisSession ? (
-                                      <Loader2 className="w-3 h-3 animate-spin" />
+                                      <Loader2 className="w-3.5 h-3.5 animate-spin" />
                                     ) : isAllSaved ? (
                                       <>
-                                        <Check className="w-3 h-3" />
-                                        <span>本场已全收</span>
+                                        <Check className="w-3.5 h-3.5 stroke-[2.2]" />
+                                        <span>已全收</span>
                                       </>
                                     ) : (
                                       <>
-                                        <Plus className="w-3 h-3" />
-                                        <span>整场入库 ({unsavedCount})</span>
+                                        <Plus className="w-3.5 h-3.5 stroke-[1.8]" />
+                                        <span>整场入库</span>
                                       </>
                                     )}
                                   </button>
                                 </div>
 
-                                {/* Row 2: Full-Width Un-truncated Cities, Mode & Composition */}
-                                <div className="flex items-center gap-1.5 text-[11px] text-stone-400 dark:text-stone-500 flex-wrap">
-                                  {session.isLatest && (
-                                    <span className="px-1.5 py-0.5 rounded-md bg-amber-500/12 text-[10px] font-bold text-amber-700 dark:text-amber-400 border border-amber-600/25 shrink-0">
-                                      最新考次
-                                    </span>
-                                  )}
-                                  <span className="font-mono uppercase tracking-wider text-stone-500 dark:text-stone-400">
-                                    {monthStr} {yearStr} {weekdayStr}
-                                  </span>
-                                  <span aria-hidden="true">·</span>
-                                  <span className="text-stone-500 dark:text-stone-400">{regionCities}</span>
-                                  <span aria-hidden="true">·</span>
-                                  <span>{session.mode}</span>
-                                  <span aria-hidden="true">·</span>
-                                  <span className="text-stone-600 dark:text-stone-300 font-medium">
-                                    {sIndex === 0 ? '1篇新题首发 · 2篇高频旧题' : '2篇高频母题 · 1篇经典复现'}
-                                  </span>
+                                {/* Row 2: Quiet Single-Line Subtitle (Weekday · Cities) */}
+                                <div className="flex items-center gap-1.5 text-[11px] text-stone-400 dark:text-stone-500 min-w-0">
+                                  <span className="shrink-0">{weekdayStr}</span>
+                                  <span aria-hidden="true" className="opacity-50 shrink-0">·</span>
+                                  <span className="truncate">{regionCities}</span>
                                 </div>
                               </div>
 
@@ -1270,80 +1276,63 @@ export const OnlineIELTSSearchModal: React.FC<OnlineIELTSSearchModalProps> = ({
                                       );
 
                                       return (
-                                        <div key={previewKey} className="py-3 first:pt-1 last:pb-0">
+                                        <div key={previewKey} className="py-3.5 first:pt-1.5 last:pb-0">
                                           <article
                                             onClick={() =>
                                               setExpandedPreviewId(isExpanded ? null : previewKey)
                                             }
                                             className="group transition-colors cursor-pointer flex items-start gap-3"
                                           >
-                                            {/* Left Number + Discipline Dot */}
-                                            <div className="w-9 shrink-0 pt-0.5 flex flex-col items-start">
-                                              <div className="flex items-center gap-1.5">
-                                                <span className={`w-1.5 h-1.5 rounded-full ${disc.badgeDotClass}`} />
-                                                <span className="font-serif-luxury text-lg font-bold leading-none text-stone-800 dark:text-stone-200 group-hover:text-[#516050] dark:group-hover:text-[#8FB996] transition-colors tabular-nums">
-                                                  0{pNum}
-                                                </span>
-                                              </div>
-                                              <span className="mt-1 text-[10px] font-mono tabular-nums text-stone-400 dark:text-stone-500">
+                                            {/* Left Clean Passage Index */}
+                                            <div className="w-7 shrink-0 pt-0.5 flex items-center">
+                                              <span className="font-serif-luxury text-lg font-bold leading-none text-stone-800 dark:text-stone-200 group-hover:text-stone-950 dark:group-hover:text-white transition-colors tabular-nums">
                                                 P{pNum}
                                               </span>
                                             </div>
 
-                                            {/* Center Bilingual Title & Question Type Breakdown */}
+                                            {/* Center Bilingual Title & Single Clean Metadata Line */}
                                             <div className="min-w-0 flex-1 space-y-1">
-                                              <div className="flex items-center gap-1.5">
-                                                <h4 className="text-[14.5px] font-bold text-stone-900 dark:text-stone-100 group-hover:text-[#516050] dark:group-hover:text-[#8FB996] transition-colors leading-snug">
-                                                  {meta.titleZh}
-                                                </h4>
-                                                <ChevronDown
-                                                  className={`w-3.5 h-3.5 text-stone-400 shrink-0 transition-transform duration-200 ${
-                                                    isExpanded ? 'rotate-180 text-[#516050] dark:text-[#8FB996]' : ''
-                                                  }`}
-                                                />
-                                              </div>
+                                              <h4 className="text-[14.5px] font-bold text-stone-900 dark:text-stone-100 group-hover:text-stone-950 dark:group-hover:text-white transition-colors leading-snug">
+                                                {meta.titleZh}
+                                              </h4>
 
                                               <p className="font-serif-luxury italic text-xs text-stone-500 dark:text-stone-400 truncate">
                                                 {meta.titleEn}
                                               </p>
 
-                                              {/* Unboxed Metadata: Discipline · Question Types · New/Old Status */}
-                                              <div className="flex items-center gap-1.5 text-[11px] text-stone-400 dark:text-stone-500 flex-wrap pt-0.5">
-                                                <span className={`font-medium ${disc.accentTextClass}`}>
+                                              <div className="flex items-center gap-1.5 text-[11px] text-stone-400 dark:text-stone-500 whitespace-nowrap pt-0.5 min-w-0">
+                                                <span className={`font-medium truncate min-w-0 ${disc.accentTextClass}`}>
                                                   {disc.shortZh}
                                                 </span>
-                                                {cleanQTypes && (
-                                                  <>
-                                                    <span aria-hidden="true">·</span>
-                                                    <span className="text-stone-600 dark:text-stone-300">
-                                                      {cleanQTypes}
+                                                {isNewTopic && (
+                                                  <span className="inline-flex items-center gap-1 shrink-0">
+                                                    <span aria-hidden="true" className="opacity-50">·</span>
+                                                    <span className="text-amber-700 dark:text-amber-400 font-medium">
+                                                      新题
                                                     </span>
-                                                  </>
+                                                  </span>
                                                 )}
-                                                <span aria-hidden="true">·</span>
-                                                <span
-                                                  className={
-                                                    isNewTopic
-                                                      ? 'text-amber-700 dark:text-amber-400 font-medium'
-                                                      : 'text-stone-400 dark:text-stone-500'
-                                                  }
-                                                >
-                                                  {isNewTopic ? '2026新题首发' : '高频旧题'}
-                                                </span>
                                                 {vocabHits.length > 0 && (
-                                                  <>
-                                                    <span aria-hidden="true">·</span>
-                                                    <span className="text-amber-700 dark:text-amber-400 font-medium font-mono">
-                                                      共鸣 +{vocabHits.length} 词
+                                                  <span className="inline-flex items-center gap-1 shrink-0">
+                                                    <span aria-hidden="true" className="opacity-50">·</span>
+                                                    <span className="text-amber-700 dark:text-amber-400 font-medium tabular-nums">
+                                                      生词 +{vocabHits.length}
                                                     </span>
-                                                  </>
+                                                  </span>
                                                 )}
                                               </div>
                                             </div>
 
-                                            {/* Right Ingestion Toggle Button (Decoupled from Row Expand) */}
-                                            <div
-                                              className="shrink-0 self-center pl-1"
+                                            {/* Right Minimalist Ingestion Toggle */}
+                                            <button
+                                              type="button"
+                                              aria-label={isSaved ? `移出馆藏：${meta.titleZh}` : `收录入库：${meta.titleZh}`}
+                                              title={isSaved ? '已收录，点击移出' : '收录本篇'}
+                                              className={`shrink-0 self-center w-7 h-7 rounded-full inline-flex items-center justify-center transition-all cursor-pointer active:scale-90 ${
+                                                isSaved
+                                                  ? 'bg-[#2D5A40] border border-[#2D5A40] text-white dark:bg-[#78B894] dark:border-[#78B894] dark:text-stone-950'
+                                                  : 'border border-stone-900/[0.14] dark:border-white/[0.16] text-stone-400 dark:text-stone-500 hover:border-stone-900/40 dark:hover:border-white/40 hover:text-stone-900 dark:hover:text-white hover:bg-stone-900/[0.03] dark:hover:bg-white/[0.05]'
+                                              }`}
                                               onClick={(e) => {
                                                 e.stopPropagation();
                                                 if (!fullPassage) return;
@@ -1354,26 +1343,12 @@ export const OnlineIELTSSearchModal: React.FC<OnlineIELTSSearchModalProps> = ({
                                                 }
                                               }}
                                             >
-                                              <span
-                                                className={`inline-flex items-center gap-1 px-2.5 py-1 rounded-lg text-[11px] font-medium transition-all ${
-                                                  isSaved
-                                                    ? 'bg-[#516050]/14 text-[#516050] dark:text-[#8FB996]'
-                                                    : 'text-stone-600 dark:text-stone-300 bg-stone-900/[0.04] dark:bg-white/[0.06] hover:bg-[#516050]/[0.12] hover:text-[#516050] dark:hover:text-[#8FB996]'
-                                                }`}
-                                              >
-                                                {isSaved ? (
-                                                  <>
-                                                    <Check className="w-3 h-3" />
-                                                    <span>已收录</span>
-                                                  </>
-                                                ) : (
-                                                  <>
-                                                    <Plus className="w-3 h-3" />
-                                                    <span>入库</span>
-                                                  </>
-                                                )}
-                                              </span>
-                                            </div>
+                                              {isSaved ? (
+                                                <Check className="w-3.5 h-3.5 stroke-[2.3]" />
+                                              ) : (
+                                                <Plus className="w-3.5 h-3.5 stroke-[1.85]" />
+                                              )}
+                                            </button>
                                           </article>
 
                                           {/* Expandable Exam Recall Brief & Instant Practice Drawer */}
@@ -1386,7 +1361,13 @@ export const OnlineIELTSSearchModal: React.FC<OnlineIELTSSearchModalProps> = ({
                                                 transition={{ duration: 0.16 }}
                                                 className="overflow-hidden"
                                               >
-                                                <div className="mt-2.5 ml-12 p-3 rounded-2xl bg-[#FAF7F2] dark:bg-white/[0.03] border border-stone-900/[0.06] dark:border-white/[0.06] space-y-2">
+                                                <div className="mt-2.5 ml-10 p-3 rounded-2xl bg-[#FAF7F2] dark:bg-white/[0.03] border border-stone-900/[0.06] dark:border-white/[0.06] space-y-2">
+                                                  {cleanQTypes && (
+                                                    <div className="text-[11px] text-stone-500 dark:text-stone-400">
+                                                      <span className="font-medium text-stone-700 dark:text-stone-300">题型：</span>
+                                                      {cleanQTypes}
+                                                    </div>
+                                                  )}
                                                   <p className="text-xs text-stone-600 dark:text-stone-300 leading-relaxed">
                                                     <span className="font-semibold text-stone-800 dark:text-stone-200">
                                                       考场回忆提要：
@@ -1420,7 +1401,7 @@ export const OnlineIELTSSearchModal: React.FC<OnlineIELTSSearchModalProps> = ({
                                                       <button
                                                         type="button"
                                                         onClick={() => handleLaunchReading(fullPassage, false)}
-                                                        className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg text-[11px] font-medium bg-[#516050] text-white hover:bg-[#3F4C3E] transition-colors cursor-pointer"
+                                                        className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg text-[11px] font-medium bg-stone-900 hover:bg-stone-800 dark:bg-stone-100 dark:hover:bg-white text-white dark:text-stone-950 transition-colors cursor-pointer"
                                                       >
                                                         <span>立即试做本篇</span>
                                                         <ArrowRight className="w-3 h-3" />
@@ -1455,58 +1436,42 @@ export const OnlineIELTSSearchModal: React.FC<OnlineIELTSSearchModalProps> = ({
                                         .join(' + ');
 
                                       return (
-                                        <div key={previewKey} className="py-3 first:pt-1 last:pb-0">
+                                        <div key={previewKey} className="py-3.5 first:pt-1.5 last:pb-0">
                                           <article
                                             onClick={() =>
                                               setExpandedPreviewId(isExpanded ? null : previewKey)
                                             }
                                             className="group transition-colors cursor-pointer flex items-start gap-3"
                                           >
-                                            <div className="w-9 shrink-0 pt-0.5 flex flex-col items-start">
-                                              <div className="flex items-center gap-1.5">
-                                                <span className={`w-1.5 h-1.5 rounded-full ${disc.badgeDotClass}`} />
-                                                <span className="font-serif-luxury text-lg font-bold leading-none text-stone-800 dark:text-stone-200 group-hover:text-amber-700 dark:group-hover:text-amber-400 transition-colors tabular-nums">
-                                                  0{sNum}
-                                                </span>
-                                              </div>
-                                              <span className="mt-1 text-[10px] font-mono tabular-nums text-stone-400 dark:text-stone-500">
+                                            <div className="w-7 shrink-0 pt-0.5 flex items-center">
+                                              <span className="font-serif-luxury text-lg font-bold leading-none text-stone-800 dark:text-stone-200 group-hover:text-stone-950 dark:group-hover:text-white transition-colors tabular-nums">
                                                 S{sNum}
                                               </span>
                                             </div>
 
                                             <div className="min-w-0 flex-1 space-y-1">
-                                              <div className="flex items-center gap-1.5">
-                                                <h4 className="text-[14.5px] font-bold text-stone-900 dark:text-stone-100 group-hover:text-amber-700 dark:group-hover:text-amber-400 transition-colors leading-snug">
-                                                  {meta.titleZh}
-                                                </h4>
-                                                <ChevronDown
-                                                  className={`w-3.5 h-3.5 text-stone-400 shrink-0 transition-transform duration-200 ${
-                                                    isExpanded ? 'rotate-180 text-amber-700 dark:text-amber-400' : ''
-                                                  }`}
-                                                />
-                                              </div>
+                                              <h4 className="text-[14.5px] font-bold text-stone-900 dark:text-stone-100 group-hover:text-stone-950 dark:group-hover:text-white transition-colors leading-snug">
+                                                {meta.titleZh}
+                                              </h4>
                                               <p className="font-serif-luxury italic text-xs text-stone-500 dark:text-stone-400 truncate">
                                                 {meta.titleEn}
                                               </p>
-                                              <div className="flex items-center gap-1.5 text-[11px] text-stone-400 dark:text-stone-500 flex-wrap pt-0.5">
-                                                <span className={`font-medium ${disc.accentTextClass}`}>
-                                                  {meta.categoryZh || ls.scenario}
+                                              <div className="flex items-center gap-1.5 text-[11px] text-stone-400 dark:text-stone-500 whitespace-nowrap pt-0.5 min-w-0">
+                                                <span className={`font-medium truncate min-w-0 ${disc.accentTextClass}`}>
+                                                  {(meta.categoryZh || ls.scenario || '').replace(/^Part\s*\d+\s*[·•\-]\s*/i, '')}
                                                 </span>
-                                                {cleanQTypes && (
-                                                  <>
-                                                    <span aria-hidden="true">·</span>
-                                                    <span className="text-stone-600 dark:text-stone-300">
-                                                      {cleanQTypes}
-                                                    </span>
-                                                  </>
-                                                )}
-                                                <span aria-hidden="true">·</span>
-                                                <span className="font-mono tabular-nums">{ls.difficulty}</span>
                                               </div>
                                             </div>
 
-                                            <div
-                                              className="shrink-0 self-center pl-1"
+                                            <button
+                                              type="button"
+                                              aria-label={isSaved ? `移出馆藏：${meta.titleZh}` : `收录入库：${meta.titleZh}`}
+                                              title={isSaved ? '已收录，点击移出' : '收录本节'}
+                                              className={`shrink-0 self-center w-7 h-7 rounded-full inline-flex items-center justify-center transition-all cursor-pointer active:scale-90 ${
+                                                isSaved
+                                                  ? 'bg-[#2D5A40] border border-[#2D5A40] text-white dark:bg-[#78B894] dark:border-[#78B894] dark:text-stone-950'
+                                                  : 'border border-stone-900/[0.14] dark:border-white/[0.16] text-stone-400 dark:text-stone-500 hover:border-stone-900/40 dark:hover:border-white/40 hover:text-stone-900 dark:hover:text-white hover:bg-stone-900/[0.03] dark:hover:bg-white/[0.05]'
+                                              }`}
                                               onClick={(e) => {
                                                 e.stopPropagation();
                                                 if (!fullSection) return;
@@ -1517,26 +1482,12 @@ export const OnlineIELTSSearchModal: React.FC<OnlineIELTSSearchModalProps> = ({
                                                 }
                                               }}
                                             >
-                                              <span
-                                                className={`inline-flex items-center gap-1 px-2.5 py-1 rounded-lg text-[11px] font-medium transition-all ${
-                                                  isSaved
-                                                    ? 'bg-[#516050]/14 text-[#516050] dark:text-[#8FB996]'
-                                                    : 'text-stone-600 dark:text-stone-300 bg-stone-900/[0.04] dark:bg-white/[0.06] hover:bg-[#516050]/[0.12] hover:text-[#516050] dark:hover:text-[#8FB996]'
-                                                }`}
-                                              >
-                                                {isSaved ? (
-                                                  <>
-                                                    <Check className="w-3 h-3" />
-                                                    <span>已收录</span>
-                                                  </>
-                                                ) : (
-                                                  <>
-                                                    <Plus className="w-3 h-3" />
-                                                    <span>入库</span>
-                                                  </>
-                                                )}
-                                              </span>
-                                            </div>
+                                              {isSaved ? (
+                                                <Check className="w-3.5 h-3.5 stroke-[2.3]" />
+                                              ) : (
+                                                <Plus className="w-3.5 h-3.5 stroke-[1.85]" />
+                                              )}
+                                            </button>
                                           </article>
 
                                           {/* Expandable Listening Recall Brief */}
@@ -1549,7 +1500,13 @@ export const OnlineIELTSSearchModal: React.FC<OnlineIELTSSearchModalProps> = ({
                                                 transition={{ duration: 0.16 }}
                                                 className="overflow-hidden"
                                               >
-                                                <div className="mt-2.5 ml-12 p-3 rounded-2xl bg-[#FAF7F2] dark:bg-white/[0.03] border border-stone-900/[0.06] dark:border-white/[0.06] space-y-2">
+                                                <div className="mt-2.5 ml-10 p-3 rounded-2xl bg-[#FAF7F2] dark:bg-white/[0.03] border border-stone-900/[0.06] dark:border-white/[0.06] space-y-2">
+                                                  {cleanQTypes && (
+                                                    <div className="text-[11px] text-stone-500 dark:text-stone-400">
+                                                      <span className="font-medium text-stone-700 dark:text-stone-300">题型：</span>
+                                                      {cleanQTypes}
+                                                    </div>
+                                                  )}
                                                   <p className="text-xs text-stone-600 dark:text-stone-300 leading-relaxed">
                                                     <span className="font-semibold text-stone-800 dark:text-stone-200">
                                                       场景与考点回忆：
@@ -1576,7 +1533,7 @@ export const OnlineIELTSSearchModal: React.FC<OnlineIELTSSearchModalProps> = ({
                                                       <button
                                                         type="button"
                                                         onClick={() => handleLaunchListening(fullSection)}
-                                                        className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg text-[11px] font-medium bg-[#516050] text-white hover:bg-[#3F4C3E] transition-colors cursor-pointer"
+                                                        className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg text-[11px] font-medium bg-stone-900 hover:bg-stone-800 dark:bg-stone-100 dark:hover:bg-white text-white dark:text-stone-950 transition-colors cursor-pointer"
                                                       >
                                                         <span>立即精听本节</span>
                                                         <ArrowRight className="w-3 h-3" />
@@ -1633,7 +1590,7 @@ export const OnlineIELTSSearchModal: React.FC<OnlineIELTSSearchModalProps> = ({
                     </div>
 
                     {/* Search Input Bar */}
-                    <div className="flex items-center gap-2 rounded-2xl bg-[#FAF7F2] dark:bg-stone-900 border border-stone-900/10 dark:border-white/12 px-3.5 py-2 focus-within:border-[#516050]/40 transition-colors">
+                    <div className="flex items-center gap-2 rounded-2xl bg-[#FAF7F2] dark:bg-stone-900 border border-stone-900/10 dark:border-white/12 px-3.5 py-2 focus-within:border-stone-900/35 dark:focus-within:border-white/30 transition-colors">
                       <Search className="w-4 h-4 text-stone-400 shrink-0" />
                       <input
                         id="online-volume-query-input"
@@ -1641,8 +1598,8 @@ export const OnlineIELTSSearchModal: React.FC<OnlineIELTSSearchModalProps> = ({
                         value={webQuery}
                         onChange={(e) => setWebQuery(e.target.value)}
                         onKeyDown={(e) => e.key === 'Enter' && handleSearchAndCompile()}
-                        placeholder="如：2026考场回忆、2026换题季真题、深海生物与医学创新..."
-                        className="flex-1 bg-transparent text-xs text-stone-900 dark:text-white placeholder:text-stone-400 focus:outline-none"
+                        placeholder="搜索考季、学科或专题关键词"
+                        className="flex-1 min-w-0 bg-transparent text-xs text-stone-900 dark:text-white placeholder:text-stone-400 focus:outline-none"
                       />
                       {webQuery && (
                         <button
@@ -1657,7 +1614,7 @@ export const OnlineIELTSSearchModal: React.FC<OnlineIELTSSearchModalProps> = ({
                         id="submit-volume-compile-btn"
                         disabled={isSearchingWeb || !webQuery.trim()}
                         onClick={() => handleSearchAndCompile()}
-                        className="shrink-0 inline-flex items-center gap-1 px-3 py-1.5 rounded-xl bg-[#516050] text-white text-[11px] font-medium hover:bg-[#3F4C3E] disabled:opacity-40 cursor-pointer transition-colors"
+                        className="shrink-0 inline-flex items-center gap-1 px-3 py-1.5 rounded-xl bg-stone-900 hover:bg-stone-800 dark:bg-stone-100 dark:hover:bg-white text-white dark:text-stone-950 text-[11px] font-medium disabled:opacity-40 cursor-pointer transition-colors"
                       >
                         {isSearchingWeb ? (
                           <Loader2 className="w-3.5 h-3.5 animate-spin" />
@@ -1678,7 +1635,7 @@ export const OnlineIELTSSearchModal: React.FC<OnlineIELTSSearchModalProps> = ({
                           key={t}
                           type="button"
                           onClick={() => handleSearchAndCompile(t)}
-                          className="px-2.5 py-1 rounded-lg bg-stone-900/[0.04] dark:bg-white/[0.06] text-stone-600 dark:text-stone-300 hover:bg-[#516050]/[0.1] hover:text-[#516050] dark:hover:text-[#8FB996] transition-colors cursor-pointer"
+                          className="px-2.5 py-1 rounded-lg bg-stone-900/[0.04] dark:bg-white/[0.06] text-stone-600 dark:text-stone-300 hover:bg-stone-900/[0.09] hover:text-stone-950 dark:hover:bg-white/[0.12] dark:hover:text-white transition-colors cursor-pointer"
                         >
                           {t}
                         </button>
@@ -1693,7 +1650,7 @@ export const OnlineIELTSSearchModal: React.FC<OnlineIELTSSearchModalProps> = ({
                   {/* Loading State */}
                   {isSearchingWeb && (
                     <div className="rounded-[24px] bg-[#FDFBF7] dark:bg-stone-900/50 border border-stone-900/[0.07] dark:border-white/[0.08] py-14 px-6 flex flex-col items-center justify-center space-y-2.5 text-center shadow-[0_8px_24px_-12px_rgba(28,25,23,0.05)]">
-                      <Loader2 className="w-5 h-5 animate-spin text-[#516050] dark:text-[#8FB996]" />
+                      <Loader2 className="w-5 h-5 animate-spin text-stone-700 dark:text-stone-200" />
                       <p className="text-sm font-serif-luxury font-bold text-stone-800 dark:text-stone-200">
                         正在检索并整理《{webQuery}》可入库清单...
                       </p>
@@ -1753,16 +1710,18 @@ export const OnlineIELTSSearchModal: React.FC<OnlineIELTSSearchModalProps> = ({
                   {/* Default State: Curated Specialized Dossiers */}
                   {!isSearchingWeb && !searchNotFound && !compiledVolume && (
                     <div className="rounded-[24px] bg-[#FDFBF7] dark:bg-stone-900/50 border border-stone-900/[0.07] dark:border-white/[0.08] p-5 shadow-[0_8px_24px_-12px_rgba(28,25,23,0.05)] space-y-2">
-                      <div className="flex items-baseline justify-between gap-2 pb-2.5 border-b border-stone-900/[0.08] dark:border-white/[0.08]">
-                        <div className="flex items-baseline gap-2">
-                          <span className="font-serif-luxury text-base font-bold text-stone-900 dark:text-white">
+                      <div className="pb-2.5 border-b border-stone-900/[0.08] dark:border-white/[0.08] space-y-1">
+                        <div className="flex items-center justify-between gap-2">
+                          <span className="font-serif-luxury text-base font-bold text-stone-900 dark:text-white whitespace-nowrap">
                             专题合订卷快速淘题
                           </span>
-                          <span className="text-[11px] text-stone-400">
-                            点击展开篇目并勾选入库
+                          <span className="text-[11px] font-mono tabular-nums text-stone-400 shrink-0 whitespace-nowrap">
+                            4 套合集
                           </span>
                         </div>
-                        <span className="text-[11px] font-mono text-stone-400">04 Anthologies</span>
+                        <p className="text-[11px] text-stone-400">
+                          点击展开篇目并勾选入库
+                        </p>
                       </div>
 
                       <div className="divide-y divide-stone-900/[0.06] dark:divide-white/[0.06]">
@@ -1805,26 +1764,23 @@ export const OnlineIELTSSearchModal: React.FC<OnlineIELTSSearchModalProps> = ({
                             onClick={() => handleSearchAndCompile(item.query)}
                             className="group py-3.5 first:pt-2 last:pb-0 transition-colors cursor-pointer flex items-start gap-3"
                           >
-                            <div className="w-9 shrink-0 pt-0.5 flex flex-col items-start">
-                              <div className="flex items-center gap-1.5">
-                                <span className={`w-1.5 h-1.5 rounded-full ${item.disc.badgeDotClass}`} />
-                                <span className="font-serif-luxury text-lg font-bold leading-none text-stone-800 dark:text-stone-200 group-hover:text-[#516050] dark:group-hover:text-[#8FB996] transition-colors tabular-nums">
-                                  {item.num}
-                                </span>
-                              </div>
+                            <div className="w-8 shrink-0 pt-0.5 flex flex-col items-start">
+                              <span className="font-serif-luxury text-lg font-bold leading-none text-stone-800 dark:text-stone-200 group-hover:text-stone-950 dark:group-hover:text-white transition-colors tabular-nums">
+                                {item.num}
+                              </span>
                             </div>
                             <div className="min-w-0 flex-1 space-y-0.5">
-                              <h4 className="text-[14.5px] font-bold text-stone-900 dark:text-stone-100 group-hover:text-[#516050] dark:group-hover:text-[#8FB996] transition-colors">
+                              <h4 className="text-[14.5px] font-bold text-stone-900 dark:text-stone-100 group-hover:text-stone-950 dark:group-hover:text-white transition-colors">
                                 {item.titleZh}
                               </h4>
                               <p className="font-serif-luxury italic text-xs text-stone-500 dark:text-stone-400 truncate">
                                 {item.titleEn}
                               </p>
-                              <div className="pt-0.5 text-[11px] text-stone-400">
-                                <span className={`font-medium ${item.disc.accentTextClass}`}>{item.tag}</span>
+                              <div className="pt-0.5 text-[11px] text-stone-500 dark:text-stone-400">
+                                <span className="font-medium">{item.tag}</span>
                               </div>
                             </div>
-                            <div className="shrink-0 self-center flex items-center gap-1 text-[11px] font-medium text-[#516050] dark:text-[#8FB996]">
+                            <div className="shrink-0 self-center flex items-center gap-1 text-[11px] font-medium text-stone-600 dark:text-stone-300 group-hover:text-stone-950 dark:group-hover:text-white transition-colors">
                               <span>展开</span>
                               <ArrowRight className="w-3.5 h-3.5 group-hover:translate-x-0.5 transition-transform" />
                             </div>
@@ -1905,24 +1861,22 @@ export const OnlineIELTSSearchModal: React.FC<OnlineIELTSSearchModalProps> = ({
                                 }
                               }}
                               disabled={importingVolumeId === compiledVolume.id}
-                              className={`shrink-0 inline-flex items-center gap-1 px-2.5 py-1 rounded-xl text-[11px] font-medium transition-colors cursor-pointer whitespace-nowrap ${
+                              className={`shrink-0 inline-flex items-center gap-1 py-1 px-1.5 -mr-1.5 rounded-md text-[11.5px] font-medium transition-colors cursor-pointer whitespace-nowrap ${
                                 isEntireCompiledSaved
-                                  ? 'bg-[#516050]/15 text-[#516050] dark:text-[#8FB996]'
-                                  : 'bg-[#516050]/[0.09] hover:bg-[#516050]/[0.16] text-[#516050] dark:bg-[#8FB996]/[0.12] dark:text-[#8FB996]'
+                                  ? 'text-[#2D5A40] dark:text-[#78B894] hover:bg-[#2D5A40]/[0.06] dark:hover:bg-[#78B894]/10'
+                                  : 'text-stone-500 hover:text-stone-950 dark:text-stone-400 dark:hover:text-white hover:bg-stone-900/[0.04] dark:hover:bg-white/[0.06]'
                               }`}
                             >
                               {isEntireCompiledSaved ? (
                                 <>
-                                  <Check className="w-3 h-3" />
-                                  <span>本套已全收</span>
+                                  <Check className="w-3.5 h-3.5 stroke-[2.2]" />
+                                  <span>已全收</span>
                                 </>
                               ) : (
                                 <>
-                                  <Plus className="w-3 h-3" />
+                                  <Plus className="w-3.5 h-3.5 stroke-[1.8]" />
                                   <span>
-                                    {importingVolumeId === compiledVolume.id
-                                      ? '正在入库...'
-                                      : `整套入库 (${skillFilter === 'reading' ? readingList.length - savedReadingCount : listeningList.length - savedListeningCount})`}
+                                    {importingVolumeId === compiledVolume.id ? '正在入库...' : '整套入库'}
                                   </span>
                                 </>
                               )}
@@ -1948,50 +1902,42 @@ export const OnlineIELTSSearchModal: React.FC<OnlineIELTSSearchModalProps> = ({
                               const disc = resolveDiscipline(meta.categoryZh, passage.title);
 
                               return (
-                                <div key={passage.id || pIdx} className="py-3 first:pt-1 last:pb-0">
+                                <div key={passage.id || pIdx} className="py-3.5 first:pt-1.5 last:pb-0">
                                   <article
                                     onClick={() =>
                                       setExpandedPreviewId(isExpanded ? null : previewKey)
                                     }
                                     className="group transition-colors cursor-pointer flex items-start gap-3"
                                   >
-                                    <div className="w-9 shrink-0 pt-0.5 flex flex-col items-start">
-                                      <div className="flex items-center gap-1.5">
-                                        <span className={`w-1.5 h-1.5 rounded-full ${disc.badgeDotClass}`} />
-                                        <span className="font-serif-luxury text-lg font-bold leading-none text-stone-800 dark:text-stone-200 group-hover:text-[#516050] dark:group-hover:text-[#8FB996] transition-colors tabular-nums">
-                                          0{pNum}
-                                        </span>
-                                      </div>
-                                      <span className="mt-1 text-[10px] font-mono tabular-nums text-stone-400 dark:text-stone-500">
+                                    <div className="w-7 shrink-0 pt-0.5 flex items-center">
+                                      <span className="font-serif-luxury text-lg font-bold leading-none text-stone-800 dark:text-stone-200 group-hover:text-stone-950 dark:group-hover:text-white transition-colors tabular-nums">
                                         P{pNum}
                                       </span>
                                     </div>
 
                                     <div className="min-w-0 flex-1 space-y-1">
-                                      <div className="flex items-center gap-1.5">
-                                        <h4 className="text-[14.5px] font-bold text-stone-900 dark:text-stone-100 group-hover:text-[#516050] dark:group-hover:text-[#8FB996] transition-colors leading-snug">
-                                          {meta.titleZh}
-                                        </h4>
-                                        <ChevronDown
-                                          className={`w-3.5 h-3.5 text-stone-400 shrink-0 transition-transform duration-200 ${
-                                            isExpanded ? 'rotate-180 text-[#516050] dark:text-[#8FB996]' : ''
-                                          }`}
-                                        />
-                                      </div>
+                                      <h4 className="text-[14.5px] font-bold text-stone-900 dark:text-stone-100 group-hover:text-stone-950 dark:group-hover:text-white transition-colors leading-snug">
+                                        {meta.titleZh}
+                                      </h4>
                                       <p className="font-serif-luxury italic text-xs text-stone-500 dark:text-stone-400 truncate">
                                         {meta.titleEn}
                                       </p>
-                                      <div className="flex items-center gap-1.5 text-[11px] text-stone-400 dark:text-stone-500 flex-wrap pt-0.5">
-                                        <span className={`font-medium ${disc.accentTextClass}`}>
+                                      <div className="flex items-center gap-1.5 text-[11px] text-stone-400 dark:text-stone-500 whitespace-nowrap pt-0.5 min-w-0">
+                                        <span className={`font-medium truncate min-w-0 ${disc.accentTextClass}`}>
                                           {disc.shortZh}
                                         </span>
-                                        <span aria-hidden="true">·</span>
-                                        <span className="font-mono tabular-nums">{passage.bandDifficulty || 'Band 7.0+'}</span>
                                       </div>
                                     </div>
 
-                                    <div
-                                      className="shrink-0 self-center pl-1"
+                                    <button
+                                      type="button"
+                                      aria-label={isSaved ? `移出馆藏：${meta.titleZh}` : `收录入库：${meta.titleZh}`}
+                                      title={isSaved ? '已收录，点击移出' : '收录本篇'}
+                                      className={`shrink-0 self-center w-7 h-7 rounded-full inline-flex items-center justify-center transition-all cursor-pointer active:scale-90 ${
+                                        isSaved
+                                          ? 'bg-[#2D5A40] border border-[#2D5A40] text-white dark:bg-[#78B894] dark:border-[#78B894] dark:text-stone-950'
+                                          : 'border border-stone-900/[0.14] dark:border-white/[0.16] text-stone-400 dark:text-stone-500 hover:border-stone-900/40 dark:hover:border-white/40 hover:text-stone-900 dark:hover:text-white hover:bg-stone-900/[0.03] dark:hover:bg-white/[0.05]'
+                                      }`}
                                       onClick={(e) => {
                                         e.stopPropagation();
                                         if (isSaved) {
@@ -2001,26 +1947,12 @@ export const OnlineIELTSSearchModal: React.FC<OnlineIELTSSearchModalProps> = ({
                                         }
                                       }}
                                     >
-                                      <span
-                                        className={`inline-flex items-center gap-1 px-2.5 py-1 rounded-lg text-[11px] font-medium transition-all ${
-                                          isSaved
-                                            ? 'bg-[#516050]/14 text-[#516050] dark:text-[#8FB996]'
-                                            : 'text-stone-600 dark:text-stone-300 bg-stone-900/[0.04] dark:bg-white/[0.06] hover:bg-[#516050]/[0.12] hover:text-[#516050] dark:hover:text-[#8FB996]'
-                                        }`}
-                                      >
-                                        {isSaved ? (
-                                          <>
-                                            <Check className="w-3 h-3" />
-                                            <span>已收录</span>
-                                          </>
-                                        ) : (
-                                          <>
-                                            <Plus className="w-3 h-3" />
-                                            <span>入库</span>
-                                          </>
-                                        )}
-                                      </span>
-                                    </div>
+                                      {isSaved ? (
+                                        <Check className="w-3.5 h-3.5 stroke-[2.3]" />
+                                      ) : (
+                                        <Plus className="w-3.5 h-3.5 stroke-[1.85]" />
+                                      )}
+                                    </button>
                                   </article>
 
                                   <AnimatePresence initial={false}>
@@ -2032,7 +1964,7 @@ export const OnlineIELTSSearchModal: React.FC<OnlineIELTSSearchModalProps> = ({
                                         transition={{ duration: 0.16 }}
                                         className="overflow-hidden"
                                       >
-                                        <div className="mt-2.5 ml-12 p-3 rounded-2xl bg-[#FAF7F2] dark:bg-white/[0.03] border border-stone-900/[0.06] dark:border-white/[0.06] space-y-2">
+                                        <div className="mt-2.5 ml-10 p-3 rounded-2xl bg-[#FAF7F2] dark:bg-white/[0.03] border border-stone-900/[0.06] dark:border-white/[0.06] space-y-2">
                                           <p className="text-xs text-stone-600 dark:text-stone-300 leading-relaxed">
                                             <span className="font-semibold text-stone-800 dark:text-stone-200">
                                               篇目提要：
@@ -2058,7 +1990,7 @@ export const OnlineIELTSSearchModal: React.FC<OnlineIELTSSearchModalProps> = ({
                                             <button
                                               type="button"
                                               onClick={() => handleLaunchReading(passage, false)}
-                                              className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg text-[11px] font-medium bg-[#516050] text-white hover:bg-[#3F4C3E] transition-colors cursor-pointer"
+                                              className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg text-[11px] font-medium bg-stone-900 hover:bg-stone-800 dark:bg-stone-100 dark:hover:bg-white text-white dark:text-stone-950 transition-colors cursor-pointer"
                                             >
                                               <span>立即试做本篇</span>
                                               <ArrowRight className="w-3 h-3" />
@@ -2083,50 +2015,42 @@ export const OnlineIELTSSearchModal: React.FC<OnlineIELTSSearchModalProps> = ({
                               const disc = resolveDiscipline(meta.categoryZh, section.title);
 
                               return (
-                                <div key={section.id || sIdx} className="py-3 first:pt-1 last:pb-0">
+                                <div key={section.id || sIdx} className="py-3.5 first:pt-1.5 last:pb-0">
                                   <article
                                     onClick={() =>
                                       setExpandedPreviewId(isExpanded ? null : previewKey)
                                     }
                                     className="group transition-colors cursor-pointer flex items-start gap-3"
                                   >
-                                    <div className="w-9 shrink-0 pt-0.5 flex flex-col items-start">
-                                      <div className="flex items-center gap-1.5">
-                                        <span className={`w-1.5 h-1.5 rounded-full ${disc.badgeDotClass}`} />
-                                        <span className="font-serif-luxury text-lg font-bold leading-none text-stone-800 dark:text-stone-200 group-hover:text-amber-700 dark:group-hover:text-amber-400 transition-colors tabular-nums">
-                                          0{sNum}
-                                        </span>
-                                      </div>
-                                      <span className="mt-1 text-[10px] font-mono tabular-nums text-stone-400 dark:text-stone-500">
+                                    <div className="w-7 shrink-0 pt-0.5 flex items-center">
+                                      <span className="font-serif-luxury text-lg font-bold leading-none text-stone-800 dark:text-stone-200 group-hover:text-stone-950 dark:group-hover:text-white transition-colors tabular-nums">
                                         S{sNum}
                                       </span>
                                     </div>
 
                                     <div className="min-w-0 flex-1 space-y-1">
-                                      <div className="flex items-center gap-1.5">
-                                        <h4 className="text-[14.5px] font-bold text-stone-900 dark:text-stone-100 group-hover:text-amber-700 dark:group-hover:text-amber-400 transition-colors leading-snug">
-                                          {meta.titleZh}
-                                        </h4>
-                                        <ChevronDown
-                                          className={`w-3.5 h-3.5 text-stone-400 shrink-0 transition-transform duration-200 ${
-                                            isExpanded ? 'rotate-180 text-amber-700 dark:text-amber-400' : ''
-                                          }`}
-                                        />
-                                      </div>
+                                      <h4 className="text-[14.5px] font-bold text-stone-900 dark:text-stone-100 group-hover:text-stone-950 dark:group-hover:text-white transition-colors leading-snug">
+                                        {meta.titleZh}
+                                      </h4>
                                       <p className="font-serif-luxury italic text-xs text-stone-500 dark:text-stone-400 truncate">
                                         {meta.titleEn}
                                       </p>
-                                      <div className="flex items-center gap-1.5 text-[11px] text-stone-400 dark:text-stone-500 flex-wrap pt-0.5">
-                                        <span className={`font-medium ${disc.accentTextClass}`}>
-                                          {meta.categoryZh}
+                                      <div className="flex items-center gap-1.5 text-[11px] text-stone-400 dark:text-stone-500 whitespace-nowrap pt-0.5 min-w-0">
+                                        <span className={`font-medium truncate min-w-0 ${disc.accentTextClass}`}>
+                                          {(meta.categoryZh || '').replace(/^Part\s*\d+\s*[·•\-]\s*/i, '')}
                                         </span>
-                                        <span aria-hidden="true">·</span>
-                                        <span className="font-mono tabular-nums">Part {sNum}</span>
                                       </div>
                                     </div>
 
-                                    <div
-                                      className="shrink-0 self-center pl-1"
+                                    <button
+                                      type="button"
+                                      aria-label={isSaved ? `移出馆藏：${meta.titleZh}` : `收录入库：${meta.titleZh}`}
+                                      title={isSaved ? '已收录，点击移出' : '收录本节'}
+                                      className={`shrink-0 self-center w-7 h-7 rounded-full inline-flex items-center justify-center transition-all cursor-pointer active:scale-90 ${
+                                        isSaved
+                                          ? 'bg-[#2D5A40] border border-[#2D5A40] text-white dark:bg-[#78B894] dark:border-[#78B894] dark:text-stone-950'
+                                          : 'border border-stone-900/[0.14] dark:border-white/[0.16] text-stone-400 dark:text-stone-500 hover:border-stone-900/40 dark:hover:border-white/40 hover:text-stone-900 dark:hover:text-white hover:bg-stone-900/[0.03] dark:hover:bg-white/[0.05]'
+                                      }`}
                                       onClick={(e) => {
                                         e.stopPropagation();
                                         if (isSaved) {
@@ -2136,26 +2060,12 @@ export const OnlineIELTSSearchModal: React.FC<OnlineIELTSSearchModalProps> = ({
                                         }
                                       }}
                                     >
-                                      <span
-                                        className={`inline-flex items-center gap-1 px-2.5 py-1 rounded-lg text-[11px] font-medium transition-all ${
-                                          isSaved
-                                            ? 'bg-[#516050]/14 text-[#516050] dark:text-[#8FB996]'
-                                            : 'text-stone-600 dark:text-stone-300 bg-stone-900/[0.04] dark:bg-white/[0.06] hover:bg-[#516050]/[0.12] hover:text-[#516050] dark:hover:text-[#8FB996]'
-                                        }`}
-                                      >
-                                        {isSaved ? (
-                                          <>
-                                            <Check className="w-3 h-3" />
-                                            <span>已收录</span>
-                                          </>
-                                        ) : (
-                                          <>
-                                            <Plus className="w-3 h-3" />
-                                            <span>入库</span>
-                                          </>
-                                        )}
-                                      </span>
-                                    </div>
+                                      {isSaved ? (
+                                        <Check className="w-3.5 h-3.5 stroke-[2.3]" />
+                                      ) : (
+                                        <Plus className="w-3.5 h-3.5 stroke-[1.85]" />
+                                      )}
+                                    </button>
                                   </article>
 
                                   <AnimatePresence initial={false}>
@@ -2167,7 +2077,7 @@ export const OnlineIELTSSearchModal: React.FC<OnlineIELTSSearchModalProps> = ({
                                         transition={{ duration: 0.16 }}
                                         className="overflow-hidden"
                                       >
-                                        <div className="mt-2.5 ml-12 p-3 rounded-2xl bg-[#FAF7F2] dark:bg-white/[0.03] border border-stone-900/[0.06] dark:border-white/[0.06] space-y-2">
+                                        <div className="mt-2.5 ml-10 p-3 rounded-2xl bg-[#FAF7F2] dark:bg-white/[0.03] border border-stone-900/[0.06] dark:border-white/[0.06] space-y-2">
                                           <p className="text-xs text-stone-600 dark:text-stone-300 leading-relaxed">
                                             <span className="font-semibold text-stone-800 dark:text-stone-200">
                                               场景提要：
@@ -2178,7 +2088,7 @@ export const OnlineIELTSSearchModal: React.FC<OnlineIELTSSearchModalProps> = ({
                                             <button
                                               type="button"
                                               onClick={() => handleLaunchListening(section)}
-                                              className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg text-[11px] font-medium bg-[#516050] text-white hover:bg-[#3F4C3E] transition-colors cursor-pointer"
+                                              className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg text-[11px] font-medium bg-stone-900 hover:bg-stone-800 dark:bg-stone-100 dark:hover:bg-white text-white dark:text-stone-950 transition-colors cursor-pointer"
                                             >
                                               <span>立即精听本节</span>
                                               <ArrowRight className="w-3 h-3" />
@@ -2357,7 +2267,7 @@ export const OnlineIELTSSearchModal: React.FC<OnlineIELTSSearchModalProps> = ({
                       <button
                         type="button"
                         onClick={() => setActiveTab('live-feed')}
-                        className="shrink-0 h-7 px-2.5 rounded-xl text-xs font-medium bg-[#516050]/[0.09] hover:bg-[#516050]/[0.16] text-[#516050] dark:bg-[#8FB996]/[0.12] dark:text-[#8FB996] transition-colors cursor-pointer"
+                        className="shrink-0 h-7 px-2.5 rounded-xl text-xs font-medium bg-stone-900/[0.06] hover:bg-stone-900/[0.11] text-stone-800 dark:bg-white/[0.08] dark:hover:bg-white/[0.14] dark:text-stone-200 transition-colors cursor-pointer"
                       >
                         + 继续淘题
                       </button>
@@ -2376,7 +2286,7 @@ export const OnlineIELTSSearchModal: React.FC<OnlineIELTSSearchModalProps> = ({
                           <button
                             type="button"
                             onClick={() => setActiveTab('live-feed')}
-                            className="inline-flex items-center gap-1.5 px-3.5 py-1.5 rounded-xl bg-[#516050]/[0.1] hover:bg-[#516050]/[0.16] text-[#516050] dark:text-[#8FB996] text-xs font-semibold transition-colors cursor-pointer"
+                            className="inline-flex items-center gap-1.5 px-3.5 py-1.5 rounded-xl bg-stone-900 hover:bg-stone-800 dark:bg-stone-100 dark:hover:bg-white text-white dark:text-stone-950 text-xs font-semibold transition-colors cursor-pointer"
                           >
                             <span>前往考季机经淘题</span>
                             <ArrowRight className="w-3.5 h-3.5" />
@@ -2391,7 +2301,7 @@ export const OnlineIELTSSearchModal: React.FC<OnlineIELTSSearchModalProps> = ({
                               setLibraryDisciplineFilter('ALL');
                               setFeedSearchQuery('');
                             }}
-                            className="text-xs font-medium text-[#516050] dark:text-[#8FB996] cursor-pointer"
+                            className="text-xs font-medium text-stone-800 dark:text-stone-200 underline underline-offset-4 cursor-pointer"
                           >
                             重置筛选
                           </button>
@@ -2439,35 +2349,23 @@ export const OnlineIELTSSearchModal: React.FC<OnlineIELTSSearchModalProps> = ({
                                       onClick={() => handleLaunchReading(p)}
                                       className="group py-3 first:pt-1 last:pb-0 transition-colors cursor-pointer flex items-start gap-3"
                                     >
-                                      <div className="w-9 shrink-0 pt-0.5 flex flex-col items-start">
-                                        <div className="flex items-center gap-1.5">
-                                          <span className={`w-1.5 h-1.5 rounded-full ${disc.badgeDotClass}`} />
-                                          <span className="font-serif-luxury text-lg font-bold leading-none text-stone-800 dark:text-stone-200 group-hover:text-[#516050] dark:group-hover:text-[#8FB996] transition-colors tabular-nums">
-                                            {numStr}
-                                          </span>
-                                        </div>
-                                        <span className="mt-1 text-[10px] font-mono tabular-nums text-stone-400 dark:text-stone-500">
+                                      <div className="w-7 shrink-0 pt-0.5 flex items-center">
+                                        <span className="font-serif-luxury text-lg font-bold leading-none text-stone-800 dark:text-stone-200 group-hover:text-stone-950 dark:group-hover:text-white transition-colors tabular-nums">
                                           P{pNum}
                                         </span>
                                       </div>
 
                                       <div className="min-w-0 flex-1 space-y-1">
-                                        <h4 className="text-[14.5px] font-bold text-stone-900 dark:text-stone-100 group-hover:text-[#516050] dark:group-hover:text-[#8FB996] transition-colors leading-snug">
+                                        <h4 className="text-[14.5px] font-bold text-stone-900 dark:text-stone-100 group-hover:text-stone-950 dark:group-hover:text-white transition-colors leading-snug">
                                           {meta.titleZh}
                                         </h4>
                                         <p className="font-serif-luxury italic text-xs text-stone-500 dark:text-stone-400 truncate">
                                           {meta.titleEn}
                                         </p>
-                                        <div className="flex items-center gap-1.5 text-[11px] text-stone-400 dark:text-stone-500 flex-wrap pt-0.5">
-                                          <span className={`font-medium ${disc.accentTextClass}`}>
+                                        <div className="flex items-center gap-1.5 text-[11px] text-stone-400 dark:text-stone-500 whitespace-nowrap pt-0.5 min-w-0">
+                                          <span className={`font-medium truncate min-w-0 ${disc.accentTextClass}`}>
                                             {disc.shortZh}
                                           </span>
-                                          {p.bandDifficulty && (
-                                            <>
-                                              <span aria-hidden="true">·</span>
-                                              <span className="font-mono tabular-nums">{p.bandDifficulty}</span>
-                                            </>
-                                          )}
                                         </div>
                                       </div>
 
@@ -2483,7 +2381,7 @@ export const OnlineIELTSSearchModal: React.FC<OnlineIELTSSearchModalProps> = ({
                                         <button
                                           type="button"
                                           onClick={() => handleLaunchReading(p)}
-                                          className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg text-[11px] font-medium bg-[#516050]/[0.09] hover:bg-[#516050]/[0.16] text-[#516050] dark:bg-[#8FB996]/[0.12] dark:text-[#8FB996] transition-colors cursor-pointer"
+                                          className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg text-[11px] font-medium bg-stone-900/[0.06] hover:bg-stone-900 text-stone-800 hover:text-white dark:bg-white/[0.08] dark:hover:bg-stone-100 dark:text-stone-200 dark:hover:text-stone-950 transition-colors cursor-pointer"
                                         >
                                           <span>练习</span>
                                           <ArrowRight className="w-3 h-3" />
@@ -2508,7 +2406,7 @@ export const OnlineIELTSSearchModal: React.FC<OnlineIELTSSearchModalProps> = ({
                         <button
                           type="button"
                           onClick={() => setActiveTab('live-feed')}
-                          className="inline-flex items-center gap-1.5 px-3.5 py-1.5 rounded-xl bg-[#516050]/[0.1] hover:bg-[#516050]/[0.16] text-[#516050] dark:text-[#8FB996] text-xs font-semibold transition-colors cursor-pointer"
+                          className="inline-flex items-center gap-1.5 px-3.5 py-1.5 rounded-xl bg-stone-900 hover:bg-stone-800 dark:bg-stone-100 dark:hover:bg-white text-white dark:text-stone-950 text-xs font-semibold transition-colors cursor-pointer"
                         >
                           <span>前往考季机经淘题</span>
                           <ArrowRight className="w-3.5 h-3.5" />
@@ -2546,9 +2444,8 @@ export const OnlineIELTSSearchModal: React.FC<OnlineIELTSSearchModalProps> = ({
                             </div>
 
                             <div className="divide-y divide-stone-900/[0.06] dark:divide-white/[0.06]">
-                              {groupItems.map(({ section: s, meta, disc }, idx) => {
+                              {groupItems.map(({ section: s, meta }, idx) => {
                                 const sNum = s.sectionNum || (idx % 4) + 1;
-                                const numStr = String(sNum).padStart(2, '0');
 
                                 return (
                                   <article
@@ -2556,28 +2453,22 @@ export const OnlineIELTSSearchModal: React.FC<OnlineIELTSSearchModalProps> = ({
                                     onClick={() => handleLaunchListening(s)}
                                     className="group py-3 first:pt-1 last:pb-0 transition-colors cursor-pointer flex items-start gap-3"
                                   >
-                                    <div className="w-9 shrink-0 pt-0.5 flex flex-col items-start">
-                                      <div className="flex items-center gap-1.5">
-                                        <span className={`w-1.5 h-1.5 rounded-full ${disc.badgeDotClass}`} />
-                                        <span className="font-serif-luxury text-lg font-bold leading-none text-stone-800 dark:text-stone-200 group-hover:text-amber-700 dark:group-hover:text-amber-400 transition-colors tabular-nums">
-                                          {numStr}
-                                        </span>
-                                      </div>
-                                      <span className="mt-1 text-[10px] font-mono tabular-nums text-stone-400 dark:text-stone-500">
+                                    <div className="w-7 shrink-0 pt-0.5 flex items-center">
+                                      <span className="font-serif-luxury text-lg font-bold leading-none text-stone-800 dark:text-stone-200 group-hover:text-stone-950 dark:group-hover:text-white transition-colors tabular-nums">
                                         S{sNum}
                                       </span>
                                     </div>
 
                                     <div className="min-w-0 flex-1 space-y-1">
-                                      <h4 className="text-[14.5px] font-bold text-stone-900 dark:text-stone-100 group-hover:text-amber-700 dark:group-hover:text-amber-400 transition-colors leading-snug">
+                                      <h4 className="text-[14.5px] font-bold text-stone-900 dark:text-stone-100 group-hover:text-stone-950 dark:group-hover:text-white transition-colors leading-snug">
                                         {meta.titleZh}
                                       </h4>
                                       <p className="font-serif-luxury italic text-xs text-stone-500 dark:text-stone-400 truncate">
                                         {meta.titleEn}
                                       </p>
-                                      <div className="flex items-center gap-1.5 text-[11px] text-stone-400 dark:text-stone-500 flex-wrap pt-0.5">
-                                        <span className={`font-medium ${disc.accentTextClass}`}>
-                                          {meta.categoryZh}
+                                      <div className="flex items-center gap-1.5 text-[11px] text-stone-400 dark:text-stone-500 whitespace-nowrap pt-0.5 min-w-0">
+                                        <span className="font-medium text-stone-500 dark:text-stone-400 truncate min-w-0">
+                                          {(meta.categoryZh || '').replace(/^Part\s*\d+\s*[·•\-]\s*/i, '')}
                                         </span>
                                       </div>
                                     </div>
@@ -2594,7 +2485,7 @@ export const OnlineIELTSSearchModal: React.FC<OnlineIELTSSearchModalProps> = ({
                                       <button
                                         type="button"
                                         onClick={() => handleLaunchListening(s)}
-                                        className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg text-[11px] font-medium bg-[#516050]/[0.09] hover:bg-[#516050]/[0.16] text-[#516050] dark:bg-[#8FB996]/[0.12] dark:text-[#8FB996] transition-colors cursor-pointer"
+                                        className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg text-[11px] font-medium bg-stone-900/[0.06] hover:bg-stone-900 text-stone-800 hover:text-white dark:bg-white/[0.08] dark:hover:bg-stone-100 dark:text-stone-200 dark:hover:text-stone-950 transition-colors cursor-pointer"
                                       >
                                         <span>练习</span>
                                         <ArrowRight className="w-3.5 h-3.5" />
@@ -2613,7 +2504,7 @@ export const OnlineIELTSSearchModal: React.FC<OnlineIELTSSearchModalProps> = ({
               );
             })()}
 
-            {/* Persistent Bottom Collection Sync Bar (底部馆藏同步汇总栏 — 点击左侧亦可直接查看馆藏) */}
+            {/* Persistent Bottom Collection Sync Bar */}
             <div className="shrink-0 bg-[#FAF7F2]/95 dark:bg-stone-900/95 backdrop-blur-md border-t border-stone-900/[0.07] dark:border-white/[0.08] px-5 pt-3 pb-[max(0.75rem,calc(env(safe-area-inset-bottom,0px)+0.75rem))]">
               <div className="max-w-2xl mx-auto flex items-center justify-between gap-2">
                 <button
@@ -2622,23 +2513,32 @@ export const OnlineIELTSSearchModal: React.FC<OnlineIELTSSearchModalProps> = ({
                   className="flex items-center gap-1.5 text-xs text-stone-500 dark:text-stone-400 hover:text-stone-900 dark:hover:text-white whitespace-nowrap min-w-0 cursor-pointer transition-colors"
                   title="点击查看已收录馆藏"
                 >
-                  <span className="w-1.5 h-1.5 rounded-full bg-[#516050] dark:bg-[#8FB996] shrink-0" />
-                  <span className="truncate">
-                    馆藏已收录：
-                    <strong className="font-semibold text-stone-800 dark:text-white mx-0.5">
-                      阅读 {customPassages.length} 篇
-                    </strong>
-                    ·
-                    <strong className="font-semibold text-stone-800 dark:text-white mx-0.5">
-                      听力 {customListening.length} 篇
-                    </strong>
+                  <span
+                    className={`w-1.5 h-1.5 rounded-full shrink-0 ${
+                      customPassages.length + customListening.length > 0
+                        ? 'bg-[#2D5A40] dark:bg-[#78B894]'
+                        : 'bg-stone-400 dark:bg-stone-500'
+                    }`}
+                  />
+                  <span className="truncate tabular-nums">
+                    {customPassages.length + customListening.length === 0 ? (
+                      '馆藏暂未收录'
+                    ) : (
+                      <>
+                        已收录
+                        <strong className="font-semibold text-stone-800 dark:text-white mx-1">
+                          {customPassages.length + customListening.length}
+                        </strong>
+                        篇
+                      </>
+                    )}
                   </span>
                 </button>
 
                 <button
                   type="button"
                   onClick={handleClose}
-                  className="shrink-0 whitespace-nowrap inline-flex items-center gap-1 px-3 py-1.5 rounded-xl bg-[#516050]/[0.1] hover:bg-[#516050]/[0.16] text-[#516050] dark:bg-[#8FB996]/[0.15] dark:text-[#8FB996] text-xs font-semibold transition-colors cursor-pointer"
+                  className="shrink-0 whitespace-nowrap inline-flex items-center gap-1 px-3.5 py-1.5 rounded-xl bg-stone-900 hover:bg-stone-800 dark:bg-stone-100 dark:hover:bg-white text-white dark:text-stone-950 text-xs font-semibold transition-colors cursor-pointer"
                 >
                   <span>完成并返回</span>
                   <ArrowRight className="w-3.5 h-3.5" />

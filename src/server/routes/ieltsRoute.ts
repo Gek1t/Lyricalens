@@ -5,6 +5,15 @@ import { type AuthenticatedRequest, authenticate } from '../auth';
 const router = Router();
 router.use(authenticate);
 
+function safeJsonParse<T>(raw: string | null | undefined, fallback: T): T {
+  if (!raw) return fallback;
+  try {
+    return JSON.parse(raw) as T;
+  } catch {
+    return fallback;
+  }
+}
+
 // GET /api/ielts/tests - Get all test records
 router.get('/tests', async (req: AuthenticatedRequest, res: Response) => {
   try {
@@ -16,8 +25,8 @@ router.get('/tests', async (req: AuthenticatedRequest, res: Response) => {
 
     const parsed = tests.map((t) => ({
       ...sanitizeBigInt(t),
-      questionResults: t.questionResults ? JSON.parse(t.questionResults) : [],
-      rawQuestions: t.rawQuestions ? JSON.parse(t.rawQuestions) : [],
+      questionResults: safeJsonParse(t.questionResults, []),
+      rawQuestions: safeJsonParse(t.rawQuestions, []),
     }));
 
     res.json({ success: true, data: parsed });
@@ -79,7 +88,7 @@ router.get('/custom-passages', async (req: AuthenticatedRequest, res: Response) 
 
     const parsed = passages.map((p) => ({
       ...sanitizeBigInt(p),
-      questions: p.questions ? JSON.parse(p.questions) : [],
+      questions: safeJsonParse(p.questions, []),
     }));
 
     res.json({ success: true, data: parsed });
@@ -156,8 +165,8 @@ router.get('/custom-listening', async (req: AuthenticatedRequest, res: Response)
 
     const parsed = listeningList.map((item) => ({
       ...sanitizeBigInt(item),
-      questions: item.questions ? JSON.parse(item.questions) : [],
-      transcript: item.transcript ? JSON.parse(item.transcript) : null,
+      questions: safeJsonParse(item.questions, []),
+      transcript: safeJsonParse(item.transcript, null),
     }));
 
     res.json({ success: true, data: parsed });

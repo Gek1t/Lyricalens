@@ -11,7 +11,7 @@ import { db, collectWord, cycleWordMastery } from '../../db';
 import { SEED_WORDS } from '../../db/seedData';
 import { WordItem, SongItem, MasteryLevel, AudioQuality, AUDIO_QUALITY_OPTIONS } from '../../types';
 import { analyzeSongVocab } from '../../utils/vocabEngine';
-import { lookupLyricTerm, formatPartOfSpeech } from '../../utils/lyricDictionary';
+import { lookupLyricTerm, formatPartOfSpeech, lookupLocalWordSync } from '../../utils/lyricDictionary';
 import { lookupInIeltsCorpus, estimateIpaPhonetics } from '../../utils/ieltsCorpusDictionary';
 import { resolveSongAudioClient, fetchSongLyricsClient, SupportedMusicPlatform } from '../../utils/clientMusicSync';
 import { TopHeader } from '../TopHeader';
@@ -27,17 +27,18 @@ import {
   Repeat1,
   Shuffle,
   ListMusic,
-  Sparkles,
   Volume2,
-  BookOpen,
-  ArrowUpRight,
-  Quote,
-  Maximize2,
-  Minimize2,
+  Check,
+  ChevronRight,
   X
 } from 'lucide-react';
 
 export type PlayMode = 'list' | 'single' | 'shuffle';
+
+const EMPTY_DB_WORDS: WordItem[] = [];
+const SEED_WORD_MAP = new Map<string, Omit<WordItem, 'id'>>(
+  SEED_WORDS.map(w => [w.word.toLowerCase(), w])
+);
 
 interface MusicPlayerPanelProps {
   onOpenNotebook: () => void;
@@ -106,9 +107,14 @@ export const MusicPlayerPanel: React.FC<MusicPlayerPanelProps> = ({ onOpenNotebo
   }, []);
 
   // Live query database words to enrich radar data
-  const dbWords = useLiveQuery(() => {
-    return db.words.toArray();
-  }, []) || [];
+  const dbWords = useLiveQuery(() => db.words.toArray(), []) ?? EMPTY_DB_WORDS;
+  const dbWordMap = useMemo(() => {
+    const map = new Map<string, WordItem>();
+    for (const w of dbWords) {
+      if (w.word) map.set(w.word.toLowerCase(), w);
+    }
+    return map;
+  }, [dbWords]);
 
   const fallbackSong: SongItem = useMemo(() => ({
     id: 'seed-serenity-bloom',
@@ -141,23 +147,24 @@ export const MusicPlayerPanel: React.FC<MusicPlayerPanelProps> = ({ onOpenNotebo
     const keyVocabs = analysis.allKeyVocab.length > 0 ? analysis.allKeyVocab : (deferredVocabSong.keyVocab || []);
     
     return keyVocabs.map((vocabStr) => {
-      const matchDb = dbWords.find(w => w.word.toLowerCase() === vocabStr.toLowerCase());
+      const lowerVocab = vocabStr.toLowerCase();
+      const matchDb = dbWordMap.get(lowerVocab);
       if (matchDb) return matchDb;
-      const matchSeed = SEED_WORDS.find(w => w.word.toLowerCase() === vocabStr.toLowerCase());
+      const matchSeed = SEED_WORD_MAP.get(lowerVocab);
       if (matchSeed) {
         return {
           ...matchSeed,
         } as WordItem;
       }
-      const corpusHit = lookupInIeltsCorpus(vocabStr.toLowerCase());
-      if (corpusHit) {
+      const localHit = lookupLocalWordSync(lowerVocab) || lookupInIeltsCorpus(lowerVocab);
+      if (localHit) {
         return {
           word: vocabStr,
-          phoneticUk: corpusHit.uk || estimateIpaPhonetics(vocabStr).uk,
-          phoneticUs: corpusHit.us || estimateIpaPhonetics(vocabStr).us,
-          partOfSpeech: formatPartOfSpeech(corpusHit.pos, vocabStr),
-          definition: corpusHit.en,
-          definitionCn: corpusHit.cn,
+          phoneticUk: localHit.uk || estimateIpaPhonetics(vocabStr).uk,
+          phoneticUs: localHit.us || estimateIpaPhonetics(vocabStr).us,
+          partOfSpeech: formatPartOfSpeech(localHit.pos, vocabStr),
+          definition: localHit.en || `Key vocabulary in "${deferredVocabSong.title}".`,
+          definitionCn: localHit.cn,
           examples: [{
             en: `Featured in the song "${deferredVocabSong.title}"`,
             cn: `收录于《${deferredVocabSong.title}》`
@@ -184,7 +191,7 @@ export const MusicPlayerPanel: React.FC<MusicPlayerPanelProps> = ({ onOpenNotebo
         addedTimestamp: Date.now()
       } as WordItem;
     });
-  }, [deferredVocabSong, dbWords]);
+  }, [deferredVocabSong, dbWords, dbWordMap]);
 
   const [colorTheme, setColorTheme] = useState<{
     mattingBg: string;
@@ -194,8 +201,8 @@ export const MusicPlayerPanel: React.FC<MusicPlayerPanelProps> = ({ onOpenNotebo
   }>({
     mattingBg: 'hsl(110, 10%, 92%)',
     mattingBgDark: 'hsl(110, 12%, 14%)',
-    accentBtn: 'hsl(110, 20%, 35%)',
-    accentBtnDark: 'hsl(110, 25%, 45%)'
+    accentBtn: 'hsl(145, 38%, 42%)',
+    accentBtnDark: 'hsl(145, 44%, 50%)'
   });
 
   const handleCardPointerDown = (e: React.PointerEvent) => {
@@ -369,8 +376,34 @@ export const MusicPlayerPanel: React.FC<MusicPlayerPanelProps> = ({ onOpenNotebo
     : null;
   
   const curQuote = useMemo(() => {
-    if (activeLyricLine && activeLyricLine.rawText) {
-      const text = activeLyricLine.rawText.replace(/^\[.*?\]/, '').trim();
+    const normalizeMeta = (s: string) => s.toLowerCase().replace(/[^a-z0-9\u4e00-\u9fa5]/g, '');
+    const normTitle = normalizeMeta(currentSong?.title || '');
+    const normArtist = normalizeMeta(currentSong?.artist || '');
+
+    const isMetadataLine = (raw: string): boolean => {
+      const cleaned = raw.replace(/^\[.*?\]/, '').trim();
+      if (!cleaned) return true;
+      if (/^(作词|作曲|编曲|演唱|制作|混音|和声|词|曲)\s*[:：]/.test(cleaned)) return true;
+      const norm = normalizeMeta(cleaned);
+      if (!norm) return true;
+      if (normTitle && norm === normTitle) return true;
+      if (normTitle && normArtist && (norm === `${normTitle}${normArtist}` || norm === `${normArtist}${normTitle}`)) {
+        return true;
+      }
+      return false;
+    };
+
+    // Prefer active lyric line; if it is merely a title/artist header line, preview the first real lyric line instead
+    let candidateLine = activeLyricLine;
+    if (candidateLine && isMetadataLine(candidateLine.rawText || '') && parsedLyrics.length > 1) {
+      const firstRealLine = parsedLyrics.find(line => !isMetadataLine(line.rawText || ''));
+      if (firstRealLine) {
+        candidateLine = firstRealLine;
+      }
+    }
+
+    if (candidateLine && candidateLine.rawText) {
+      const text = candidateLine.rawText.replace(/^\[.*?\]/, '').trim();
       if (text) {
         // Look for any key vocabulary in this line
         const targetVocab = ((currentSong && currentSong.keyVocab) || []).find(v => v && text.toLowerCase().includes(v.toLowerCase()));
@@ -385,11 +418,11 @@ export const MusicPlayerPanel: React.FC<MusicPlayerPanelProps> = ({ onOpenNotebo
             targetWord: matchedWord,
             quoteSuffix: `${suffix}”`,
             fullSentence: text,
-            translation: activeLyricLine?.translation || ''
+            translation: candidateLine?.translation || ''
           };
         }
 
-        // If no predefined vocab matched, pick the longest meaningful word or first word
+        // If no predefined vocab matched, pick the longest meaningful word
         const words = text.split(/\s+/).filter(w => w.length > 3 && /^[a-zA-Z]+$/.test(w));
         const pickedWord = words.length > 0 ? words.sort((a, b) => b.length - a.length)[0] : '';
         if (pickedWord) {
@@ -400,7 +433,7 @@ export const MusicPlayerPanel: React.FC<MusicPlayerPanelProps> = ({ onOpenNotebo
             targetWord: text.slice(wIdx, wIdx + pickedWord.length),
             quoteSuffix: `${text.slice(wIdx + pickedWord.length)}”`,
             fullSentence: text,
-            translation: activeLyricLine?.translation || ''
+            translation: candidateLine?.translation || ''
           };
         }
 
@@ -409,7 +442,7 @@ export const MusicPlayerPanel: React.FC<MusicPlayerPanelProps> = ({ onOpenNotebo
           targetWord: '',
           quoteSuffix: '”',
           fullSentence: text,
-          translation: activeLyricLine?.translation || ''
+          translation: candidateLine?.translation || ''
         };
       }
     }
@@ -424,7 +457,7 @@ export const MusicPlayerPanel: React.FC<MusicPlayerPanelProps> = ({ onOpenNotebo
       fullSentence: `${title} - ${artist}`,
       translation: ''
     };
-  }, [activeLyricLine, currentSong]);
+  }, [activeLyricLine, parsedLyrics, currentSong]);
 
   // Extract dynamic album palette and Morandi/contrast tones on song switch
   // Deferred until after the 300ms card entry spring settles so main-thread canvas readback never competes with swipe frames
@@ -1165,13 +1198,17 @@ export const MusicPlayerPanel: React.FC<MusicPlayerPanelProps> = ({ onOpenNotebo
                   e.stopPropagation();
                   setIsVocabRadarOpen(true);
                 }}
-                className="flex items-center gap-1.5 px-2 py-0.5 -mr-1 rounded-full bg-stone-100/90 dark:bg-stone-800/90 hover:bg-[#516050]/15 dark:hover:bg-[#8FB996]/20 border border-stone-200/80 dark:border-stone-700/80 text-stone-600 dark:text-stone-300 hover:text-[#516050] dark:hover:text-[#8FB996] active:scale-95 transition-all cursor-pointer group shadow-2xs"
-                title="查看本曲核心生词雷达"
+                className="flex items-center gap-1.5 py-0.5 -mr-0.5 text-stone-500 dark:text-stone-400 hover:text-stone-900 dark:hover:text-stone-100 active:scale-95 transition-all cursor-pointer group"
+                title="查看本曲核心生词"
               >
-                <span className="text-[#516050] dark:text-[#8FB996] group-hover:scale-125 transition-transform text-[10px] leading-none">✦</span>
-                <span className="tracking-wider text-[9px] font-sans font-semibold uppercase">
+                <span
+                  className="w-1.5 h-1.5 rounded-full transition-transform group-hover:scale-125"
+                  style={{ backgroundColor: isDark ? colorTheme.accentBtnDark : colorTheme.accentBtn }}
+                />
+                <span className="tracking-[0.12em] text-[10px] font-sans font-semibold uppercase tabular-nums">
                   {songVocabList.length} WORDS
                 </span>
+                <ChevronRight className="w-3 h-3 opacity-50 group-hover:opacity-90 group-hover:translate-x-0.5 transition-all" />
               </button>
             </div>
           </div>
@@ -1191,13 +1228,15 @@ export const MusicPlayerPanel: React.FC<MusicPlayerPanelProps> = ({ onOpenNotebo
             className="font-serif-luxury italic text-[16px] sm:text-[17px] text-stone-800 dark:text-stone-200 leading-snug font-normal line-clamp-2 hardware-accelerated"
           >
             {curQuote.quotePrefix}
-            <span
-              onClick={() => handleWordClick(curQuote.targetWord, curQuote.fullSentence)}
-              className="vocab-target font-normal italic text-stone-900 dark:text-white underline decoration-amber-600/60 dark:decoration-amber-400/70 underline-offset-4 decoration-2 cursor-pointer hover:bg-amber-100/40 dark:hover:bg-amber-950/30 px-1 py-0.5 rounded transition-all"
-              title={`Click '${curQuote.targetWord}' to view Cambridge phonetics & dual context`}
-            >
-              {curQuote.targetWord}
-            </span>
+            {curQuote.targetWord && (
+              <span
+                onClick={() => handleWordClick(curQuote.targetWord, curQuote.fullSentence)}
+                className="font-medium italic text-stone-900 dark:text-stone-50 cursor-pointer transition-opacity hover:opacity-70 no-underline"
+                title={`点击查询 “${curQuote.targetWord}”`}
+              >
+                {curQuote.targetWord}
+              </span>
+            )}
             {curQuote.quoteSuffix}
           </p>
         </div>
@@ -1267,7 +1306,7 @@ export const MusicPlayerPanel: React.FC<MusicPlayerPanelProps> = ({ onOpenNotebo
           <button
             id="music-play-mode-btn"
             onClick={togglePlayMode}
-            className="p-2.5 active:scale-90 transition-all text-[#262E25] dark:text-[#7EA783] hover:opacity-80"
+            className="p-2.5 active:scale-90 transition-all text-stone-800 dark:text-stone-200 hover:opacity-80"
             aria-label={`Play mode: ${playMode}`}
             title={
               playMode === 'list'
@@ -1298,9 +1337,10 @@ export const MusicPlayerPanel: React.FC<MusicPlayerPanelProps> = ({ onOpenNotebo
             id="music-play-pause-btn"
             onClick={() => setIsPlaying(!isPlaying)}
             style={{
-              backgroundColor: isDark ? colorTheme.accentBtnDark : colorTheme.accentBtn
+              backgroundColor: isDark ? colorTheme.accentBtnDark : colorTheme.accentBtn,
+              boxShadow: `0 10px 24px -4px ${withColorAlpha(isDark ? colorTheme.accentBtnDark : colorTheme.accentBtn, isDark ? 0.42 : 0.36)}`
             }}
-            className="w-14 h-14 rounded-full flex items-center justify-center text-white shadow-[0_10px_24px_rgba(0,0,0,0.22)] active:scale-95 transition-all duration-500 hover:brightness-110"
+            className="w-14 h-14 rounded-full flex items-center justify-center text-white active:scale-95 transition-[transform,filter,background-color,box-shadow] duration-300 hover:brightness-105 cursor-pointer"
             aria-label={isPlaying ? 'Pause' : 'Play'}
           >
             {isPlaying ? (
@@ -1327,7 +1367,7 @@ export const MusicPlayerPanel: React.FC<MusicPlayerPanelProps> = ({ onOpenNotebo
             onClick={() => setIsPlaylistOpen(!isPlaylistOpen)}
             className={`p-2.5 active:scale-90 transition-all ${
               isPlaylistOpen
-                ? 'text-[#262E25] dark:text-[#7EA783]'
+                ? 'text-stone-900 dark:text-stone-100'
                 : 'text-stone-600 dark:text-stone-400 hover:text-stone-900 dark:hover:text-white'
             }`}
             aria-label="Open playlist"
@@ -1363,7 +1403,8 @@ export const MusicPlayerPanel: React.FC<MusicPlayerPanelProps> = ({ onOpenNotebo
             onTouchStart={(e) => e.stopPropagation()}
             onTouchMove={(e) => e.stopPropagation()}
             onTouchEnd={(e) => e.stopPropagation()}
-            className="absolute inset-0 z-50 flex flex-col justify-end pointer-events-auto"
+            style={{ transform: 'translate3d(0, 0, 0)' }}
+            className="absolute inset-0 z-50 flex flex-col justify-end pointer-events-auto isolate"
           >
             {/* Backdrop Blur */}
             <motion.div
@@ -1383,54 +1424,53 @@ export const MusicPlayerPanel: React.FC<MusicPlayerPanelProps> = ({ onOpenNotebo
               initial={{ y: '100%' }}
               animate={{ y: 0 }}
               exit={{ y: '100%' }}
-              transition={{ type: 'spring', damping: 34, stiffness: 185, mass: 1.05 }}
+              transition={{ type: 'spring', damping: 32, stiffness: 235, mass: 0.92 }}
               onTouchStart={(e) => e.stopPropagation()}
               onTouchMove={(e) => e.stopPropagation()}
-              className="relative w-full max-h-[85%] overflow-y-auto no-scrollbar rounded-t-[32px] bg-[#FAF7F2] dark:bg-[#121826] border-t border-stone-200/90 dark:border-stone-800 shadow-2xl p-5 pb-7 z-10 text-stone-900 dark:text-stone-100"
+              className="relative isolate w-full max-h-[82%] flex flex-col overflow-hidden rounded-t-[32px] bg-[#FAF7F2] dark:bg-[#121826] border-t border-stone-200/90 dark:border-stone-800 shadow-2xl p-5 pb-7 z-10 text-stone-900 dark:text-stone-100"
             >
               {/* Drag Pill Handle */}
-              <div className="w-10 h-1 rounded-full bg-stone-300 dark:bg-stone-600 mx-auto mb-4" />
+              <div className="w-10 h-1 rounded-full bg-stone-300 dark:bg-stone-600 mx-auto mb-4 shrink-0" />
 
               {/* Header */}
-              <div className="flex items-center justify-between pb-3.5 border-b border-stone-200/80 dark:border-stone-800">
-                <div className="flex items-center gap-2.5">
-                  <div className="w-8 h-8 rounded-full bg-[#516050]/15 dark:bg-[#8FB996]/20 flex items-center justify-center text-[#516050] dark:text-[#8FB996]">
-                    <BookOpen className="w-4 h-4" />
+              <div className="flex items-center justify-between pb-3.5 border-b border-stone-200/80 dark:border-stone-800 shrink-0">
+                <div className="min-w-0">
+                  <div className="flex items-baseline gap-2">
+                    <h4 className="text-[15px] font-semibold text-stone-900 dark:text-stone-50 tracking-tight">
+                      本曲核心词
+                    </h4>
+                    <span className="text-xs font-mono tabular-nums text-stone-400 dark:text-stone-500">
+                      {songVocabList.length} 词
+                    </span>
                   </div>
-                  <div>
-                    <div className="flex items-center gap-2">
-                      <h4 className="font-serif-luxury text-base font-semibold text-stone-900 dark:text-stone-50">
-                        Vocab Radar
-                      </h4>
-                      <span className="text-[10px] font-mono px-2 py-0.5 rounded-full bg-[#516050] text-white dark:bg-[#8FB996] dark:text-stone-950 font-bold tracking-wider">
-                        {songVocabList.length} WORDS
-                      </span>
-                    </div>
-                    <p className="text-[11px] text-stone-500 dark:text-stone-400 truncate mt-0.5 font-sans">
-                      Track: <span className="font-serif-luxury font-medium text-stone-700 dark:text-stone-300">{currentSong.title}</span>
-                    </p>
-                  </div>
+                  <p className="text-[11px] font-serif-luxury text-stone-500 dark:text-stone-400 truncate mt-0.5">
+                    {currentSong.title}
+                  </p>
                 </div>
                 <button
                   type="button"
                   onClick={() => setIsVocabRadarOpen(false)}
-                  className="p-2 rounded-full bg-stone-100 dark:bg-stone-800 text-stone-600 dark:text-stone-300 hover:bg-stone-200 dark:hover:bg-stone-700 transition-colors cursor-pointer"
+                  className="p-2 rounded-full bg-stone-100 dark:bg-stone-800 text-stone-500 dark:text-stone-300 hover:bg-stone-200 dark:hover:bg-stone-700 transition-colors cursor-pointer shrink-0"
                   aria-label="Close vocab radar"
                 >
                   <X className="w-4 h-4" />
                 </button>
               </div>
 
-              {/* Word List - Styled exactly like Notebook Modal Word Card */}
-              <div className="space-y-2.5 mt-3.5 max-h-[380px] overflow-y-auto no-scrollbar">
+              {/* Word List — Clean editorial card hierarchy aligned with Vocabulary Vault */}
+              <div className="flex-1 min-h-0 space-y-2.5 pt-3.5 overflow-y-auto no-scrollbar bg-[#FAF7F2] dark:bg-[#121826]">
                 {songVocabList.length === 0 ? (
                   <div className="py-10 text-center text-stone-400 dark:text-stone-500 text-xs space-y-1">
-                    <p className="font-medium text-stone-600 dark:text-stone-300">当前歌曲暂未检测到学术生词</p>
-                    <p className="text-[11px] text-stone-400 dark:text-stone-500">点击全屏歌词中的任意英文单词，即可即时查词并加入生词本</p>
+                    <p className="font-medium text-stone-600 dark:text-stone-300">当前歌曲暂未检测到核心生词</p>
+                    <p className="text-[11px] text-stone-400 dark:text-stone-500">点击全屏歌词中的任意英文单词即可查词收录</p>
                   </div>
                 ) : (
                   songVocabList.map((item) => {
                     const mastery = (item.masteryLevel ?? (item.isStarred ? 1 : 0)) as MasteryLevel;
+                    const isCollected = dbWords.some(w => w.word.toLowerCase() === item.word.toLowerCase());
+                    const shortPos = item.partOfSpeech
+                      ? item.partOfSpeech.split(/\s+/)[0]
+                      : 'vocab';
 
                   return (
                     <div
@@ -1439,29 +1479,17 @@ export const MusicPlayerPanel: React.FC<MusicPlayerPanelProps> = ({ onOpenNotebo
                         setIsVocabRadarOpen(false);
                         openWordDetail(item);
                       }}
-                      className="relative p-3.5 sm:p-4 rounded-2xl transition-all duration-200 cursor-pointer select-none flex items-center justify-between gap-3 bg-white dark:bg-[#151D2E] border border-stone-200/80 dark:border-slate-800/90 hover:border-stone-300 dark:hover:border-slate-700 shadow-2xs active:scale-[0.99]"
+                      className="relative px-4 py-3.5 rounded-2xl transition-all duration-200 cursor-pointer select-none flex items-center justify-between gap-3 bg-white dark:bg-[#151D2E] border border-stone-200/75 dark:border-slate-800/90 hover:border-stone-300 dark:hover:border-slate-700 shadow-2xs active:scale-[0.99]"
                     >
                       {/* Card Info */}
                       <div className="flex-1 min-w-0">
-                        <div className="flex items-center gap-2 flex-wrap">
-                          <h4 className="font-serif-luxury text-lg sm:text-[19px] font-medium text-stone-900 dark:text-stone-100 capitalize truncate">
+                        <div className="flex items-baseline gap-2 min-w-0">
+                          <h4 className="font-serif-luxury text-[18px] font-medium text-stone-900 dark:text-stone-100 capitalize shrink-0 max-w-[68%] truncate">
                             {item.word}
                           </h4>
-                          <span className="font-mono text-[11px] text-stone-400 dark:text-stone-500">
+                          <span className="font-mono text-[11px] text-stone-400 dark:text-stone-500 truncate min-w-0">
                             {item.phoneticUk || item.phoneticUs || `/${item.word}/`}
                           </span>
-                        </div>
-
-                        {/* Part of Speech Tag & Notebook match tag */}
-                        <div className="mt-1 flex items-center gap-1.5 flex-wrap">
-                          <span className="px-1.5 py-0.5 rounded-md text-[9px] font-semibold bg-stone-100 dark:bg-slate-800 text-stone-600 dark:text-stone-300 uppercase font-mono">
-                            {item.partOfSpeech || 'VOCAB'}
-                          </span>
-                          {dbWords.some(w => w.word.toLowerCase() === item.word.toLowerCase()) && (
-                            <span className="px-1.5 py-0.5 rounded-md text-[9px] font-medium bg-amber-500/15 text-amber-800 dark:text-amber-300 flex items-center gap-0.5 border border-amber-500/25">
-                              <span>★</span> 单词本重点生词
-                            </span>
-                          )}
                         </div>
 
                         {/* Chinese Definition */}
@@ -1469,26 +1497,18 @@ export const MusicPlayerPanel: React.FC<MusicPlayerPanelProps> = ({ onOpenNotebo
                           {item.definitionCn || item.definition}
                         </p>
 
-                        {/* Context & Tag Badges */}
-                        <div className="flex items-center gap-1.5 mt-2 flex-wrap">
-                          {item.sourceContext && (
-                            <span className="text-[9px] uppercase tracking-wider text-stone-400 dark:text-stone-500 bg-stone-100/80 dark:bg-slate-800/80 px-2 py-0.5 rounded-md truncate max-w-[140px]">
-                              {item.sourceContext}
-                            </span>
-                          )}
-                          {item.categories && item.categories.length > 0 ? (
-                            item.categories.slice(0, 2).map((cat) => (
-                              <span
-                                key={cat}
-                                className="text-[9px] font-medium text-[#516050] dark:text-[#8FB996] bg-[#516050]/10 dark:bg-[#8FB996]/15 px-2 py-0.5 rounded-md"
-                              >
-                                {cat}
+                        {/* Single Unboxed Inline Metadata Row */}
+                        <div className="mt-1.5 flex items-center gap-1.5 text-[11px] text-stone-400 dark:text-stone-500 min-w-0">
+                          <span className="font-mono italic text-stone-500 dark:text-stone-400 shrink-0">
+                            {shortPos}
+                          </span>
+                          {isCollected && (
+                            <>
+                              <span aria-hidden="true" className="opacity-45 shrink-0">·</span>
+                              <span className="font-medium text-amber-700/90 dark:text-amber-400/90 shrink-0">
+                                已收录
                               </span>
-                            ))
-                          ) : (
-                            <span className="text-[9px] font-medium text-stone-600 dark:text-stone-400 bg-stone-100 dark:bg-slate-800 px-2 py-0.5 rounded-md">
-                              Track: {currentSong.title}
-                            </span>
+                            </>
                           )}
                         </div>
                       </div>
@@ -1502,7 +1522,7 @@ export const MusicPlayerPanel: React.FC<MusicPlayerPanelProps> = ({ onOpenNotebo
                             e.stopPropagation();
                             speakWord(item.word, 'en-GB');
                           }}
-                          className="p-2 rounded-full hover:bg-stone-100 dark:hover:bg-slate-800 text-stone-400 hover:text-[#516050] dark:hover:text-[#8FB996] active:scale-95 transition-all cursor-pointer"
+                          className="p-2 rounded-full hover:bg-stone-100 dark:hover:bg-slate-800 text-stone-400 hover:text-stone-900 dark:hover:text-stone-100 active:scale-95 transition-all cursor-pointer"
                           title="朗读发音 (UK)"
                         >
                           <Volume2 className="w-4 h-4" />
@@ -1577,20 +1597,16 @@ export const MusicPlayerPanel: React.FC<MusicPlayerPanelProps> = ({ onOpenNotebo
               <div className="w-9 h-1 rounded-full bg-stone-300 dark:bg-stone-600 mx-auto mb-3.5" />
 
               <div className="flex items-center justify-between pb-3 mb-3 border-b border-stone-100 dark:border-stone-800">
-                <div>
-                  <h4 className="text-base font-bold text-stone-900 dark:text-white">
-                    播放音质与规格
-                  </h4>
-                  <p className="text-[11px] text-stone-400 dark:text-stone-500 mt-0.5">
-                    网易云流媒体 · 自由选择音频格式
-                  </p>
-                </div>
+                <h4 className="text-[15px] font-semibold text-stone-900 dark:text-white tracking-tight">
+                  播放音质
+                </h4>
                 <button
                   type="button"
                   onClick={() => setIsQualityModalOpen(false)}
                   className="w-7 h-7 rounded-full bg-stone-100 dark:bg-stone-800 flex items-center justify-center text-stone-500 hover:text-stone-900 dark:hover:text-white transition-colors cursor-pointer"
+                  aria-label="Close quality selector"
                 >
-                  <X className="w-4 h-4 stroke-[2.5]" />
+                  <X className="w-4 h-4 stroke-[2.25]" />
                 </button>
               </div>
 
@@ -1608,35 +1624,35 @@ export const MusicPlayerPanel: React.FC<MusicPlayerPanelProps> = ({ onOpenNotebo
                       }}
                       className="w-full px-4 py-3 text-left transition-colors flex items-center justify-between gap-3 cursor-pointer select-none hover:bg-stone-100/80 dark:hover:bg-stone-700/60"
                     >
-                      <div className="flex items-center gap-3">
-                        <span className={`w-11 h-6 flex items-center justify-center rounded-md font-mono text-[10px] font-bold uppercase tracking-tight ${
-                          opt.vipOnly
-                            ? 'bg-amber-500 text-white'
-                            : isSelected
-                              ? 'bg-stone-900 text-white dark:bg-white dark:text-stone-900'
-                              : 'bg-stone-200 dark:bg-stone-700 text-stone-600 dark:text-stone-300'
+                      <div className="flex items-center gap-3 min-w-0">
+                        <span className={`w-11 h-6 flex items-center justify-center rounded-md font-mono text-[10px] font-semibold uppercase tracking-tight shrink-0 ${
+                          isSelected
+                            ? 'bg-stone-900 text-white dark:bg-white dark:text-stone-900'
+                            : opt.vipOnly
+                              ? 'bg-amber-500/12 text-amber-700 dark:bg-amber-400/15 dark:text-amber-300 border border-amber-500/20'
+                              : 'bg-stone-200/80 dark:bg-stone-700 text-stone-600 dark:text-stone-300'
                         }`}>
                           {opt.badge}
                         </span>
 
-                        <div className="flex flex-col">
+                        <div className="flex flex-col min-w-0">
                           <div className="flex items-center gap-2">
-                            <span className="text-xs font-bold text-stone-900 dark:text-white">
+                            <span className="text-xs font-semibold text-stone-900 dark:text-white">
                               {opt.label}
                             </span>
-                            <span className="text-[10px] font-mono text-stone-400">
+                            <span className="text-[10px] font-mono tabular-nums text-stone-400">
                               {opt.bitrate}
                             </span>
                           </div>
-                          <span className="text-[11px] text-stone-400 dark:text-stone-500 mt-0.5">
+                          <span className="text-[11px] text-stone-400 dark:text-stone-500 mt-0.5 truncate">
                             {opt.desc}
                           </span>
                         </div>
                       </div>
 
                       {isSelected && (
-                        <div className="w-5 h-5 rounded-full bg-emerald-500 text-white flex items-center justify-center flex-shrink-0 shadow-xs">
-                          <span className="text-[11px] font-bold leading-none">✓</span>
+                        <div className="w-5 h-5 rounded-full bg-[#30D158] text-white flex items-center justify-center shrink-0">
+                          <Check className="w-3 h-3 stroke-[2.75]" />
                         </div>
                       )}
                     </button>

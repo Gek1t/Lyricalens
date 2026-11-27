@@ -5,6 +5,15 @@ import { type AuthenticatedRequest, authenticate } from '../auth';
 const router = Router();
 router.use(authenticate);
 
+function safeJsonParse<T>(raw: string | null | undefined, fallback: T): T {
+  if (!raw) return fallback;
+  try {
+    return JSON.parse(raw) as T;
+  } catch {
+    return fallback;
+  }
+}
+
 // GET /api/words - Fetch all vocabulary words for the authenticated user
 router.get('/', async (req: AuthenticatedRequest, res: Response) => {
   try {
@@ -16,10 +25,10 @@ router.get('/', async (req: AuthenticatedRequest, res: Response) => {
 
     const parsed = words.map((w) => ({
       ...sanitizeBigInt(w),
-      examples: w.examples ? JSON.parse(w.examples) : [],
-      categories: w.categories ? JSON.parse(w.categories) : [],
-      aiTags: w.aiTags ? JSON.parse(w.aiTags) : [],
-      subWords: w.subWords ? JSON.parse(w.subWords) : [],
+      examples: safeJsonParse(w.examples, []),
+      categories: safeJsonParse(w.categories, []),
+      aiTags: safeJsonParse(w.aiTags, []),
+      subWords: safeJsonParse(w.subWords, []),
     }));
 
     res.json({ success: true, count: parsed.length, data: parsed });
@@ -116,10 +125,10 @@ router.post('/', async (req: AuthenticatedRequest, res: Response) => {
 
     const parsed = {
       ...sanitizeBigInt(upserted),
-      examples: upserted.examples ? JSON.parse(upserted.examples) : [],
-      categories: upserted.categories ? JSON.parse(upserted.categories) : [],
-      aiTags: upserted.aiTags ? JSON.parse(upserted.aiTags) : [],
-      subWords: upserted.subWords ? JSON.parse(upserted.subWords) : [],
+      examples: safeJsonParse(upserted.examples, []),
+      categories: safeJsonParse(upserted.categories, []),
+      aiTags: safeJsonParse(upserted.aiTags, []),
+      subWords: safeJsonParse(upserted.subWords, []),
     };
 
     res.json({ success: true, data: parsed });
@@ -162,10 +171,10 @@ router.put('/:id', async (req: AuthenticatedRequest, res: Response) => {
 
     const parsed = {
       ...sanitizeBigInt(updated),
-      examples: updated.examples ? JSON.parse(updated.examples) : [],
-      categories: updated.categories ? JSON.parse(updated.categories) : [],
-      aiTags: updated.aiTags ? JSON.parse(updated.aiTags) : [],
-      subWords: updated.subWords ? JSON.parse(updated.subWords) : [],
+      examples: safeJsonParse(updated.examples, []),
+      categories: safeJsonParse(updated.categories, []),
+      aiTags: safeJsonParse(updated.aiTags, []),
+      subWords: safeJsonParse(updated.subWords, []),
     };
 
     res.json({ success: true, data: parsed });
@@ -316,10 +325,10 @@ router.post('/batch-sync', async (req: AuthenticatedRequest, res: Response) => {
 
     const parsed = deltaWords.map((w) => ({
       ...sanitizeBigInt(w),
-      examples: w.examples ? JSON.parse(w.examples) : [],
-      categories: w.categories ? JSON.parse(w.categories) : [],
-      aiTags: w.aiTags ? JSON.parse(w.aiTags) : [],
-      subWords: w.subWords ? JSON.parse(w.subWords) : [],
+      examples: safeJsonParse(w.examples, []),
+      categories: safeJsonParse(w.categories, []),
+      aiTags: safeJsonParse(w.aiTags, []),
+      subWords: safeJsonParse(w.subWords, []),
     }));
 
     res.json({

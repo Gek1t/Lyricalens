@@ -348,31 +348,27 @@ export function isChineseSong(song?: { title?: string; artist?: string; lrcText?
   return false;
 }
 
-/**
- * Evaluates the vocabulary difficulty level and stats of a song based on lyrics/title/artist
- */
-export function evaluateSongVocabDifficulty(
-  song: Partial<SongItem>,
-  notebookWords: Array<string | { word: string }> = [],
-  dueWords: Array<string | { word: string }> = []
-): EvaluatedSongDifficulty {
-  const isChinese = isChineseSong(song);
+export function buildLowerWordSet(words: Array<string | { word: string }> = []): Set<string> {
+  const set = new Set<string>();
+  for (const item of words) {
+    const w = typeof item === 'string' ? item : item.word;
+    if (w) {
+      const trimmed = w.trim().toLowerCase();
+      if (trimmed) set.add(trimmed);
+    }
+  }
+  return set;
+}
 
+export function evaluateAndAnalyzeSong(
+  song: Partial<SongItem>,
+  notebookSet: Set<string>,
+  dueSet: Set<string>
+): { evaluation: EvaluatedSongDifficulty; analysis: MatchedVocabResult } {
+  const isChinese = isChineseSong(song);
   const realLyric = sanitizeLyricText(song.lrcText);
   const combinedText = `${song.title || ''} ${song.artist || ''} ${realLyric}`;
   const tokens = extractEnglishWordTokens(combinedText);
-
-  const notebookSet = new Set<string>();
-  for (const item of notebookWords) {
-    const w = typeof item === 'string' ? item : item.word;
-    if (w) notebookSet.add(w.trim().toLowerCase());
-  }
-
-  const dueSet = new Set<string>();
-  for (const item of dueWords) {
-    const w = typeof item === 'string' ? item : item.word;
-    if (w) dueSet.add(w.trim().toLowerCase());
-  }
 
   let band8Count = 0;
   let ieltsCount = 0;
@@ -381,14 +377,22 @@ export function evaluateSongVocabDifficulty(
   let matchedNotebookCount = 0;
   let matchedDueCount = 0;
   const matchedDueWords: string[] = [];
+  const matchedNotebook: string[] = [];
+  const matchedIELTS: string[] = [];
 
   for (const token of tokens) {
     if (COMMON_STOP_WORDS.has(token)) continue;
 
-    if (notebookSet.has(token)) matchedNotebookCount++;
     if (dueSet.has(token)) {
       matchedDueCount++;
-      if (!matchedDueWords.includes(token)) matchedDueWords.push(token);
+      matchedDueWords.push(token);
+    }
+
+    if (notebookSet.has(token)) {
+      matchedNotebookCount++;
+      matchedNotebook.push(token);
+    } else if (IELTS_BAND_8_WORDS.has(token) || IELTS_CORE_ACADEMIC_WORDS.has(token)) {
+      matchedIELTS.push(token);
     }
 
     if (IELTS_BAND_8_WORDS.has(token)) {
@@ -421,19 +425,43 @@ export function evaluateSongVocabDifficulty(
   }
 
   return {
-    level,
-    isChinese,
-    stats: {
-      totalWords,
-      academicCount,
-      ieltsCount,
-      toeflCount,
-      cet6Count,
-      matchedNotebookCount,
-      matchedDueCount,
-      dueWords: matchedDueWords
+    evaluation: {
+      level,
+      isChinese,
+      stats: {
+        totalWords,
+        academicCount,
+        ieltsCount,
+        toeflCount,
+        cet6Count,
+        matchedNotebookCount,
+        matchedDueCount,
+        dueWords: matchedDueWords
+      }
+    },
+    analysis: {
+      matchedNotebookWords: matchedNotebook,
+      matchedIELTSWords: matchedIELTS,
+      allKeyVocab: [...matchedNotebook, ...matchedIELTS].slice(0, 4),
+      notebookMatchCount: matchedNotebook.length,
+      matchedDueWords
     }
   };
+}
+
+/**
+ * Evaluates the vocabulary difficulty level and stats of a song based on lyrics/title/artist
+ */
+export function evaluateSongVocabDifficulty(
+  song: Partial<SongItem>,
+  notebookWords: Array<string | { word: string }> = [],
+  dueWords: Array<string | { word: string }> = []
+): EvaluatedSongDifficulty {
+  return evaluateAndAnalyzeSong(
+    song,
+    buildLowerWordSet(notebookWords),
+    buildLowerWordSet(dueWords)
+  ).evaluation;
 }
 
 export interface MatchedVocabResult {
@@ -462,50 +490,11 @@ export function analyzeSongVocab(
     };
   }
 
-  const realLyric = sanitizeLyricText(song.lrcText);
-  const combinedText = `${song.title || ''} ${song.artist || ''} ${realLyric}`;
-  const tokens = extractEnglishWordTokens(combinedText);
-
-  const notebookSet = new Set<string>();
-  for (const item of notebookWords) {
-    const w = typeof item === 'string' ? item : item.word;
-    if (w && w.trim()) notebookSet.add(w.trim().toLowerCase());
-  }
-
-  const dueSet = new Set<string>();
-  for (const item of dueWords) {
-    const w = typeof item === 'string' ? item : item.word;
-    if (w && w.trim()) dueSet.add(w.trim().toLowerCase());
-  }
-
-  const matchedNotebook: string[] = [];
-  const matchedIELTS: string[] = [];
-  const matchedDue: string[] = [];
-
-  for (const token of tokens) {
-    if (COMMON_STOP_WORDS.has(token)) continue;
-
-    if (dueSet.has(token) && !matchedDue.includes(token)) {
-      matchedDue.push(token);
-    }
-
-    if (notebookSet.has(token)) {
-      if (!matchedNotebook.includes(token)) matchedNotebook.push(token);
-    } else if (IELTS_BAND_8_WORDS.has(token) || IELTS_CORE_ACADEMIC_WORDS.has(token)) {
-      if (!matchedIELTS.includes(token)) matchedIELTS.push(token);
-    }
-  }
-
-  // Combined key vocabulary: Due words & Notebook words come first, then IELTS words (max 4)
-  const allKeyVocab = [...matchedNotebook, ...matchedIELTS].slice(0, 4);
-
-  return {
-    matchedNotebookWords: matchedNotebook,
-    matchedIELTSWords: matchedIELTS,
-    allKeyVocab,
-    notebookMatchCount: matchedNotebook.length,
-    matchedDueWords: matchedDue
-  };
+  return evaluateAndAnalyzeSong(
+    song,
+    buildLowerWordSet(notebookWords),
+    buildLowerWordSet(dueWords)
+  ).analysis;
 }
 
 /**
@@ -521,11 +510,11 @@ export function prioritizeSongsByNotebookAndSpacedRepetition(
   if (!songs || songs.length === 0) return [];
 
   const dueWords = getDueReviewWords(words);
-  const dueWordStrs = dueWords.map(w => w.word.toLowerCase());
+  const notebookSet = buildLowerWordSet(words);
+  const dueSet = buildLowerWordSet(dueWords);
 
   const analyzed = songs.map(s => {
-    const evaluation = evaluateSongVocabDifficulty(s, words, dueWordStrs);
-    const analysis = analyzeSongVocab(s, words, dueWordStrs);
+    const { evaluation, analysis } = evaluateAndAnalyzeSong(s, notebookSet, dueSet);
     const sanitizedLrc = sanitizeLyricText(s.lrcText);
 
     return {

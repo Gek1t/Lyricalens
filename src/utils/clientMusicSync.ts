@@ -1518,8 +1518,8 @@ export async function resolveSongAudioClient(
     }
   }
 
-  // 3. Full-Track Unblock Resolver (Kuwo >= 60s full song matcher — bypasses 30s VIP trial clips!)
-  if (title) {
+  // 3. Full-Track Unblock Resolver (Kuwo >= 60s full song matcher — native only, direct http:// is blocked by CORS in web browsers)
+  if (title && Capacitor.isNativePlatform()) {
     try {
       const cleanQuery = `${title} ${artist}`.replace(/[()[\]\-]/g, ' ').replace(/\s+/g, ' ').trim();
       const kwRes = await safeHttpRequest(
@@ -1546,8 +1546,8 @@ export async function resolveSongAudioClient(
     } catch {}
   }
 
-  // 4. Kuwo direct by ID if platform is kuwo
-  if (platform === 'kuwo' && cleanId) {
+  // 4. Kuwo direct by ID if platform is kuwo (native only)
+  if (platform === 'kuwo' && cleanId && Capacitor.isNativePlatform()) {
     try {
       const playRes = await safeHttpRequest(
         `http://antiserver.kuwo.cn/anti.s?type=convert_url&rid=${cleanId}&format=mp3&response=url`

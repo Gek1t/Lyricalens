@@ -2979,6 +2979,66 @@ export function cleanChunkMeaning(raw: string): string {
 }
 
 /**
+ * Synchronous local dictionary lookup (BUILTIN_VOCAB_DICT + COMMON_WORD_CN_DICT + IELTS corpus)
+ * for instant UI cards such as song core vocabulary lists without repeating the raw English word.
+ */
+export function lookupLocalWordSync(
+  rawWord: string
+): { cn: string; en: string; pos?: string; uk?: string; us?: string } | null {
+  const cleanW = cleanWordText(rawWord).toLowerCase();
+  if (!cleanW) return null;
+
+  const builtin = BUILTIN_VOCAB_DICT[cleanW];
+  if (builtin?.definitionCn) {
+    return {
+      cn: builtin.definitionCn,
+      en: builtin.definition || '',
+      pos: builtin.partOfSpeech,
+      uk: builtin.phoneticUk,
+      us: builtin.phoneticUs,
+    };
+  }
+
+  const common = COMMON_WORD_CN_DICT[cleanW];
+  if (common?.cn) {
+    return {
+      cn: common.cn,
+      en: common.en,
+      pos: common.pos,
+      uk: common.uk,
+      us: common.us,
+    };
+  }
+
+  const corpus = lookupInIeltsCorpus(cleanW);
+  if (corpus?.cn) {
+    return {
+      cn: corpus.cn,
+      en: corpus.en,
+      pos: corpus.pos,
+      uk: corpus.uk,
+      us: corpus.us,
+    };
+  }
+
+  const morph = inferWordMorphology(cleanW, false);
+  if (
+    morph.cn &&
+    morph.cn.toLowerCase() !== cleanW &&
+    !morph.cn.includes('专有名词') &&
+    !morph.cn.includes('语境词汇')
+  ) {
+    return {
+      cn: morph.cn,
+      en: morph.en || '',
+      pos: morph.pos,
+    };
+  }
+
+  return null;
+}
+
+/**
  * Gets clean Chinese meaning for a single word, handling pronouns and common forms
  */
 export function getSimpleWordCn(w: string): string {

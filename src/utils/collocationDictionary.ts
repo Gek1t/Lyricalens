@@ -678,6 +678,7 @@ export function parseStructuredDefinitions(defCn: string, partOfSpeech?: string)
   const semiSplit = defCn.split(/[;；]/).map(s => s.trim()).filter(Boolean);
   if (semiSplit.length > 1) {
     const posTokens = (partOfSpeech || '')
+      .replace(/\s*\([^)]*\)/g, '')
       .split(/[/、,]/)
       .map(p => p.trim())
       .filter(p => p.length > 0);

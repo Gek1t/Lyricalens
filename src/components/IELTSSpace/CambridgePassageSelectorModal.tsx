@@ -11,8 +11,12 @@ import {
 import { triggerHighRefreshBoost } from '../../utils/displayRefreshRate';
 import { useAppStore } from '../../store/useAppStore';
 import { db } from '../../db';
+import type { WordItem } from '../../types';
+import type { CambridgePassage } from '../../data/ieltsPassages';
 
 const QUICK_BOOK_FILTERS = ['ALL', '2026 考场真题', 'Cambridge 20', 'Cambridge 19'];
+const EMPTY_WORDS: WordItem[] = [];
+const EMPTY_PASSAGES: CambridgePassage[] = [];
 
 export const CambridgePassageSelectorModal: React.FC = () => {
   const isCambridgeSelectorOpen = useAppStore(s => s.isCambridgeSelectorOpen);
@@ -25,8 +29,14 @@ export const CambridgePassageSelectorModal: React.FC = () => {
   const [selectedBookFilter, setSelectedBookFilter] = useState<string>('ALL');
   const [isBookDropdownOpen, setIsBookDropdownOpen] = useState<boolean>(false);
 
-  const allDbWords = useLiveQuery(() => db.words.toArray()) || [];
-  const customPassages = useLiveQuery(() => db.customPassages.toArray()) || [];
+  const allDbWords = useLiveQuery(
+    () => (isCambridgeSelectorOpen ? db.words.toArray() : EMPTY_WORDS),
+    [isCambridgeSelectorOpen]
+  ) ?? EMPTY_WORDS;
+  const customPassages = useLiveQuery(
+    () => (isCambridgeSelectorOpen ? db.customPassages.toArray() : EMPTY_PASSAGES),
+    [isCambridgeSelectorOpen]
+  ) ?? EMPTY_PASSAGES;
   const userWordStrings = useMemo(() => allDbWords.map(w => w.word), [allDbWords]);
 
   const completePassages = useMemo(
@@ -176,9 +186,9 @@ export const CambridgePassageSelectorModal: React.FC = () => {
             </div>
 
             {/* Header */}
-            <div className="px-5 pb-3 flex items-center justify-between gap-3 shrink-0 border-b border-stone-200/70 dark:border-slate-800/70">
+            <div className="px-5 pb-3 flex items-center justify-between gap-3 shrink-0 border-b border-stone-200/70 dark:border-white/[0.08]">
               <div className="flex items-center gap-2.5 min-w-0">
-                <div className="w-7 h-7 rounded-full bg-[#516050]/10 dark:bg-[#8FB996]/15 flex items-center justify-center text-[#516050] dark:text-[#8FB996] shrink-0">
+                <div className="w-7 h-7 rounded-full bg-stone-900/[0.06] dark:bg-white/[0.08] flex items-center justify-center text-stone-800 dark:text-stone-200 shrink-0">
                   <BookOpen className="w-3.5 h-3.5" />
                 </div>
                 <h2 className="font-serif-luxury text-[17px] font-bold text-stone-900 dark:text-stone-100 leading-none truncate">
@@ -193,17 +203,17 @@ export const CambridgePassageSelectorModal: React.FC = () => {
                   handleClose();
                   openOnlineSearch('reading');
                 }}
-                className="flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-medium whitespace-nowrap shrink-0 bg-white dark:bg-white/[0.06] hover:bg-stone-100/90 dark:hover:bg-white/[0.1] text-[#516050] dark:text-[#8FB996] border border-stone-200/85 dark:border-white/[0.1] transition-all active:scale-95 cursor-pointer shadow-2xs focus:outline-none group"
+                className="flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-medium whitespace-nowrap shrink-0 bg-white dark:bg-white/[0.06] hover:bg-stone-100/90 dark:hover:bg-white/[0.1] text-stone-700 dark:text-stone-200 border border-stone-200/85 dark:border-white/[0.1] transition-all active:scale-95 cursor-pointer shadow-2xs focus:outline-none group"
               >
-                <Globe className="w-3.5 h-3.5 shrink-0" />
+                <Globe className="w-3.5 h-3.5 shrink-0 opacity-75" />
                 <span>全网题库</span>
-                <ChevronRight className="w-3 h-3 opacity-60 group-hover:translate-x-0.5 transition-transform shrink-0" />
+                <ChevronRight className="w-3 h-3 opacity-55 group-hover:translate-x-0.5 transition-transform shrink-0" />
               </button>
             </div>
 
-            {/* Single-Row Clean Filter Bar: 3 Quick Pills + Volume Picker Dropdown */}
-            <div className="relative px-5 py-2.5 flex items-center justify-between gap-2 border-b border-stone-200/60 dark:border-slate-800/60 shrink-0 bg-stone-100/60 dark:bg-[#161C28]/60 z-20">
-              <div className="flex items-center gap-1.5 min-w-0">
+            {/* Single-Row Clean Filter Bar: Scrollable Quick Pills + Isolated Volume Picker Dropdown */}
+            <div className="relative px-5 py-2.5 flex items-center justify-between gap-2 border-b border-stone-200/60 dark:border-white/[0.07] shrink-0 bg-stone-100/55 dark:bg-[#161C28]/60 z-20">
+              <div className="flex-1 min-w-0 flex items-center gap-1.5 overflow-x-auto no-scrollbar pr-5 [mask-image:linear-gradient(to_right,black_calc(100%-20px),transparent_100%)] [-webkit-mask-image:linear-gradient(to_right,black_calc(100%-20px),transparent_100%)]">
                 {QUICK_BOOK_FILTERS.filter(b => availableBooks.includes(b)).map(book => {
                   const isSelected = selectedBookFilter === book;
                   const bookHitSum = getBookHitCount(book);
@@ -217,18 +227,18 @@ export const CambridgePassageSelectorModal: React.FC = () => {
                         setSelectedBookFilter(book);
                         setIsBookDropdownOpen(false);
                       }}
-                      className={`px-3 py-1 rounded-full text-xs font-medium whitespace-nowrap transition-all cursor-pointer flex items-center gap-1 active:scale-95 focus:outline-none ${
+                      className={`px-3 py-1 rounded-full text-xs font-medium whitespace-nowrap shrink-0 transition-all cursor-pointer flex items-center gap-1 active:scale-95 focus:outline-none ${
                         isSelected
-                          ? 'bg-[#516050] dark:bg-[#8FB996] text-white dark:text-stone-950 font-semibold shadow-2xs'
-                          : 'bg-white dark:bg-[#1A2234] text-stone-600 dark:text-stone-400 hover:bg-stone-100 dark:hover:bg-slate-800 border border-stone-200/70 dark:border-slate-800'
+                          ? 'bg-stone-900 dark:bg-stone-100 text-white dark:text-stone-950 font-semibold shadow-2xs'
+                          : 'bg-white dark:bg-[#1A2234] text-stone-600 dark:text-stone-400 hover:bg-stone-100 dark:hover:bg-slate-800 border border-stone-200/70 dark:border-white/[0.08]'
                       }`}
                     >
                       <span>{displayBookLabel}</span>
                       {bookHitSum > 0 && (
                         <span className={`text-[10px] px-1.5 py-0.2 rounded-full font-mono tabular-nums font-semibold ${
                           isSelected
-                            ? 'bg-white/20 text-white dark:bg-stone-900/30 dark:text-stone-900'
-                            : 'bg-amber-500/15 text-amber-700 dark:text-amber-300'
+                            ? 'bg-white/20 text-white dark:bg-stone-900/20 dark:text-stone-950'
+                            : 'bg-amber-500/12 text-amber-700 dark:text-amber-300'
                         }`}>
                           {bookHitSum}
                         </span>
@@ -246,8 +256,8 @@ export const CambridgePassageSelectorModal: React.FC = () => {
                     onClick={() => setIsBookDropdownOpen(prev => !prev)}
                     className={`px-2.5 py-1 rounded-full text-xs font-medium whitespace-nowrap transition-all cursor-pointer flex items-center gap-1 active:scale-95 focus:outline-none ${
                       isExtraBookSelected
-                        ? 'bg-[#516050] dark:bg-[#8FB996] text-white dark:text-stone-950 font-semibold shadow-2xs'
-                        : 'bg-white dark:bg-[#1A2234] text-stone-600 dark:text-stone-400 hover:bg-stone-100 dark:hover:bg-slate-800 border border-stone-200/70 dark:border-slate-800'
+                        ? 'bg-stone-900 dark:bg-stone-100 text-white dark:text-stone-950 font-semibold shadow-2xs'
+                        : 'bg-white dark:bg-[#1A2234] text-stone-600 dark:text-stone-300 hover:bg-stone-100 dark:hover:bg-slate-800 border border-stone-200/75 dark:border-white/[0.09]'
                     }`}
                   >
                     <span className="max-w-[96px] truncate">
@@ -268,7 +278,7 @@ export const CambridgePassageSelectorModal: React.FC = () => {
                           animate={{ opacity: 1, y: 0, scale: 1 }}
                           exit={{ opacity: 0, y: 4, scale: 0.96 }}
                           transition={{ duration: 0.16, ease: [0.16, 1, 0.3, 1] }}
-                          className="absolute right-0 mt-1.5 w-48 max-h-60 overflow-y-auto no-scrollbar rounded-2xl p-1.5 bg-[#FDFBF7]/98 dark:bg-[#161E2E]/98 backdrop-blur-2xl border border-stone-200/90 dark:border-slate-700/80 shadow-xl z-40 space-y-0.5"
+                          className="absolute right-0 mt-1.5 w-48 max-h-60 overflow-y-auto no-scrollbar rounded-2xl p-1.5 bg-[#FDFCF9] dark:bg-[#141822] border border-stone-200/90 dark:border-white/[0.1] shadow-xl z-40 space-y-0.5"
                         >
                           {extraBooks.map(book => {
                             const active = selectedBookFilter === book;
@@ -283,7 +293,7 @@ export const CambridgePassageSelectorModal: React.FC = () => {
                                 }}
                                 className={`w-full px-3 py-2 rounded-xl text-xs flex items-center justify-between gap-2 text-left transition-colors cursor-pointer ${
                                   active
-                                    ? 'bg-[#516050]/12 dark:bg-[#8FB996]/15 text-[#516050] dark:text-[#8FB996] font-semibold'
+                                    ? 'bg-stone-900/[0.06] dark:bg-white/[0.09] text-stone-950 dark:text-white font-semibold'
                                     : 'text-stone-700 dark:text-stone-300 hover:bg-stone-900/[0.04] dark:hover:bg-white/[0.05]'
                                 }`}
                               >
@@ -320,14 +330,14 @@ export const CambridgePassageSelectorModal: React.FC = () => {
                     }}
                     className={`relative p-4 rounded-2xl border transition-all cursor-pointer group active:scale-[0.99] ${
                       isCurrent
-                        ? 'bg-[#516050]/8 dark:bg-[#8FB996]/10 border-[#516050]/40 dark:border-[#8FB996]/50 shadow-sm ring-1 ring-[#516050]/20 dark:ring-[#8FB996]/25'
-                        : 'bg-white dark:bg-[#18202F] border-stone-200/80 dark:border-slate-800/90 hover:border-stone-400 dark:hover:border-slate-600 hover:shadow-xs'
+                        ? 'bg-[#FDFCF9] dark:bg-[#192131] border-stone-900/25 dark:border-stone-200/30 shadow-sm ring-1 ring-stone-900/10 dark:ring-white/10'
+                        : 'bg-white dark:bg-[#151C28] border-stone-200/80 dark:border-white/[0.08] hover:border-stone-400 dark:hover:border-white/[0.2] hover:shadow-xs'
                     }`}
                   >
                     {/* Top Tag Row */}
                     <div className="flex items-center justify-between gap-2 mb-2">
                       <div className="flex items-center gap-1.5 flex-wrap min-w-0">
-                        <span className="px-2.5 py-0.5 rounded-lg text-[10px] font-mono font-bold uppercase tracking-wider bg-stone-100 dark:bg-slate-800 text-stone-700 dark:text-stone-300 border border-stone-200/70 dark:border-slate-700 whitespace-nowrap">
+                        <span className="px-2.5 py-0.5 rounded-lg text-[10px] font-mono font-bold uppercase tracking-wider bg-stone-100 dark:bg-white/[0.07] text-stone-700 dark:text-stone-300 border border-stone-200/70 dark:border-white/[0.08] whitespace-nowrap">
                           {passage.cambridgeBook} · Test {passage.testNum} P{passage.passageNum}
                         </span>
                         <span className="text-[11px] font-medium text-stone-500 dark:text-stone-400 truncate">
@@ -336,7 +346,7 @@ export const CambridgePassageSelectorModal: React.FC = () => {
                       </div>
 
                       {isCurrent ? (
-                        <span className="px-2.5 py-0.5 rounded-full text-[10px] font-semibold bg-[#516050] dark:bg-[#8FB996] text-white dark:text-stone-950 flex items-center gap-1 whitespace-nowrap shrink-0 shadow-2xs">
+                        <span className="px-2.5 py-0.5 rounded-full text-[10px] font-semibold bg-stone-900 dark:bg-stone-100 text-white dark:text-stone-950 flex items-center gap-1 whitespace-nowrap shrink-0 shadow-2xs">
                           <Check className="w-3 h-3" />
                           当前阅读
                         </span>
@@ -348,22 +358,22 @@ export const CambridgePassageSelectorModal: React.FC = () => {
                     </div>
 
                     {/* Title */}
-                    <h3 className="font-serif-luxury text-[15px] font-bold text-stone-900 dark:text-stone-100 group-hover:text-[#516050] dark:group-hover:text-[#8FB996] transition-colors leading-snug">
+                    <h3 className="font-serif-luxury text-[15px] font-bold text-stone-900 dark:text-stone-100 group-hover:text-stone-950 dark:group-hover:text-white transition-colors leading-snug">
                       {passage.title}
                     </h3>
 
                     {/* Matched Vocabulary / Highlights */}
-                    <div className="mt-3 pt-2.5 border-t border-stone-100 dark:border-slate-800/80 flex items-center justify-between gap-2">
+                    <div className="mt-3 pt-2.5 border-t border-stone-100 dark:border-white/[0.06] flex items-center justify-between gap-2">
                       {hitCount > 0 ? (
-                        <div className="flex items-center gap-1.5 text-xs text-[#516050] dark:text-[#8FB996] min-w-0 flex-1">
-                          <Flame className="w-3.5 h-3.5 text-amber-500 shrink-0" />
+                        <div className="flex items-center gap-1.5 text-xs text-amber-800 dark:text-amber-300 min-w-0 flex-1">
+                          <Flame className="w-3.5 h-3.5 text-amber-600 dark:text-amber-400 shrink-0" />
                           <div className="flex items-center gap-1 overflow-hidden">
-                            <span className="font-medium whitespace-nowrap shrink-0">命中生词 ({hitCount}):</span>
+                            <span className="font-medium whitespace-nowrap shrink-0">命中生词 ({hitCount})</span>
                             <div className="flex items-center gap-1 overflow-hidden">
                               {matchedWords.slice(0, 2).map((w, idx) => (
                                 <span
                                   key={`pass-match-${passage.id}-${w}-${idx}`}
-                                  className="px-1.5 py-0.5 rounded-md bg-[#516050]/10 dark:bg-[#8FB996]/15 text-[#516050] dark:text-[#8FB996] font-mono text-[10px] font-semibold whitespace-nowrap shrink-0"
+                                  className="px-1.5 py-0.5 rounded-md bg-amber-500/12 dark:bg-amber-400/15 text-amber-800 dark:text-amber-300 font-mono text-[10px] font-semibold whitespace-nowrap shrink-0"
                                 >
                                   {w}
                                 </span>
@@ -382,7 +392,7 @@ export const CambridgePassageSelectorModal: React.FC = () => {
                         </div>
                       )}
 
-                      <div className="flex items-center gap-1 px-2.5 py-1 rounded-lg text-xs font-semibold text-[#516050] dark:text-[#8FB996] bg-[#516050]/8 dark:bg-[#8FB996]/10 group-hover:bg-[#516050] group-hover:text-white dark:group-hover:bg-[#8FB996] dark:group-hover:text-stone-950 transition-all whitespace-nowrap shrink-0">
+                      <div className="flex items-center gap-1 px-2.5 py-1 rounded-lg text-xs font-semibold text-stone-700 dark:text-stone-200 bg-stone-900/[0.05] dark:bg-white/[0.07] group-hover:bg-stone-900 group-hover:text-white dark:group-hover:bg-stone-100 dark:group-hover:text-stone-950 transition-all whitespace-nowrap shrink-0">
                         <span>{isCurrent ? '继续精读' : '载入真题'}</span>
                         <ArrowRight className="w-3 h-3 group-hover:translate-x-0.5 transition-transform" />
                       </div>

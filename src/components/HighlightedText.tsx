@@ -15,7 +15,7 @@ interface HighlightedTextProps {
 }
 
 const DEFAULT_TOKEN_CLASS =
-  'hover:text-[#516050] dark:hover:text-[#8FB996] hover:underline underline-offset-2 cursor-pointer transition-colors duration-150';
+  'hover:text-stone-950 dark:hover:text-white hover:underline underline-offset-2 cursor-pointer transition-colors duration-150';
 
 /**
  * Escapes regex special characters
@@ -33,7 +33,7 @@ export const HighlightedText: React.FC<HighlightedTextProps> = ({
   text,
   targetWord,
   className = '',
-  highlightClassName = 'font-semibold text-stone-950 dark:text-stone-50 underline decoration-[#516050] dark:decoration-[#8FB996] decoration-[1.75px] underline-offset-[5px] bg-[#516050]/[0.08] dark:bg-[#8FB996]/[0.15] px-1.5 py-0.5 rounded-sm cursor-pointer hover:bg-[#516050]/15 transition-all',
+  highlightClassName = 'font-semibold text-stone-950 dark:text-stone-50 underline decoration-stone-900/75 dark:decoration-stone-200/80 decoration-[1.75px] underline-offset-[5px] bg-stone-900/[0.06] dark:bg-white/[0.12] px-1.5 py-0.5 rounded-sm cursor-pointer hover:bg-stone-900/12 transition-all',
   tokenClassName = DEFAULT_TOKEN_CLASS,
   onWordClick,
 }) => {
@@ -155,7 +155,7 @@ interface ClickableWordHeadingProps {
 }
 
 const HEADING_TOKEN_CLASS =
-  'hover:text-[#516050] dark:hover:text-[#8FB996] active:text-[#516050] dark:active:text-[#8FB996] underline decoration-stone-300/80 dark:decoration-white/25 decoration-dotted underline-offset-[6px] hover:decoration-[#516050] dark:hover:decoration-[#8FB996] cursor-pointer rounded-md px-0.5 -mx-0.5 active:bg-[#516050]/10 dark:active:bg-[#8FB996]/15 transition-colors duration-150';
+  'hover:text-stone-950 dark:hover:text-white active:text-stone-950 dark:active:text-white underline decoration-stone-300/80 dark:decoration-white/25 decoration-dotted underline-offset-[6px] hover:decoration-stone-900 dark:hover:decoration-stone-200 cursor-pointer rounded-md px-0.5 -mx-0.5 active:bg-stone-900/10 dark:active:bg-white/15 transition-colors duration-150';
 
 /**
  * Renders multi-word phrase headings as individually clickable words while leaving single-word headings inert.

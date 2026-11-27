@@ -94,7 +94,8 @@ async function callOpenAICompatibleApi(endpoint: string, apiKey: string, model: 
         max_tokens: 4096,
         system: systemMsg,
         messages: userAssistantMsgs
-      })
+      }),
+      signal: AbortSignal.timeout(45000)
     });
 
     if (!res.ok) {
@@ -126,7 +127,8 @@ async function callOpenAICompatibleApi(endpoint: string, apiKey: string, model: 
       'Content-Type': 'application/json',
       'Authorization': `Bearer ${apiKey}`
     },
-    body: JSON.stringify(body)
+    body: JSON.stringify(body),
+    signal: AbortSignal.timeout(45000)
   });
 
   if (!res.ok) {
@@ -942,7 +944,10 @@ app.post('/api/music/sync-playlist', async (req: Request, res: Response) => {
         };
 
         // Try v3 detail API first (contains full trackIds array)
-        const r2 = await fetch(`https://music.163.com/api/v3/playlist/detail?id=${playlistId}`, { headers: ncmHeaders });
+        const r2 = await fetch(`https://music.163.com/api/v3/playlist/detail?id=${playlistId}`, {
+          headers: ncmHeaders,
+          signal: AbortSignal.timeout(12000)
+        });
         if (r2.ok) {
           const d2 = await r2.json();
           if (d2.code === 200 && d2.playlist) {
@@ -958,7 +963,10 @@ app.post('/api/music/sync-playlist', async (req: Request, res: Response) => {
 
         // If no tracks or trackIds, try v1 detail API
         if (tracks.length === 0 && allTrackIds.length === 0) {
-          const r1 = await fetch(`https://music.163.com/api/playlist/detail?id=${playlistId}`, { headers: ncmHeaders });
+          const r1 = await fetch(`https://music.163.com/api/playlist/detail?id=${playlistId}`, {
+            headers: ncmHeaders,
+            signal: AbortSignal.timeout(12000)
+          });
           if (r1.ok) {
             const d1 = await r1.json();
             if (d1.code === 200 && d1.result) {
@@ -987,7 +995,8 @@ app.post('/api/music/sync-playlist', async (req: Request, res: Response) => {
               batchChunks.map(async chunk => {
                 try {
                   const songRes = await fetch(`https://music.163.com/api/v3/song/detail?c=${encodeURIComponent(JSON.stringify(chunk.map(id => ({ id }))))}`, {
-                    headers: ncmHeaders
+                    headers: ncmHeaders,
+                    signal: AbortSignal.timeout(12000)
                   });
                   if (songRes.ok) {
                     const songData = await songRes.json();
@@ -2054,7 +2063,8 @@ app.get('/api/music/song-lyric', async (req: Request, res: Response) => {
 
     if (cleanId) {
       const lrcRes = await fetch(`https://music.163.com/api/song/lyric?id=${cleanId}&lv=1&kv=1&tv=-1`, {
-        headers: { 'User-Agent': 'Mozilla/5.0' }
+        headers: { 'User-Agent': 'Mozilla/5.0' },
+        signal: AbortSignal.timeout(10000)
       });
       if (lrcRes.ok) {
         const data = await lrcRes.json();
@@ -2068,14 +2078,16 @@ app.get('/api/music/song-lyric', async (req: Request, res: Response) => {
     if (!lrc && (title || artist)) {
       const q = `${title} ${artist}`.trim();
       const sRes = await fetch(`https://music.163.com/api/search/get?s=${encodeURIComponent(q)}&type=1&limit=2`, {
-        headers: { 'User-Agent': 'Mozilla/5.0' }
+        headers: { 'User-Agent': 'Mozilla/5.0' },
+        signal: AbortSignal.timeout(10000)
       });
       if (sRes.ok) {
         const sData = await sRes.json();
         const cand = sData.result?.songs?.[0];
         if (cand?.id) {
           const cLrcRes = await fetch(`https://music.163.com/api/song/lyric?id=${cand.id}&lv=1&kv=1&tv=-1`, {
-            headers: { 'User-Agent': 'Mozilla/5.0' }
+            headers: { 'User-Agent': 'Mozilla/5.0' },
+            signal: AbortSignal.timeout(10000)
           });
           if (cLrcRes.ok) {
             const cData = await cLrcRes.json();

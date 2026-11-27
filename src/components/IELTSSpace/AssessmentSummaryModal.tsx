@@ -30,6 +30,11 @@ import {
   ArrowUpRight,
   MinusCircle
 } from 'lucide-react';
+import type { CambridgePassage } from '../../data/ieltsPassages';
+
+const EMPTY_WORDS: WordItem[] = [];
+const EMPTY_TEST_RECORDS: IELTSTestRecord[] = [];
+const EMPTY_CUSTOM_PASSAGES: CambridgePassage[] = [];
 
 // Specialized academic vocabulary fallback map for compound or domain-specific IELTS passage terms
 const ACADEMIC_TERM_FALLBACKS: Record<
@@ -216,27 +221,36 @@ export const AssessmentSummaryModal: React.FC = () => {
         particleCount: 80,
         spread: 70,
         origin: { y: 0.6 },
-        colors: ['#516050', '#CBD5C8', '#E6DFD5', '#F59E0B']
+        colors: ['#1C1917', '#78716C', '#E7E5E4', '#D97706']
       });
     }
   }, [isAssessmentModalOpen, assessmentResult]);
 
-  // Query words & test records from Dexie
-  const allDbWords = useLiveQuery(() => db.words.toArray(), []) || [];
-  const allTestRecords = useLiveQuery(() => db.ieltsTests.toArray(), []) || [];
+  // Query words & test records from Dexie (suspended when modal is closed)
+  const allDbWords = useLiveQuery(
+    () => (isAssessmentModalOpen ? db.words.toArray() : EMPTY_WORDS),
+    [isAssessmentModalOpen]
+  ) ?? EMPTY_WORDS;
+  const allTestRecords = useLiveQuery(
+    () => (isAssessmentModalOpen ? db.ieltsTests.toArray() : EMPTY_TEST_RECORDS),
+    [isAssessmentModalOpen]
+  ) ?? EMPTY_TEST_RECORDS;
 
   const dbWordMap = useMemo(() => {
     const map = new Map<string, WordItem>();
-    allDbWords.forEach(w => {
+    for (const w of allDbWords) {
       if (w.word) map.set(w.word.toLowerCase(), w);
-    });
+    }
     return map;
   }, [allDbWords]);
 
-  const customPassages = useLiveQuery(() => db.customPassages.toArray(), []) || [];
+  const customPassages = useLiveQuery(
+    () => (isAssessmentModalOpen ? db.customPassages.toArray() : EMPTY_CUSTOM_PASSAGES),
+    [isAssessmentModalOpen]
+  ) ?? EMPTY_CUSTOM_PASSAGES;
   const allWorkbookPassages = useMemo(
-    () => getCompleteWorkbookPassages(customPassages),
-    [customPassages]
+    () => (isAssessmentModalOpen ? getCompleteWorkbookPassages(customPassages) : EMPTY_CUSTOM_PASSAGES),
+    [isAssessmentModalOpen, customPassages]
   );
 
   const currentPassageObj = useMemo(() => {
@@ -476,7 +490,7 @@ export const AssessmentSummaryModal: React.FC = () => {
           >
             {/* Unified TopHeader — 100% consistent with IELTS / Music / AR punch-hole safe area */}
             <TopHeader
-              centerLabel="ASSESSMENT REPORT"
+              centerLabel="评估报告"
               leftKey="assessment-back-arrow"
               leftIcon={
                 <ArrowLeft className="w-4.5 h-4.5 group-hover:-translate-x-0.5 transition-transform" />
@@ -497,8 +511,8 @@ export const AssessmentSummaryModal: React.FC = () => {
               >
                 <div className="flex items-center justify-between gap-3">
                   <div className="space-y-1 flex-1 min-w-0">
-                    <div className="flex items-center gap-1.5 text-[10px] font-mono uppercase tracking-[0.14em] text-[#516050] dark:text-[#8FB996] font-semibold">
-                      <span>{volumeDisplayLabel}</span>
+                    <div className="flex items-center gap-1.5 text-[10px] font-mono uppercase tracking-[0.12em] text-stone-500 dark:text-stone-400 font-medium">
+                      <span className="text-stone-800 dark:text-stone-200 font-semibold">{volumeDisplayLabel}</span>
                       {currentPassageObj && (
                         <>
                           <span className="text-stone-300 dark:text-stone-600">·</span>
@@ -510,16 +524,16 @@ export const AssessmentSummaryModal: React.FC = () => {
                       <span className="text-stone-300 dark:text-stone-600">·</span>
                       <span className="text-stone-400 dark:text-stone-500">
                         {assessmentResult.extensionCount && assessmentResult.extensionCount > 0
-                          ? `EXTENDED (+${assessmentResult.extensionCount})`
+                          ? `加时 (+${assessmentResult.extensionCount})`
                           : '20:00'}
                       </span>
                     </div>
 
-                    {/* Bilingual Full Title — Zero Truncation */}
-                    <h2 className="font-serif-luxury text-[15px] font-bold text-stone-900 dark:text-stone-50 tracking-tight leading-snug">
+                    {/* Bilingual Full Title — Balanced Wrapping */}
+                    <h2 className="font-serif-luxury text-[14.5px] font-bold text-stone-900 dark:text-stone-50 tracking-tight leading-[1.38] [text-wrap:balance]">
                       {bilingualTitleMeta.titleZh}
                     </h2>
-                    <p className="font-serif-luxury text-[11px] text-stone-500 dark:text-stone-400 leading-tight">
+                    <p className="font-serif-luxury italic text-[11px] text-stone-500 dark:text-stone-400 leading-snug">
                       {bilingualTitleMeta.titleEn}
                     </p>
 
@@ -542,7 +556,7 @@ export const AssessmentSummaryModal: React.FC = () => {
                       <span className="text-stone-300 dark:text-stone-700">·</span>
                       <span>
                         词汇{' '}
-                        <strong className="text-[#516050] dark:text-[#8FB996] font-bold">
+                        <strong className="text-amber-700 dark:text-amber-400 font-bold">
                           +{dynamicWords.length}
                         </strong>
                       </span>
@@ -559,7 +573,7 @@ export const AssessmentSummaryModal: React.FC = () => {
                         fill="none"
                         stroke="currentColor"
                         strokeWidth="5"
-                        className="text-stone-200/70 dark:text-white/[0.06]"
+                        className="text-stone-200/75 dark:text-white/[0.07]"
                       />
                       <motion.circle
                         cx="44"
@@ -573,7 +587,7 @@ export const AssessmentSummaryModal: React.FC = () => {
                         initial={{ strokeDashoffset: ringCircumference }}
                         animate={{ strokeDashoffset: ringDashOffset }}
                         transition={{ duration: 0.9, delay: 0.18, ease: [0.16, 1, 0.3, 1] }}
-                        className="text-[#516050] dark:text-[#8FB996]"
+                        className="text-stone-900 dark:text-stone-100"
                       />
                     </svg>
                     <div className="absolute inset-0 flex flex-col items-center justify-center text-center">
@@ -600,7 +614,7 @@ export const AssessmentSummaryModal: React.FC = () => {
                           <span
                             className={
                               item.isCurrent
-                                ? 'text-[#516050] dark:text-[#8FB996] font-bold'
+                                ? 'text-stone-900 dark:text-stone-100 font-bold'
                                 : item.isCompleted
                                 ? 'text-stone-700 dark:text-stone-300 font-medium'
                                 : 'text-stone-400 dark:text-stone-500'
@@ -614,7 +628,7 @@ export const AssessmentSummaryModal: React.FC = () => {
                     </div>
 
                     {testSuiteSummary.isAllCompleted || testSuiteSummary.isFinalPassageOfTest ? (
-                      <span className="px-2 py-0.5 rounded-full bg-[#516050]/10 dark:bg-[#8FB996]/15 text-[#516050] dark:text-[#8FB996] font-semibold whitespace-nowrap shrink-0">
+                      <span className="px-2 py-0.5 rounded-full bg-stone-900/[0.07] dark:bg-white/[0.1] text-stone-900 dark:text-stone-100 font-semibold whitespace-nowrap shrink-0">
                         整卷 {testSuiteSummary.totalCorrect}/{testSuiteSummary.totalQuestions} · Band{' '}
                         {testSuiteSummary.suiteBand.toFixed(1)}
                       </span>
@@ -706,7 +720,7 @@ export const AssessmentSummaryModal: React.FC = () => {
                           <div className="flex items-start justify-between gap-3">
                             <div className="space-y-1 min-w-0 flex-1">
                               <div className="flex items-baseline gap-2 min-w-0 flex-wrap">
-                                <h4 className="font-serif-luxury text-base font-bold text-stone-900 dark:text-stone-100 group-hover:text-[#516050] dark:group-hover:text-[#8FB996] transition-colors capitalize shrink-0">
+                                <h4 className="font-serif-luxury text-base font-bold text-stone-900 dark:text-stone-100 group-hover:text-stone-950 dark:group-hover:text-white transition-colors capitalize shrink-0">
                                   {item.word}
                                 </h4>
                                 {/* Full Phonetic Display — Zero Truncation (Item 1) */}
@@ -807,7 +821,7 @@ export const AssessmentSummaryModal: React.FC = () => {
                                     e.stopPropagation();
                                     handleLocateInPassage(q, qIdx);
                                   }}
-                                  className="inline-flex items-center gap-0.5 px-2 py-0.5 rounded-full bg-stone-100 hover:bg-[#516050] dark:bg-white/[0.06] dark:hover:bg-[#8FB996] text-stone-600 hover:text-white dark:text-stone-300 dark:hover:text-stone-950 text-[10px] font-sans-ui font-medium transition-colors cursor-pointer"
+                                  className="inline-flex items-center gap-0.5 px-2 py-0.5 rounded-full bg-stone-100 hover:bg-stone-900 dark:bg-white/[0.06] dark:hover:bg-stone-100 text-stone-600 hover:text-white dark:text-stone-300 dark:hover:text-stone-950 text-[10px] font-sans-ui font-medium transition-colors cursor-pointer"
                                   title={`跳转到原文 Paragraph ${paraLetter} 出题段`}
                                 >
                                   <span>定位原文 · Para {paraLetter}</span>
@@ -832,7 +846,7 @@ export const AssessmentSummaryModal: React.FC = () => {
                                 你的作答: {userAns || '未填'}
                               </span>
                               <span className="text-stone-300 dark:text-stone-700">·</span>
-                              <span className="text-[#516050] dark:text-[#8FB996] font-semibold">
+                              <span className="text-stone-900 dark:text-stone-100 font-semibold">
                                 官方正解: {q.correctAnswer}
                               </span>
                             </div>
@@ -865,7 +879,7 @@ export const AssessmentSummaryModal: React.FC = () => {
                     id="assessment-next-passage-btn"
                     type="button"
                     onClick={handleStartNextPassage}
-                    className="flex-[1.5] py-3 px-4 rounded-full bg-[#516050] hover:bg-[#3F4C3E] dark:bg-[#6B8F71] dark:hover:bg-[#4A6B50] text-white font-sans-ui text-xs font-semibold flex items-center justify-center gap-1.5 shadow-md active:scale-98 transition-all cursor-pointer whitespace-nowrap"
+                    className="flex-[1.5] py-3 px-4 rounded-full bg-stone-900 hover:bg-stone-800 dark:bg-stone-100 dark:hover:bg-white text-white dark:text-stone-950 font-sans-ui text-xs font-semibold flex items-center justify-center gap-1.5 shadow-md active:scale-98 transition-all cursor-pointer whitespace-nowrap"
                   >
                     <span>
                       {nextSequential.isSameTest
@@ -879,7 +893,7 @@ export const AssessmentSummaryModal: React.FC = () => {
                     id="return-to-daily-song-btn"
                     type="button"
                     onClick={handleReturnToSong}
-                    className="flex-[1.4] py-3 px-5 rounded-full bg-[#516050] hover:bg-[#3F4C3E] dark:bg-[#6B8F71] dark:hover:bg-[#4A6B50] text-white font-sans-ui text-xs font-semibold flex items-center justify-center gap-1.5 shadow-md active:scale-98 transition-all cursor-pointer"
+                    className="flex-[1.4] py-3 px-5 rounded-full bg-stone-900 hover:bg-stone-800 dark:bg-stone-100 dark:hover:bg-white text-white dark:text-stone-950 font-sans-ui text-xs font-semibold flex items-center justify-center gap-1.5 shadow-md active:scale-98 transition-all cursor-pointer"
                   >
                     <span>返回音乐研习</span>
                     <ChevronRight className="w-3.5 h-3.5" />

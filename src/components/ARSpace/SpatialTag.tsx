@@ -140,20 +140,27 @@ export const SpatialTag: React.FC<SpatialTagProps> = ({
     isTopPlaced = clampedCardTop + capsuleHeight / 2 < anchorYPx;
     leaderLineEndY = isTopPlaced ? shiftY + capsuleHeight : shiftY;
   } else {
-    const leaderHeight = 24;
-    const bubbleHeight = measuredCardSize.height || 230;
-    const spaceAbove = anchorYPx - topSafeMargin;
+    const leaderHeight = 20;
+    const expandedTopMargin = 82;
+    const expandedBottomMargin = 132;
+    const bubbleHeight = measuredCardSize.height || 224;
+    const spaceAbove = anchorYPx - expandedTopMargin;
+    const spaceBelow = containerHeight - expandedBottomMargin - anchorYPx;
+    const fitsAbove = spaceAbove >= bubbleHeight + leaderHeight;
+    const fitsBelow = spaceBelow >= bubbleHeight + leaderHeight;
 
-    if (spaceAbove >= bubbleHeight + leaderHeight) {
+    if (fitsAbove || (!fitsBelow && spaceAbove >= spaceBelow)) {
       isTopPlaced = true;
-      const cardTopPx = Math.max(topSafeMargin, anchorYPx - leaderHeight - bubbleHeight);
+      const maxTopAboveAnchor = anchorYPx - 16 - bubbleHeight;
+      const desiredTop = anchorYPx - leaderHeight - bubbleHeight;
+      const cardTopPx = Math.min(maxTopAboveAnchor, Math.max(expandedTopMargin, desiredTop));
       shiftY = cardTopPx - anchorYPx;
       leaderLineEndY = shiftY + bubbleHeight;
     } else {
       isTopPlaced = false;
-      const minTop = topSafeMargin;
-      const maxTop = Math.max(minTop, containerHeight - bottomSafeMargin - bubbleHeight);
-      const cardTopPx = Math.max(minTop, Math.min(maxTop, anchorYPx + leaderHeight));
+      const minTopBelowAnchor = anchorYPx + 16;
+      const maxTop = Math.max(minTopBelowAnchor, containerHeight - expandedBottomMargin - bubbleHeight);
+      const cardTopPx = Math.max(minTopBelowAnchor, Math.min(maxTop, anchorYPx + leaderHeight));
       shiftY = cardTopPx - anchorYPx;
       leaderLineEndY = shiftY;
     }
@@ -191,18 +198,18 @@ export const SpatialTag: React.FC<SpatialTagProps> = ({
           y1={0}
           x2={shiftX}
           y2={leaderLineEndY}
-          stroke={isExpanded ? 'rgba(250, 247, 240, 0.95)' : 'rgba(250, 247, 240, 0.8)'}
+          stroke={isExpanded ? 'rgba(253, 252, 249, 0.95)' : 'rgba(253, 252, 249, 0.82)'}
           strokeWidth={isExpanded ? 1.25 : 1}
         />
         <circle
           cx={shiftX}
           cy={leaderLineEndY}
           r={2}
-          fill="#FAF7F0"
+          fill="#FDFCF9"
         />
       </svg>
 
-      {/* Breathing Pearl & Sage Anchor Point at Exact Object Coordinate (0, 0) */}
+      {/* Crisp Pearl & Charcoal Anchor Point at Exact Object Coordinate (0, 0) */}
       <button
         type="button"
         onClick={(e) => {
@@ -215,20 +222,20 @@ export const SpatialTag: React.FC<SpatialTagProps> = ({
         <span
           className={`absolute rounded-full transition-all duration-500 ${
             isExpanded
-              ? 'w-6 h-6 bg-[#FAF7F0]/45 animate-ping'
-              : 'w-4.5 h-4.5 bg-[#FAF7F0]/35 animate-pulse'
+              ? 'w-6 h-6 bg-[#FDFCF9]/45 animate-ping'
+              : 'w-4.5 h-4.5 bg-[#FDFCF9]/35 animate-pulse'
           }`}
         />
         <span
-          className={`relative rounded-full transition-all duration-300 shadow-[0_2px_10px_rgba(0,0,0,0.35)] ${
+          className={`relative rounded-full transition-all duration-300 shadow-[0_2px_10px_rgba(0,0,0,0.38)] ${
             isExpanded
-              ? 'w-3 h-3 bg-[#516050] ring-2 ring-[#FAF7F0] scale-110'
-              : 'w-2.5 h-2.5 bg-[#FAF7F0] ring-2 ring-[#516050] group-hover:scale-125'
+              ? 'w-3 h-3 bg-stone-900 dark:bg-stone-100 ring-2 ring-[#FDFCF9] dark:ring-stone-900 scale-110'
+              : 'w-2.5 h-2.5 bg-[#FDFCF9] ring-[1.75px] ring-stone-900/75 group-hover:scale-125'
           }`}
         />
       </button>
 
-      {/* Direct Object Annotation Tag / Card (Warm Cream Editorial Glass) */}
+      {/* Direct Object Annotation Tag / Card (Warm Ivory Editorial Surface) */}
       <div
         ref={cardElementRef}
         style={{
@@ -242,7 +249,7 @@ export const SpatialTag: React.FC<SpatialTagProps> = ({
       >
         <AnimatePresence mode="wait">
           {!isExpanded ? (
-            /* Warm Parchment Frosted Capsule Label */
+            /* Warm Ivory Frosted Capsule Label */
             <motion.div
               key="micro-capsule"
               initial={{ opacity: 0, scale: 0.9, y: isTopPlaced ? 4 : -4 }}
@@ -255,7 +262,7 @@ export const SpatialTag: React.FC<SpatialTagProps> = ({
               }}
               className="cursor-pointer active:scale-95 transition-transform"
             >
-              <div className="flex items-center gap-2 px-3.5 py-1.5 rounded-full bg-[#FAF7F0]/94 dark:bg-[#141822]/92 backdrop-blur-2xl border border-white/80 dark:border-white/15 shadow-[0_8px_24px_rgba(28,25,23,0.22)] whitespace-nowrap shrink-0 hover:bg-[#FDFBF7] dark:hover:bg-[#1A202C] transition-colors">
+              <div className="flex items-center gap-2 px-3.5 py-1.5 rounded-full bg-[#FDFCF9]/95 dark:bg-[#141822]/94 backdrop-blur-2xl border border-white/85 dark:border-white/14 shadow-[0_8px_24px_rgba(20,18,16,0.22)] whitespace-nowrap shrink-0 hover:bg-white dark:hover:bg-[#1A202C] transition-colors">
                 <MasteryBadge
                   level={currentMastery}
                   size={15}
@@ -268,13 +275,13 @@ export const SpatialTag: React.FC<SpatialTagProps> = ({
                 <span className="font-serif-luxury text-[13.5px] font-semibold tracking-wide text-stone-900 dark:text-stone-100 leading-none whitespace-nowrap">
                   {tag.label}
                 </span>
-                <span className="text-[11px] text-[#516050] dark:text-[#8FB996] font-sans font-medium pl-1.5 border-l border-stone-300/80 dark:border-white/15 leading-none whitespace-nowrap">
+                <span className="text-[11px] text-stone-500 dark:text-stone-400 font-sans font-medium pl-1.5 border-l border-stone-300/80 dark:border-white/15 leading-none whitespace-nowrap">
                   {tag.wordData.definitionCn ? tag.wordData.definitionCn.split(/[，；,]/)[0] : tag.phonetic}
                 </span>
               </div>
             </motion.div>
           ) : (
-            /* Expanded Detail Card (Warm Cream Paper & Botanical Sage Magazine Style) */
+            /* Expanded Detail Card (Solid Warm Ivory Editorial Card) */
             <motion.div
               key="micro-bubble"
               initial={{ opacity: 0, scale: 0.92, y: isTopPlaced ? 8 : -8 }}
@@ -282,7 +289,7 @@ export const SpatialTag: React.FC<SpatialTagProps> = ({
               exit={{ opacity: 0, scale: 0.92, y: isTopPlaced ? 6 : -6 }}
               transition={{ duration: 0.22, ease: [0.16, 1, 0.3, 1] }}
               onClick={(e) => e.stopPropagation()}
-              className="w-[260px] max-w-[84vw] rounded-2xl p-4 bg-[#FAF7F0]/96 dark:bg-[#141822]/95 backdrop-blur-2xl border border-white/85 dark:border-white/15 shadow-[0_20px_48px_rgba(28,25,23,0.28)] text-stone-900 dark:text-stone-100 space-y-2.5"
+              className="w-[260px] max-w-[84vw] rounded-2xl p-4 bg-[#FDFCF9] dark:bg-[#141822] border border-stone-200/90 dark:border-white/14 shadow-[0_20px_50px_rgba(20,18,16,0.3)] text-stone-900 dark:text-stone-100 space-y-2.5"
             >
               {/* Header */}
               <div className="flex items-center justify-between pb-2 border-b border-stone-200/80 dark:border-white/10">
@@ -309,8 +316,8 @@ export const SpatialTag: React.FC<SpatialTagProps> = ({
                     onClick={handlePlayAudio}
                     className={`w-6 h-6 rounded-full flex items-center justify-center transition-all cursor-pointer ${
                       isPlayingAudio
-                        ? 'bg-[#516050] text-white'
-                        : 'text-[#516050] dark:text-[#8FB996] hover:bg-[#516050]/10 dark:hover:bg-white/10'
+                        ? 'bg-stone-900 text-white dark:bg-stone-100 dark:text-stone-900'
+                        : 'text-stone-600 dark:text-stone-300 hover:bg-stone-200/70 dark:hover:bg-white/10'
                     }`}
                     aria-label="Play pronunciation"
                   >
@@ -333,11 +340,11 @@ export const SpatialTag: React.FC<SpatialTagProps> = ({
               {/* Phonetic & Meaning */}
               <div className="space-y-1 text-left">
                 {tag.phonetic && (
-                  <p className="font-mono text-[11px] text-[#516050] dark:text-[#8FB996] font-medium">
+                  <p className="font-mono text-[11px] text-stone-500 dark:text-stone-400 font-medium">
                     {tag.phonetic}
                   </p>
                 )}
-                <p className="text-[13px] font-medium text-stone-800 dark:text-stone-100 leading-snug">
+                <p className="text-[13px] font-medium text-stone-900 dark:text-stone-100 leading-snug">
                   {wordData.definitionCn}
                 </p>
                 {wordData.definition && (
@@ -360,10 +367,10 @@ export const SpatialTag: React.FC<SpatialTagProps> = ({
               <button
                 type="button"
                 onClick={handleTriggerHero}
-                className="w-full pt-1 flex items-center justify-between text-[11px] font-semibold text-[#516050] dark:text-[#8FB996] hover:opacity-80 group cursor-pointer transition-opacity"
+                className="w-full pt-1 flex items-center justify-between text-[11.5px] font-semibold text-stone-900 dark:text-stone-100 hover:opacity-75 group cursor-pointer transition-opacity"
               >
-                <span>翻阅完整词汇手帖</span>
-                <ChevronRight className="w-3.5 h-3.5 text-[#516050] dark:text-[#8FB996] group-hover:translate-x-0.5 transition-transform" />
+                <span>查看完整词卡</span>
+                <ChevronRight className="w-3.5 h-3.5 text-stone-400 group-hover:text-stone-700 dark:group-hover:text-stone-200 group-hover:translate-x-0.5 transition-all" />
               </button>
             </motion.div>
           )}

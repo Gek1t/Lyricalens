@@ -386,8 +386,8 @@ export const IELTSListeningView: React.FC<IELTSListeningViewProps> = ({
               ? 'border-emerald-600 text-emerald-700 dark:text-emerald-300 font-bold'
               : 'border-rose-500 text-rose-700 dark:text-rose-300 line-through'
             : userVal.trim()
-            ? 'border-[#516050] dark:border-[#8FB996] text-[#516050] dark:text-[#8FB996] font-semibold'
-            : 'border-stone-400/85 dark:border-stone-600 focus:border-[#516050] dark:focus:border-[#8FB996] text-stone-900 dark:text-stone-100 placeholder:font-serif-luxury placeholder:italic placeholder:text-[13px] placeholder:text-stone-400/75'
+            ? 'border-stone-900 dark:border-stone-100 text-stone-900 dark:text-stone-100 font-semibold'
+            : 'border-stone-400/85 dark:border-stone-600 focus:border-stone-900 dark:focus:border-stone-100 text-stone-900 dark:text-stone-100 placeholder:font-serif-luxury placeholder:italic placeholder:text-[13px] placeholder:text-stone-400/75'
         }`}
       />
     );
@@ -470,26 +470,22 @@ export const IELTSListeningView: React.FC<IELTSListeningViewProps> = ({
         <div className="max-w-lg mx-auto space-y-4">
           {/* 1. Open Editorial Masthead, In-Test S1-S4 Switcher & Academic Title */}
           <div className="space-y-2 pt-1">
-            <div className="flex flex-wrap items-center justify-between gap-x-2 gap-y-1 text-xs">
-              <div className="flex items-center gap-1.5 font-mono tabular-nums text-stone-600 dark:text-stone-300 min-w-0 overflow-hidden">
-                <span className="font-serif-luxury italic text-[14px] sm:text-[15px] font-bold tracking-normal truncate text-[#516050] dark:text-[#8FB996]">
+            <div className="flex items-center justify-between gap-2 text-xs">
+              <div className="flex items-center gap-1.5 font-sans-ui tabular-nums text-stone-500 dark:text-stone-400 min-w-0 overflow-hidden">
+                <span className="text-[12.5px] font-semibold tracking-normal truncate text-stone-800 dark:text-stone-200">
                   {normalizeVolumeKey(section.cambridgeBook) === '2026 考场真题'
                     ? '2026 考季真题'
                     : section.cambridgeBook
-                        .replace(/^Cambridge\s+(\d+)$/i, 'Vol. $1')
-                        .replace(/^(\d{4})\s*考场真题$/, 'Vol. $1')
-                        .replace(/^(\d{4})\s*Recall$/i, 'Vol. $1')
-                        .replace(/^(Cambridge\s+IELTS\s+Academic\s+Special|IELTS\s+Academic\s+Reading\s+Special)$/i, 'Vol. Special')}
+                        .replace(/^Cambridge\s+(\d+)$/i, '剑桥雅思 $1')
+                        .replace(/^(\d{4})\s*考场真题$/, '$1 考季真题')
+                        .replace(/^(\d{4})\s*Recall$/i, '$1 考季真题')
+                        .replace(/^(Cambridge\s+IELTS\s+Academic\s+Special|IELTS\s+Academic\s+Reading\s+Special)$/i, '学术特辑')}
                 </span>
-                <span aria-hidden="true" className="opacity-40 shrink-0">·</span>
+                <span aria-hidden="true" className="opacity-45 shrink-0">·</span>
                 <span className="whitespace-nowrap shrink-0">Test {section.testNum}</span>
-                <span aria-hidden="true" className="opacity-40 shrink-0">·</span>
-                <span className="font-sans-ui font-medium text-[#516050] dark:text-[#8FB996] whitespace-nowrap shrink-0">
-                  Section {section.sectionNum} 听力
-                </span>
               </div>
-              <span className="font-mono tabular-nums text-[11px] text-stone-500 dark:text-stone-400 font-medium whitespace-nowrap shrink-0 ml-auto">
-                {section.bandDifficulty}
+              <span className="font-sans-ui tabular-nums text-[11px] text-stone-400 dark:text-stone-500 font-medium whitespace-nowrap shrink-0">
+                {section.bandDifficulty.replace(/\s*-\s*/g, '–')}
               </span>
             </div>
 
@@ -524,7 +520,7 @@ export const IELTSListeningView: React.FC<IELTSListeningViewProps> = ({
                     >
                       <span className="whitespace-nowrap">S{sib.sectionNum}</span>
                       {doneRec ? (
-                        <span className="text-[10px] text-[#516050] dark:text-[#8FB996] font-semibold whitespace-nowrap">
+                        <span className="text-[10px] text-stone-700 dark:text-stone-300 font-semibold whitespace-nowrap">
                           ✓{doneRec.correctCount}/{doneRec.totalQuestions}
                         </span>
                       ) : draftAnsCount > 0 && !isCurrentSib ? (
@@ -532,7 +528,7 @@ export const IELTSListeningView: React.FC<IELTSListeningViewProps> = ({
                           {draftAnsCount}/{sib.questions.length}
                         </span>
                       ) : isCurrentSib && answeredCount > 0 ? (
-                        <span className="text-[10px] text-[#516050] dark:text-[#8FB996] whitespace-nowrap">
+                        <span className="text-[10px] text-stone-700 dark:text-stone-300 font-semibold whitespace-nowrap">
                           {answeredCount}/{section.questions.length}
                         </span>
                       ) : null}
@@ -580,7 +576,7 @@ export const IELTSListeningView: React.FC<IELTSListeningViewProps> = ({
                   <button
                     type="button"
                     onClick={handleTogglePlay}
-                    className="w-7 h-7 rounded-full bg-[#516050] hover:bg-[#3F4C3E] dark:bg-[#8FB996] text-white dark:text-stone-950 flex items-center justify-center shrink-0 transition-transform active:scale-90 cursor-pointer shadow-2xs focus:outline-none"
+                    className="w-7 h-7 rounded-full bg-stone-900 hover:bg-stone-800 dark:bg-stone-100 dark:hover:bg-white text-white dark:text-stone-950 flex items-center justify-center shrink-0 transition-transform active:scale-90 cursor-pointer shadow-2xs focus:outline-none"
                     title={isPlaying ? '暂停播放' : '播放听力音频'}
                   >
                     {isPlaying ? (
@@ -607,11 +603,11 @@ export const IELTSListeningView: React.FC<IELTSListeningViewProps> = ({
                 >
                   <div className="w-full h-[3px] rounded-full bg-stone-300/85 dark:bg-white/10 relative flex items-center">
                     <div
-                      className="h-full bg-[#516050] dark:bg-[#8FB996] transition-all duration-300 rounded-full"
+                      className="h-full bg-stone-900 dark:bg-stone-100 transition-all duration-300 rounded-full"
                       style={{ width: `${progressPercent}%` }}
                     />
                     <div
-                      className="w-2.5 h-2.5 rounded-full bg-[#516050] dark:bg-[#8FB996] shadow-2xs -ml-1.5 transition-transform group-hover:scale-125"
+                      className="w-2.5 h-2.5 rounded-full bg-stone-900 dark:bg-stone-100 shadow-2xs -ml-1.5 transition-transform group-hover:scale-125"
                     />
                   </div>
                 </div>
@@ -635,7 +631,7 @@ export const IELTSListeningView: React.FC<IELTSListeningViewProps> = ({
                     <button
                       type="button"
                       onClick={handleSpeedCycle}
-                      className="text-[11px] font-mono tabular-nums font-semibold text-[#516050] dark:text-[#8FB996] hover:opacity-80 transition-opacity cursor-pointer"
+                      className="text-[11px] font-mono tabular-nums font-semibold text-stone-800 dark:text-stone-200 hover:opacity-80 transition-opacity cursor-pointer"
                       title="切换倍速"
                     >
                       {playbackSpeed.toFixed(1)}×
@@ -675,7 +671,7 @@ export const IELTSListeningView: React.FC<IELTSListeningViewProps> = ({
                       <button
                         type="button"
                         onClick={handleTogglePlay}
-                        className="w-10 h-10 rounded-full bg-[#516050] hover:bg-[#3F4C3E] dark:bg-[#8FB996] text-white dark:text-stone-950 flex items-center justify-center shrink-0 transition-transform active:scale-92 cursor-pointer shadow-xs focus:outline-none"
+                        className="w-10 h-10 rounded-full bg-stone-900 hover:bg-stone-800 dark:bg-stone-100 dark:hover:bg-white text-white dark:text-stone-950 flex items-center justify-center shrink-0 transition-transform active:scale-92 cursor-pointer shadow-xs focus:outline-none"
                         title={isPlaying ? '暂停播放' : '播放听力音频'}
                       >
                         {isPlaying ? (
@@ -700,7 +696,7 @@ export const IELTSListeningView: React.FC<IELTSListeningViewProps> = ({
                       <button
                         type="button"
                         onClick={handleSpeedCycle}
-                        className="text-[11.5px] font-mono tabular-nums font-semibold text-stone-500 hover:text-stone-900 dark:text-stone-400 dark:hover:text-white transition-colors cursor-pointer whitespace-nowrap"
+                        className="text-[11.5px] font-mono tabular-nums font-semibold text-stone-600 hover:text-stone-900 dark:text-stone-400 dark:hover:text-white transition-colors cursor-pointer whitespace-nowrap"
                         title="切换倍速"
                       >
                         {playbackSpeed.toFixed(1)}×
@@ -715,7 +711,7 @@ export const IELTSListeningView: React.FC<IELTSListeningViewProps> = ({
                         }}
                         className={`p-1 transition-colors cursor-pointer shrink-0 ${
                           repeatSentence
-                            ? 'text-[#516050] dark:text-[#8FB996]'
+                            ? 'text-stone-900 dark:text-white'
                             : 'text-stone-400 hover:text-stone-700 dark:text-stone-500 dark:hover:text-stone-300'
                         }`}
                         title="单句复读循环"
@@ -780,9 +776,11 @@ export const IELTSListeningView: React.FC<IELTSListeningViewProps> = ({
                     </button>
                   </div>
 
-                  <span className="text-[11px] font-mono tabular-nums text-stone-400 dark:text-stone-500">
-                    {activeTab === 'exam' ? `Questions ${firstQId}–${lastQId}` : '点序号跳播 · 点词查释义'}
-                  </span>
+                  {activeTab === 'exam' && (
+                    <span className="text-[11px] font-mono tabular-nums text-stone-400 dark:text-stone-500">
+                      Questions {firstQId}–{lastQId}
+                    </span>
+                  )}
                 </div>
               </div>
             </div>
@@ -821,7 +819,7 @@ export const IELTSListeningView: React.FC<IELTSListeningViewProps> = ({
                                   ? 'text-emerald-700 dark:text-emerald-400'
                                   : 'text-rose-600 dark:text-rose-400'
                                 : userVal.trim()
-                                ? 'text-[#516050] dark:text-[#8FB996]'
+                                ? 'text-stone-900 dark:text-stone-100'
                                 : 'text-stone-400 dark:text-stone-500'
                             }`}
                           >
@@ -857,13 +855,13 @@ export const IELTSListeningView: React.FC<IELTSListeningViewProps> = ({
                                         isExamSubmitted && isCorrectOpt
                                           ? 'bg-emerald-500/10 border-emerald-500/40 text-emerald-900 dark:text-emerald-200 font-semibold'
                                           : isSelected
-                                          ? 'bg-[#516050]/10 dark:bg-[#8FB996]/15 border-[#516050]/35 dark:border-[#8FB996]/40 text-stone-900 dark:text-white font-semibold'
+                                          ? 'bg-stone-900/[0.06] dark:bg-white/[0.1] border-stone-900/35 dark:border-stone-100/40 text-stone-900 dark:text-white font-semibold'
                                           : 'bg-white/60 dark:bg-white/[0.02] border-stone-900/[0.06] dark:border-white/[0.06] text-stone-700 dark:text-stone-300 hover:bg-white dark:hover:bg-white/[0.05]'
                                       }`}
                                     >
                                       <span className="leading-snug">{opt}</span>
                                       {isSelected && (
-                                        <Check className="w-3.5 h-3.5 text-[#516050] dark:text-[#8FB996] shrink-0" />
+                                        <Check className="w-3.5 h-3.5 text-stone-900 dark:text-stone-100 shrink-0" />
                                       )}
                                     </button>
                                   );
@@ -900,8 +898,8 @@ export const IELTSListeningView: React.FC<IELTSListeningViewProps> = ({
                                         }}
                                         className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[11px] font-sans-ui font-medium transition-all cursor-pointer active:scale-95 border ${
                                           isCluePlaying
-                                            ? 'bg-[#516050] text-white border-[#516050] dark:bg-[#8FB996] dark:text-stone-950 dark:border-[#8FB996] shadow-2xs'
-                                            : 'bg-white/90 hover:bg-white dark:bg-white/[0.07] dark:hover:bg-white/[0.12] text-[#516050] dark:text-[#8FB996] border-[#516050]/20 dark:border-[#8FB996]/25 shadow-2xs'
+                                            ? 'bg-stone-900 text-white border-stone-900 dark:bg-stone-100 dark:text-stone-950 dark:border-stone-100 shadow-2xs'
+                                            : 'bg-white/90 hover:bg-white dark:bg-white/[0.07] dark:hover:bg-white/[0.12] text-stone-800 dark:text-stone-200 border-stone-900/15 dark:border-white/20 shadow-2xs'
                                         }`}
                                         title={isCluePlaying ? '点击暂停原音朗读' : '点击播放该题对应的听力原句'}
                                       >
@@ -938,14 +936,14 @@ export const IELTSListeningView: React.FC<IELTSListeningViewProps> = ({
                                     onClick={() => handleJumpToParagraph(clueIdx)}
                                     className={`px-3 py-2 rounded-xl border transition-colors cursor-pointer ${
                                       isCluePlaying
-                                        ? 'bg-[#516050]/[0.08] dark:bg-[#8FB996]/[0.12] border-[#516050]/25 dark:border-[#8FB996]/30'
+                                        ? 'bg-stone-900/[0.06] dark:bg-white/[0.1] border-stone-900/20 dark:border-white/25'
                                         : 'bg-white/65 dark:bg-white/[0.025] border-stone-900/[0.05] dark:border-white/[0.05] hover:bg-white/90 dark:hover:bg-white/[0.05]'
                                     }`}
                                     title="轻触播放该原句"
                                   >
                                     <p className="font-serif-luxury italic text-[13.5px] text-stone-700 dark:text-stone-200 leading-relaxed">
                                       {cluePara.speaker && (
-                                        <span className="not-italic font-sans-ui text-[10.5px] font-semibold uppercase tracking-wider text-[#516050] dark:text-[#8FB996] mr-1.5">
+                                        <span className="not-italic font-sans-ui text-[10.5px] font-semibold uppercase tracking-wider text-stone-700 dark:text-stone-300 mr-1.5">
                                           {cluePara.speaker}:
                                         </span>
                                       )}
@@ -972,7 +970,7 @@ export const IELTSListeningView: React.FC<IELTSListeningViewProps> = ({
                     <button
                       type="button"
                       onClick={handleSubmitExam}
-                      className="w-full py-3.5 rounded-2xl bg-[#516050] hover:bg-[#3F4C3E] dark:bg-[#8FB996] text-white dark:text-stone-950 font-semibold text-xs tracking-wider flex items-center justify-center gap-2 shadow-xs transition-all cursor-pointer active:scale-[0.99]"
+                      className="w-full py-3.5 rounded-2xl bg-stone-900 hover:bg-stone-800 dark:bg-stone-100 dark:hover:bg-white text-white dark:text-stone-950 font-semibold text-xs tracking-wider flex items-center justify-center gap-2 shadow-xs transition-all cursor-pointer active:scale-[0.99]"
                     >
                       <FileCheck className="w-4 h-4" />
                       <span>
@@ -997,7 +995,7 @@ export const IELTSListeningView: React.FC<IELTSListeningViewProps> = ({
                         <button
                           type="button"
                           onClick={() => setActiveTab('transcript')}
-                          className="px-3.5 py-2 rounded-xl bg-[#516050] text-white dark:bg-[#8FB996] dark:text-stone-950 text-xs font-semibold hover:opacity-95 transition-opacity cursor-pointer whitespace-nowrap"
+                          className="px-3.5 py-2 rounded-xl bg-stone-900 hover:bg-stone-800 text-white dark:bg-stone-100 dark:hover:bg-white dark:text-stone-950 text-xs font-semibold transition-colors cursor-pointer whitespace-nowrap"
                         >
                           对照原文精听
                         </button>
@@ -1022,7 +1020,7 @@ export const IELTSListeningView: React.FC<IELTSListeningViewProps> = ({
                                 loadCambridgeListening(nextSequentialSection.next);
                               }
                             }}
-                            className="flex-[1.45] py-2.5 px-3.5 rounded-xl bg-[#516050] hover:bg-[#3F4C3E] dark:bg-[#8FB996] text-white dark:text-stone-950 font-semibold text-xs flex items-center justify-center gap-1.5 cursor-pointer transition-all active:scale-98"
+                            className="flex-[1.45] py-2.5 px-3.5 rounded-xl bg-stone-900 hover:bg-stone-800 dark:bg-stone-100 dark:hover:bg-white text-white dark:text-stone-950 font-semibold text-xs flex items-center justify-center gap-1.5 cursor-pointer transition-all active:scale-98"
                           >
                             <span>
                               {nextSequentialSection.isSameTest
@@ -1058,12 +1056,18 @@ export const IELTSListeningView: React.FC<IELTSListeningViewProps> = ({
                         key={`script-para-${idx}`}
                         data-listening-para={idx}
                         onClick={() => handleJumpToParagraph(idx)}
-                        className={`py-4 px-3 -mx-3 rounded-2xl transition-all duration-200 cursor-pointer flex items-start gap-3.5 ${
+                        className={`relative py-4 pl-3.5 pr-2.5 -mx-2 rounded-xl transition-all duration-200 cursor-pointer flex items-start gap-3.5 ${
                           isCurrent
-                            ? 'bg-[#516050]/[0.07] dark:bg-[#8FB996]/[0.1]'
-                            : 'hover:bg-stone-900/[0.025] dark:hover:bg-white/[0.025]'
+                            ? 'bg-stone-900/[0.03] dark:bg-white/[0.04]'
+                            : 'hover:bg-stone-900/[0.02] dark:hover:bg-white/[0.02]'
                         }`}
                       >
+                        {isCurrent && (
+                          <span
+                            aria-hidden="true"
+                            className="absolute left-0 top-3.5 bottom-3.5 w-[2.5px] rounded-full bg-stone-900 dark:bg-stone-100"
+                          />
+                        )}
                         {/* Left Margin: Sentence Numeral (Click to jump audio playback) */}
                         <button
                           type="button"
@@ -1072,13 +1076,13 @@ export const IELTSListeningView: React.FC<IELTSListeningViewProps> = ({
                             handleJumpToParagraph(idx);
                           }}
                           title="点击从本句开始播放"
-                          className="w-8 shrink-0 pt-0.5 flex flex-col items-start select-none cursor-pointer group/num focus:outline-none"
+                          className="w-7 shrink-0 pt-0.5 flex flex-col items-start select-none cursor-pointer group/num focus:outline-none"
                         >
                           <span
                             className={`font-serif-luxury text-lg font-bold leading-none tabular-nums transition-colors ${
                               isCurrent
-                                ? 'text-[#516050] dark:text-[#8FB996]'
-                                : 'text-stone-400 dark:text-stone-600 group-hover/num:text-[#516050] dark:group-hover/num:text-[#8FB996]'
+                                ? 'text-stone-900 dark:text-stone-100'
+                                : 'text-stone-300 dark:text-stone-600 group-hover/num:text-stone-700 dark:group-hover/num:text-stone-300'
                             }`}
                           >
                             {String(idx + 1).padStart(2, '0')}
@@ -1090,9 +1094,9 @@ export const IELTSListeningView: React.FC<IELTSListeningViewProps> = ({
                           {(para.speaker || hasClue) && (
                             <div className="flex items-center justify-between gap-2 text-[11px]">
                               <span
-                                className={`font-mono tabular-nums font-semibold uppercase tracking-wider ${
+                                className={`font-sans-ui font-semibold uppercase tracking-[0.12em] ${
                                   isCurrent
-                                    ? 'text-[#516050] dark:text-[#8FB996]'
+                                    ? 'text-stone-800 dark:text-stone-200'
                                     : 'text-stone-400 dark:text-stone-500'
                                 }`}
                               >
@@ -1100,8 +1104,8 @@ export const IELTSListeningView: React.FC<IELTSListeningViewProps> = ({
                               </span>
 
                               {hasClue && (
-                                <span className="font-sans-ui text-[#516050] dark:text-[#8FB996] font-semibold">
-                                  第 <strong className="font-mono tabular-nums">{para.clueForQuestionId}</strong> 题考点
+                                <span className="font-sans-ui text-amber-700 dark:text-amber-400 font-medium tabular-nums">
+                                  第 {para.clueForQuestionId} 题考点
                                 </span>
                               )}
                             </div>
@@ -1110,7 +1114,7 @@ export const IELTSListeningView: React.FC<IELTSListeningViewProps> = ({
                           <p
                             className={`font-serif-luxury text-[15.5px] sm:text-[16px] leading-[1.75] transition-colors ${
                               isCurrent
-                                ? 'text-stone-950 dark:text-white font-semibold'
+                                ? 'text-stone-950 dark:text-white font-medium'
                                 : 'text-stone-700 dark:text-stone-300'
                             }`}
                           >
@@ -1130,9 +1134,9 @@ export const IELTSListeningView: React.FC<IELTSListeningViewProps> = ({
                                       e.stopPropagation();
                                       handleTranscriptWordClick(word, para.text, e.currentTarget);
                                     }}
-                                    className={`relative inline-block px-[2px] py-[1px] -mx-[1px] rounded-[5px] transition-colors duration-100 cursor-pointer hover:bg-[#516050]/12 dark:hover:bg-[#8FB996]/18 hover:text-[#516050] dark:hover:text-[#8FB996] ${
+                                    className={`relative inline-block px-[2px] py-[1px] -mx-[1px] rounded-[5px] transition-colors duration-100 cursor-pointer hover:bg-stone-900/[0.07] dark:hover:bg-white/[0.1] hover:text-stone-950 dark:hover:text-white ${
                                       isSaved
-                                        ? 'underline decoration-[#516050]/60 dark:decoration-[#8FB996]/70 underline-offset-[3px] decoration-[1.5px] font-medium text-stone-900 dark:text-stone-100'
+                                        ? 'underline decoration-amber-600/60 dark:decoration-amber-400/70 underline-offset-[3px] decoration-[1.5px] font-medium text-stone-900 dark:text-stone-100'
                                         : ''
                                     }`}
                                   >
@@ -1157,7 +1161,6 @@ export const IELTSListeningView: React.FC<IELTSListeningViewProps> = ({
                       <span className="text-xs font-semibold tracking-wider text-stone-400 dark:text-stone-500 uppercase">
                         核心听力词汇 · Key Vocabulary
                       </span>
-                      <span className="text-[11px] text-stone-400">点击查词与发音</span>
                     </div>
                     <div className="flex items-center gap-x-3.5 gap-y-2 flex-wrap pt-0.5">
                       {section.keyVocab.map((w, idx) => (
@@ -1172,7 +1175,7 @@ export const IELTSListeningView: React.FC<IELTSListeningViewProps> = ({
                                 e.currentTarget
                               );
                             }}
-                            className="font-serif-luxury text-[15.5px] font-medium text-stone-800 dark:text-stone-200 hover:text-[#516050] dark:hover:text-[#8FB996] underline decoration-stone-300 dark:decoration-stone-700 underline-offset-4 cursor-pointer transition-colors"
+                            className="font-serif-luxury text-[15.5px] font-medium text-stone-800 dark:text-stone-200 hover:text-stone-950 dark:hover:text-white underline decoration-stone-300 dark:decoration-stone-700 underline-offset-4 cursor-pointer transition-colors"
                           >
                             {w}
                           </button>

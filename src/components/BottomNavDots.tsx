@@ -72,7 +72,7 @@ export const BottomNavDots: React.FC = () => {
                       isActive
                         ? isLightDots
                           ? 'w-4 h-1 bg-white/85 shadow-[0_1px_4px_rgba(0,0,0,0.3)]'
-                          : 'w-4 h-1 bg-[#516050]'
+                          : 'w-4 h-1 bg-stone-900 dark:bg-stone-100'
                         : isLightDots
                           ? 'w-1 h-1 bg-white/35 hover:bg-white/60'
                           : 'w-1 h-1 bg-stone-400/45 hover:bg-stone-500/70'

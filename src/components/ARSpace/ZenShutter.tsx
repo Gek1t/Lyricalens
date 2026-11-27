@@ -1,5 +1,5 @@
 import React from 'react';
-import { RefreshCw, Play, Loader2, ImagePlus, Camera } from 'lucide-react';
+import { RefreshCw, RotateCcw, ImagePlus, Camera } from 'lucide-react';
 
 interface ZenShutterProps {
   isFrozen: boolean;
@@ -38,7 +38,7 @@ export const ZenShutter: React.FC<ZenShutterProps> = ({
         )}
       </div>
 
-      {/* Center: Frosted Glass Outer Ring + Camera Wireframe Icon Button */}
+      {/* Center: Frosted Glass Outer Ring + Camera / Retake Icon Button */}
       <div className="flex items-center justify-center">
         <button
           id="zen-shutter-btn"
@@ -48,8 +48,8 @@ export const ZenShutter: React.FC<ZenShutterProps> = ({
             onToggleFreeze();
           }}
           disabled={isScanning}
-          title={isFrozen ? '点击恢复实时取景' : '轻触快门定格识物'}
-          aria-label={isFrozen ? 'Resume live stream' : 'Freeze frame and scan'}
+          title={isFrozen ? '返回取景重拍' : '轻触快门定格识物'}
+          aria-label={isFrozen ? 'Return to live viewfinder' : 'Freeze frame and scan'}
           className="group relative w-16 h-16 rounded-full p-1.5 flex items-center justify-center border border-white/45 bg-stone-950/28 hover:bg-stone-950/42 hover:border-white/65 backdrop-blur-2xl shadow-[0_8px_32px_rgba(0,0,0,0.4)] transition-all duration-300 cursor-pointer active:scale-92"
         >
           {/* Subtle 1px Optical Ring Sweep when Analyzing */}
@@ -74,16 +74,16 @@ export const ZenShutter: React.FC<ZenShutterProps> = ({
 
           {/* Inner Frosted Glass Core */}
           <span
-            className={`w-full h-full rounded-full flex items-center justify-center transition-all duration-300 border border-white/40 text-white ${
+            className={`w-full h-full rounded-full flex items-center justify-center transition-all duration-300 border text-white ${
               isScanning
-                ? 'bg-stone-950/35 scale-95'
+                ? 'bg-stone-950/35 border-white/35 scale-95'
                 : isFrozen
-                ? 'bg-stone-950/45 scale-95'
-                : 'bg-white/18 group-hover:bg-white/26 shadow-[inset_0_1px_1px_rgba(255,255,255,0.3)]'
+                ? 'bg-stone-950/55 border-white/50 group-hover:bg-stone-950/70 scale-95'
+                : 'bg-white/18 border-white/40 group-hover:bg-white/26 shadow-[inset_0_1px_1px_rgba(255,255,255,0.3)]'
             }`}
           >
             {isFrozen && !isScanning ? (
-              <Play className="w-5 h-5 fill-white text-white ml-0.5" />
+              <RotateCcw className="w-[19px] h-[19px] text-white stroke-[1.85] transition-transform duration-300 group-hover:-rotate-45" />
             ) : (
               <Camera
                 className={`w-[21px] h-[21px] text-white stroke-[1.75] transition-all duration-300 ${
@@ -95,7 +95,7 @@ export const ZenShutter: React.FC<ZenShutterProps> = ({
         </button>
       </div>
 
-      {/* Right Slot: Camera Flip Button (Strictly Symmetrical 44x44 Frosted Glass Circle) */}
+      {/* Right Slot: Camera Flip Button (Hidden cleanly while viewing a frozen photo) */}
       <div className="flex items-center justify-end">
         {onFlipCamera && (
           <button
@@ -104,7 +104,14 @@ export const ZenShutter: React.FC<ZenShutterProps> = ({
               e.stopPropagation();
               onFlipCamera();
             }}
-            className="w-11 h-11 rounded-full bg-stone-950/35 hover:bg-stone-950/50 active:scale-92 backdrop-blur-xl border border-white/30 flex items-center justify-center text-white shadow-[0_4px_20px_rgba(0,0,0,0.28)] transition-all duration-200 cursor-pointer"
+            disabled={isFrozen || isScanning}
+            aria-hidden={isFrozen}
+            tabIndex={isFrozen ? -1 : 0}
+            className={`w-11 h-11 rounded-full bg-stone-950/35 hover:bg-stone-950/50 active:scale-92 backdrop-blur-xl border border-white/30 flex items-center justify-center text-white shadow-[0_4px_20px_rgba(0,0,0,0.28)] transition-all duration-200 ${
+              isFrozen
+                ? 'opacity-0 scale-90 pointer-events-none'
+                : 'opacity-100 scale-100 cursor-pointer'
+            }`}
             aria-label="Flip Camera"
             title="翻转摄像头"
           >

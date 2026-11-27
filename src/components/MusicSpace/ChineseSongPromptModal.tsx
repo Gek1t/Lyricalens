@@ -90,7 +90,7 @@ export const ChineseSongPromptModal: React.FC<ChineseSongPromptModalProps> = ({
             <button
               type="button"
               onClick={onConfirmImportEnglishOnly}
-              className="w-full px-3 py-2.5 rounded-xl bg-[#516050] hover:bg-[#404c3f] dark:bg-[#688E6D] dark:hover:bg-[#587a5c] text-white flex items-center justify-between transition-all active:scale-[0.99] cursor-pointer"
+              className="w-full px-3 py-2.5 rounded-xl bg-stone-900 hover:bg-stone-800 dark:bg-stone-100 dark:hover:bg-white text-white dark:text-stone-950 flex items-center justify-between transition-all active:scale-[0.99] cursor-pointer"
             >
               <div className="flex items-center gap-2 text-left min-w-0">
                 <Filter className="w-3.5 h-3.5 text-white/90 shrink-0" />

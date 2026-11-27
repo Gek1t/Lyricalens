@@ -24,7 +24,6 @@ import {
   Layers,
   ChevronLeft,
   ChevronRight,
-  Clock,
   CheckCheck,
   Download
 } from 'lucide-react';
@@ -227,6 +226,7 @@ export const NotebookModal: React.FC<NotebookModalProps> = ({ isOpen, onClose })
       setSelectedWords(new Set());
       setIsTagModalOpen(false);
       setIsFlashcardOpen(false);
+      setFlashcardDeck([]);
       setSessionReviewedWords(new Set());
       setSessionModifiedWords(new Set());
     }
@@ -266,10 +266,10 @@ export const NotebookModal: React.FC<NotebookModalProps> = ({ isOpen, onClose })
   };
 
   useEffect(() => {
-    if (isOpen && notebookAutoFlashcard && allWords && allWords.length > 0 && !isFlashcardOpen) {
+    if (isOpen && notebookAutoFlashcard && allWords && allWords.length > 0 && flashcardDeck.length === 0) {
       handleStartFlashcardReview();
     }
-  }, [isOpen, notebookAutoFlashcard, allWords]);
+  }, [isOpen, notebookAutoFlashcard, allWords, flashcardDeck.length]);
 
   const handleNavigateFlashcard = (dir: -1 | 1) => {
     const nextIdx = flashcardIndex + dir;
@@ -299,11 +299,26 @@ export const NotebookModal: React.FC<NotebookModalProps> = ({ isOpen, onClose })
     return () => window.removeEventListener('keydown', onKeyDown);
   }, [isFlashcardOpen, flashcardIndex, flashcardDeck]);
 
-  const handleFlashcardDecision = async (targetLevel: 2 | 3) => {
+  const handleFlashcardDecision = async (targetLevel: 1 | 2 | 3) => {
     const currentCard = flashcardDeck[flashcardIndex];
     if (!currentCard) return;
 
     const isMastered = targetLevel === 3;
+    const nextIdx = flashcardIndex + 1;
+
+    // Advance card UI immediately for zero-latency tactile responsiveness
+    setFlashcardStats(prev => ({
+      mastered: prev.mastered + (isMastered ? 1 : 0),
+      learning: prev.learning + (isMastered ? 0 : 1)
+    }));
+    setFlashcardDirection(1);
+    setIsFlashcardFlipped(false);
+    setFlashcardIndex(nextIdx);
+
+    if (nextIdx < flashcardDeck.length) {
+      setTimeout(() => speakWordIfAutoEnabled(flashcardDeck[nextIdx].word), 160);
+    }
+
     try {
       await recordWordReview(currentCard.word, isMastered);
       await setWordMastery(currentCard.word, targetLevel);
@@ -311,20 +326,6 @@ export const NotebookModal: React.FC<NotebookModalProps> = ({ isOpen, onClose })
       setSessionModifiedWords(prev => new Set(prev).add(currentCard.word));
     } catch (e) {
       console.error(e);
-    }
-
-    setFlashcardStats(prev => ({
-      mastered: prev.mastered + (isMastered ? 1 : 0),
-      learning: prev.learning + (isMastered ? 0 : 1)
-    }));
-
-    const nextIdx = flashcardIndex + 1;
-    setFlashcardDirection(1);
-    setIsFlashcardFlipped(false);
-    setFlashcardIndex(nextIdx);
-
-    if (nextIdx < flashcardDeck.length) {
-      setTimeout(() => speakWordIfAutoEnabled(flashcardDeck[nextIdx].word), 160);
     }
   };
 
@@ -598,8 +599,8 @@ export const NotebookModal: React.FC<NotebookModalProps> = ({ isOpen, onClose })
                   <h2 className="font-serif-luxury text-lg sm:text-xl font-semibold text-stone-900 dark:text-stone-50 leading-tight truncate">
                     Vocabulary Vault
                   </h2>
-                  <span className="text-[10px] font-sans text-stone-500 dark:text-stone-400 block truncate">
-                    生词本中枢 · {allWords?.length || 0} 词收录
+                  <span className="text-[11px] font-sans text-stone-400 dark:text-stone-500 block truncate tabular-nums">
+                    生词本 · {allWords?.length || 0} 词
                   </span>
                 </div>
 
@@ -608,12 +609,12 @@ export const NotebookModal: React.FC<NotebookModalProps> = ({ isOpen, onClose })
                   <button
                     type="button"
                     onClick={handleStartFlashcardReview}
-                    className="px-2.5 sm:px-3 py-1.5 text-white bg-[#516050] hover:bg-[#3F4C3E] dark:bg-[#8FB996] dark:text-stone-950 rounded-full flex items-center gap-1 sm:gap-1.5 text-xs font-medium transition-all active:scale-95 shrink-0 cursor-pointer shadow-xs"
-                    title="艾宾浩斯闪卡速刷复习"
+                    className="h-8 px-3 bg-stone-900 hover:bg-stone-800 dark:bg-stone-100 dark:hover:bg-white text-stone-50 dark:text-stone-900 rounded-xl inline-flex items-center gap-1.5 text-xs font-medium transition-colors active:scale-[0.98] shrink-0 cursor-pointer"
+                    title="闪卡复习"
                   >
-                    <span>闪卡速刷</span>
+                    <span>闪卡复习</span>
                     {dueWordsCount > 0 && (
-                      <span className="px-1.5 py-0.2 rounded-full bg-amber-400/25 dark:bg-stone-900/20 text-amber-100 dark:text-stone-950 font-mono text-[10px] font-bold tabular-nums">
+                      <span className="font-mono text-[11px] opacity-70 tabular-nums">
                         {dueWordsCount}
                       </span>
                     )}
@@ -623,11 +624,11 @@ export const NotebookModal: React.FC<NotebookModalProps> = ({ isOpen, onClose })
                   <button
                     id="vault-enter-batch-mode-btn"
                     onClick={() => setIsBatchMode(true)}
-                    className="p-1.5 sm:p-2 text-stone-600 hover:text-stone-900 dark:text-stone-400 dark:hover:text-stone-100 hover:bg-stone-200/50 dark:hover:bg-slate-800/60 rounded-full flex items-center justify-center transition-all active:scale-95 shrink-0 cursor-pointer"
-                    title="多选批量操作"
-                    aria-label="多选批量操作"
+                    className="p-1.5 sm:p-2 text-stone-500 hover:text-stone-900 dark:text-stone-400 dark:hover:text-stone-100 hover:bg-stone-200/50 dark:hover:bg-slate-800/60 rounded-xl flex items-center justify-center transition-colors active:scale-95 shrink-0 cursor-pointer"
+                    title="批量管理"
+                    aria-label="批量管理"
                   >
-                    <ListChecks className="w-4.5 h-4.5 text-[#516050] dark:text-[#8FB996] shrink-0" />
+                    <ListChecks className="w-4.5 h-4.5 shrink-0" />
                   </button>
 
                   {/* Close Button */}
@@ -648,9 +649,9 @@ export const NotebookModal: React.FC<NotebookModalProps> = ({ isOpen, onClose })
                     onClick={handleToggleSelectAll}
                     className={`w-5.5 h-5.5 rounded-full border flex items-center justify-center transition-all duration-200 shrink-0 ${
                       selectedWords.size === filteredWords.length && filteredWords.length > 0
-                        ? 'bg-[#516050] dark:bg-[#8FB996] border-[#516050] dark:border-[#8FB996] text-white dark:text-stone-950 shadow-xs scale-105'
+                        ? 'bg-stone-900 dark:bg-stone-100 border-stone-900 dark:border-stone-100 text-white dark:text-stone-950 shadow-xs scale-105'
                         : selectedWords.size > 0
-                        ? 'bg-[#516050]/15 dark:bg-[#8FB996]/20 border-[#516050] dark:border-[#8FB996] text-[#516050] dark:text-[#8FB996]'
+                        ? 'bg-stone-900/12 dark:bg-white/15 border-stone-900 dark:border-stone-100 text-stone-900 dark:text-stone-100'
                         : 'border-stone-300 dark:border-slate-600 bg-stone-100/70 dark:bg-slate-800/80 hover:border-stone-400'
                     }`}
                     title="全选 / 取消全选"
@@ -658,13 +659,13 @@ export const NotebookModal: React.FC<NotebookModalProps> = ({ isOpen, onClose })
                     {selectedWords.size === filteredWords.length && filteredWords.length > 0 ? (
                       <Check className="w-3.5 h-3.5 stroke-[3]" />
                     ) : selectedWords.size > 0 ? (
-                      <div className="w-2 h-0.5 bg-[#516050] dark:bg-[#8FB996] rounded-full" />
+                      <div className="w-2 h-0.5 bg-stone-900 dark:bg-stone-100 rounded-full" />
                     ) : null}
                   </button>
 
                   <div className="min-w-0">
                     <h3 className="font-sans-ui text-sm font-semibold text-stone-900 dark:text-stone-100 whitespace-nowrap">
-                      已选择 <span className="text-[#516050] dark:text-[#8FB996] font-bold text-base font-mono tabular-nums">{selectedWords.size}</span> 项
+                      已选择 <span className="text-stone-900 dark:text-stone-100 font-bold text-base font-mono tabular-nums">{selectedWords.size}</span> 项
                     </h3>
                   </div>
                 </div>
@@ -678,7 +679,7 @@ export const NotebookModal: React.FC<NotebookModalProps> = ({ isOpen, onClose })
                   </button>
                   <button
                     onClick={handleExitBatchMode}
-                    className="px-3.5 py-1 rounded-full text-xs font-semibold bg-[#516050] dark:bg-[#8FB996] text-white dark:text-stone-950 hover:bg-[#3F4C3E] dark:hover:bg-[#7AA881] active:scale-95 transition-all shadow-xs whitespace-nowrap"
+                    className="px-3.5 py-1 rounded-full text-xs font-semibold bg-stone-900 dark:bg-stone-100 text-white dark:text-stone-950 hover:bg-stone-800 dark:hover:bg-white active:scale-95 transition-all shadow-xs whitespace-nowrap"
                   >
                     完成
                   </button>
@@ -696,8 +697,8 @@ export const NotebookModal: React.FC<NotebookModalProps> = ({ isOpen, onClose })
                 type="text"
                 value={searchTerm}
                 onChange={(e) => setSearchTerm(e.target.value)}
-                placeholder="搜索生词、中文释义、标签或收录语境..."
-                className="w-full pl-10 pr-8 py-2 text-xs rounded-xl bg-white dark:bg-[#151D2E] border border-stone-200/80 dark:border-slate-800 text-stone-800 dark:text-stone-100 placeholder:text-stone-400 focus:outline-hidden focus:ring-1 focus:ring-[#516050] shadow-2xs"
+                placeholder="搜索单词、释义或来源"
+                className="w-full pl-10 pr-8 py-2 text-xs rounded-xl bg-white dark:bg-[#151D2E] border border-stone-200/80 dark:border-slate-800 text-stone-800 dark:text-stone-100 placeholder:text-stone-400 focus:outline-hidden focus:ring-1 focus:ring-stone-400/50"
               />
               {searchTerm && (
                 <button
@@ -709,39 +710,38 @@ export const NotebookModal: React.FC<NotebookModalProps> = ({ isOpen, onClose })
               )}
             </div>
 
-            {/* Filter Pills & Mastery Breakdown Bar */}
+            {/* Cohesive Editorial Filter Tabs */}
             <div className="flex items-center justify-between gap-2 overflow-x-auto no-scrollbar pt-0.5">
-              <div className="flex items-center gap-1.5 shrink-0">
+              <div className="flex items-center gap-1 shrink-0">
                 {[
                   {
                     id: 'DUE_REVIEW',
-                    label: `待复习 (${dueWordsCount})`,
+                    label: `待复习 ${dueWordsCount}`,
                     isDueHighlight: dueWordsCount > 0
                   },
-                  { id: 'ALL', label: `全部 (${allWords?.length || 0})` },
-                  { id: 'IELTS', label: `剑桥真题` },
-                  { id: 'MUSIC', label: `音乐歌词` },
-                  { id: 'AR', label: `AR 实景` },
-                  { id: 'MASTERED', label: `已掌握 (${masteryStats[3] || 0})` },
-                  { id: 'UNMASTERED', label: `学习中 (${masteryStats[2] || 0})` },
-                  { id: 'LEVEL_1', label: `已加入 (${masteryStats[1] || 0})` },
-                  { id: 'LEVEL_0', label: `未收录 (${masteryStats[0] || 0})` }
+                  { id: 'ALL', label: `全部 ${allWords?.length || 0}` },
+                  { id: 'IELTS', label: '剑桥真题' },
+                  { id: 'MUSIC', label: '音乐歌词' },
+                  { id: 'AR', label: 'AR 实景' },
+                  { id: 'MASTERED', label: `已掌握 ${masteryStats[3] || 0}` },
+                  { id: 'UNMASTERED', label: `学习中 ${masteryStats[2] || 0}` },
+                  { id: 'LEVEL_1', label: `已加入 ${masteryStats[1] || 0}` },
+                  { id: 'LEVEL_0', label: `未收录 ${masteryStats[0] || 0}` }
                 ].map((f) => {
                   const isActive = activeFilter === f.id;
                   return (
                     <button
                       key={f.id}
                       onClick={() => handleFilterChange(f.id as any)}
-                      className={`px-3 py-1 rounded-full text-[11px] font-medium transition-all flex items-center gap-1 whitespace-nowrap cursor-pointer ${
+                      className={`px-2.5 py-1 rounded-lg text-[11px] font-medium transition-colors inline-flex items-center gap-1.5 whitespace-nowrap cursor-pointer tabular-nums ${
                         isActive
-                          ? f.id === 'DUE_REVIEW'
-                            ? 'bg-amber-500 text-white shadow-2xs font-semibold'
-                            : 'bg-[#516050] text-white shadow-2xs font-semibold'
-                          : f.isDueHighlight
-                          ? 'bg-amber-500/10 text-amber-700 dark:text-amber-300 border border-amber-500/30 hover:bg-amber-500/20'
-                          : 'bg-white dark:bg-[#151D2E] text-stone-600 dark:text-stone-400 hover:bg-stone-100 dark:hover:bg-slate-800 border border-stone-200/60 dark:border-slate-800'
+                          ? 'bg-stone-900 text-stone-50 dark:bg-stone-100 dark:text-stone-950 font-semibold'
+                          : 'text-stone-500 dark:text-stone-400 hover:text-stone-900 dark:hover:text-stone-100 hover:bg-stone-900/[0.04] dark:hover:bg-white/[0.05]'
                       }`}
                     >
+                      {f.isDueHighlight && !isActive && (
+                        <span className="w-1.5 h-1.5 rounded-full bg-[#C4845C] dark:bg-[#D89B75]" />
+                      )}
                       <span>{f.label}</span>
                     </button>
                   );
@@ -749,25 +749,28 @@ export const NotebookModal: React.FC<NotebookModalProps> = ({ isOpen, onClose })
               </div>
 
               {/* Mastery Visual Mini Legend (4 States) */}
-              <div className="hidden sm:flex items-center gap-2.5 shrink-0 text-[10px] text-stone-500 dark:text-stone-400 pl-2">
+              <div className="hidden sm:flex items-center gap-2.5 shrink-0 text-[10px] text-stone-400 dark:text-stone-500 pl-2">
                 <span className="flex items-center gap-1">
                   <span className="font-mono text-xs">○</span> 未收录
                 </span>
                 <span className="flex items-center gap-1">
-                  <span className="font-mono text-xs text-[#516050] dark:text-[#8FB996]">⊚</span> 已加入
+                  <span className="font-mono text-xs text-stone-700 dark:text-stone-300">⊚</span> 已加入
                 </span>
                 <span className="flex items-center gap-1">
-                  <span className="font-mono text-xs text-[#8C7A5B] dark:text-amber-400">⊙</span> 学习中
+                  <span className="font-mono text-xs text-[#C4845C] dark:text-[#D89B75]">⊙</span> 学习中
                 </span>
                 <span className="flex items-center gap-1">
-                  <span className="font-mono text-xs text-[#516050] dark:text-[#8FB996]">◉</span> 已掌握
+                  <span className="font-mono text-xs text-stone-900 dark:text-stone-100">◉</span> 已掌握
                 </span>
               </div>
             </div>
           </div>
 
           {/* Vocabulary Word Cards Scroll List */}
-          <div className="flex-1 overflow-y-auto no-scrollbar p-4 sm:p-5 space-y-2.5 pb-32">
+          <div
+            aria-hidden={isFlashcardOpen}
+            className={`flex-1 overflow-y-auto no-scrollbar p-4 sm:p-5 space-y-2.5 pb-32 ${isFlashcardOpen ? 'invisible pointer-events-none' : ''}`}
+          >
             {visibleWords.length > 0 ? (
               visibleWords.map((item) => {
                 const isSelected = selectedWords.has(item.word);
@@ -814,9 +817,9 @@ export const NotebookModal: React.FC<NotebookModalProps> = ({ isOpen, onClose })
                     }}
                     className={`relative p-3.5 sm:p-4 rounded-2xl transition-[transform,background-color,border-color] duration-150 cursor-pointer select-none flex items-center justify-between gap-3 ${
                       isSelected
-                        ? 'bg-[#516050]/[0.05] dark:bg-[#8FB996]/[0.08] border border-[#516050]/60 dark:border-[#8FB996]/50 shadow-xs ring-1 ring-[#516050]/20 dark:ring-[#8FB996]/20'
+                        ? 'bg-stone-900/[0.04] dark:bg-white/[0.07] border border-stone-900/45 dark:border-stone-200/45 shadow-xs ring-1 ring-stone-900/15 dark:ring-white/15'
                         : 'bg-white dark:bg-[#151D2E] border border-stone-200/80 dark:border-slate-800/90 hover:border-stone-300 dark:hover:border-slate-700 shadow-2xs'
-                    } ${isElevated ? 'scale-[1.015] shadow-lg ring-2 ring-[#516050]' : 'active:scale-[0.99]'}`}
+                    } ${isElevated ? 'scale-[1.015] shadow-lg ring-2 ring-stone-900 dark:ring-stone-100' : 'active:scale-[0.99]'}`}
                   >
                     {/* Left: Refined Apple-Style Circular Checkbox for Batch Mode */}
                     {isBatchMode && (
@@ -832,7 +835,7 @@ export const NotebookModal: React.FC<NotebookModalProps> = ({ isOpen, onClose })
                         <div
                           className={`w-5 h-5 rounded-full border flex items-center justify-center transition-all duration-200 ${
                             isSelected
-                              ? 'bg-[#516050] dark:bg-[#8FB996] border-[#516050] dark:border-[#8FB996] text-white dark:text-stone-950 shadow-xs scale-105'
+                              ? 'bg-stone-900 dark:bg-stone-100 border-stone-900 dark:border-stone-100 text-white dark:text-stone-950 shadow-xs scale-105'
                               : 'border-stone-300 dark:border-slate-600 bg-stone-100/60 dark:bg-slate-800/60 hover:border-stone-400'
                           }`}
                         >
@@ -841,66 +844,59 @@ export const NotebookModal: React.FC<NotebookModalProps> = ({ isOpen, onClose })
                       </div>
                     )}
 
-                    {/* Card Center Info */}
+                    {/* Card Center Info — Zero-Pill Editorial Typography */}
                     <div className="flex-1 min-w-0">
-                      <div className="flex items-center gap-2 flex-wrap">
-                        <h4 className="font-serif-luxury text-lg sm:text-[19px] font-medium text-stone-900 dark:text-stone-100 capitalize truncate">
+                      <div className="flex items-baseline gap-2 min-w-0">
+                        <h4 className="font-serif-luxury text-[18px] font-medium text-stone-900 dark:text-stone-100 capitalize shrink-0 max-w-[68%] truncate">
                           {item.word}
                         </h4>
-                        <span className="font-mono text-[11px] text-stone-400 dark:text-stone-500">
+                        <span className="font-mono text-[11px] text-stone-400 dark:text-stone-500 truncate min-w-0">
                           {item.phoneticUk || `/${item.word}/`}
                         </span>
-                        <span className="px-2 py-0.5 rounded-full text-[10px] font-medium bg-[#516050]/10 dark:bg-[#8FB996]/15 text-[#516050] dark:text-[#8FB996] border border-[#516050]/20 dark:border-[#8FB996]/30">
-                          {formatPartOfSpeech(item.partOfSpeech, item.word)}
-                        </span>
-
-                        {/* Ebbinghaus Spaced Repetition Retention Badge */}
-                        {isReviewedInSession ? (
-                          <span className="px-2 py-0.5 rounded-full text-[9px] font-mono font-semibold bg-emerald-500/15 text-emerald-700 dark:text-emerald-400 border border-emerald-500/30 flex items-center gap-1">
-                            <Check className="w-2.5 h-2.5" />
-                            <span>已打卡 100%</span>
-                          </span>
-                        ) : ebbinghaus.isDue ? (
-                          <span className="px-2 py-0.5 rounded-full text-[9px] font-mono font-semibold bg-amber-500/15 text-amber-700 dark:text-amber-400 border border-amber-500/30 flex items-center gap-1">
-                            <Clock className="w-2.5 h-2.5" />
-                            <span>需复习 {ebbinghaus.retentionScore}%</span>
-                          </span>
-                        ) : mastery === 3 ? (
-                          <span className="px-2 py-0.5 rounded-full text-[9px] font-mono font-medium bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border border-emerald-500/20">
-                            稳固 {ebbinghaus.retentionScore}%
-                          </span>
-                        ) : (
-                          <span className="px-2 py-0.5 rounded-full text-[9px] font-mono font-medium bg-sky-500/10 text-sky-600 dark:text-sky-400 border border-sky-500/20">
-                            留存 {ebbinghaus.retentionScore}%
-                          </span>
-                        )}
                       </div>
 
-                      <p className="text-xs text-stone-700 dark:text-stone-300 mt-1 font-normal line-clamp-1">
+                      <p className="text-[13px] text-stone-700 dark:text-stone-300 mt-0.5 font-normal line-clamp-1">
                         {item.definitionCn}
                       </p>
 
-                      {/* Context & Tag Badges */}
-                      <div className="flex items-center gap-1.5 mt-2 flex-wrap">
-                        {item.sourceContext && (
-                          <span className="text-[9px] uppercase tracking-wider text-stone-400 dark:text-stone-500 bg-stone-100/80 dark:bg-slate-800/80 px-2 py-0.5 rounded-md truncate max-w-[140px]">
-                            {item.sourceContext}
+                      {/* Quiet Unboxed Inline Metadata Row */}
+                      <div className="flex items-center gap-1.5 mt-1.5 text-[11px] text-stone-400 dark:text-stone-500 min-w-0 overflow-hidden">
+                        <span className="font-mono italic text-stone-500 dark:text-stone-400 shrink-0">
+                          {formatPartOfSpeech(item.partOfSpeech, item.word).split(' ')[0]}
+                        </span>
+
+                        <span aria-hidden="true" className="opacity-45 shrink-0">·</span>
+
+                        {isReviewedInSession ? (
+                          <span className="font-mono tabular-nums font-medium text-stone-800 dark:text-stone-200 shrink-0">
+                            已打卡 100%
+                          </span>
+                        ) : ebbinghaus.isDue ? (
+                          <span className="font-mono tabular-nums font-medium text-[#B86E42] dark:text-[#E0A378] shrink-0">
+                            需复习 {ebbinghaus.retentionScore}%
+                          </span>
+                        ) : mastery === 3 ? (
+                          <span className="font-mono tabular-nums text-stone-700 dark:text-stone-300 shrink-0">
+                            稳固 {ebbinghaus.retentionScore}%
+                          </span>
+                        ) : (
+                          <span className="font-mono tabular-nums text-stone-500 dark:text-stone-400 shrink-0">
+                            留存 {ebbinghaus.retentionScore}%
                           </span>
                         )}
-                        {item.categories?.slice(0, 2).map((cat) => (
-                          <span
-                            key={cat}
-                            className="text-[9px] font-medium text-[#516050] dark:text-[#8FB996] bg-[#516050]/10 dark:bg-[#8FB996]/15 px-2 py-0.5 rounded-md"
-                          >
-                            {cat}
-                          </span>
-                        ))}
+
+                        {item.sourceContext && (
+                          <>
+                            <span aria-hidden="true" className="opacity-45 shrink-0">·</span>
+                            <span className="truncate">{item.sourceContext}</span>
+                          </>
+                        )}
                       </div>
                     </div>
 
-                    {/* Card Right Action Strip (Audio Pronounce + Quick Review Button + 4-Tier Mastery Indicator) */}
+                    {/* Card Right Action Strip (Compact Checkoff + Audio + 4-Tier Mastery Indicator) */}
                     <div 
-                      className="flex items-center gap-1.5 sm:gap-2 shrink-0"
+                      className="flex items-center gap-1 shrink-0"
                       onClick={(e) => e.stopPropagation()}
                       onMouseDown={(e) => e.stopPropagation()}
                       onTouchStart={(e) => e.stopPropagation()}
@@ -908,11 +904,11 @@ export const NotebookModal: React.FC<NotebookModalProps> = ({ isOpen, onClose })
                       {/* One-Tap Spaced Review Checkoff Button (if Due) or Checked State */}
                       {isReviewedInSession ? (
                         <div
-                          className="px-2 py-1 rounded-lg bg-emerald-500/15 text-emerald-700 dark:text-emerald-300 border border-emerald-500/30 text-[10px] font-medium flex items-center gap-1 shadow-2xs"
-                          title="今日已完成艾宾浩斯打卡"
+                          className="p-1.5 rounded-lg bg-stone-900/[0.06] dark:bg-white/[0.1] text-stone-800 dark:text-stone-200 flex items-center justify-center"
+                          title="今日已完成复习打卡"
+                          aria-label="今日已完成复习打卡"
                         >
-                          <Check className="w-3 h-3 text-emerald-600 dark:text-emerald-400" />
-                          <span className="hidden sm:inline">已打卡</span>
+                          <Check className="w-3.5 h-3.5" />
                         </div>
                       ) : ebbinghaus.isDue ? (
                         <button
@@ -920,11 +916,11 @@ export const NotebookModal: React.FC<NotebookModalProps> = ({ isOpen, onClose })
                           onClick={(e) => handleMarkReviewed(e, item)}
                           onMouseDown={(e) => e.stopPropagation()}
                           onTouchStart={(e) => e.stopPropagation()}
-                          className="px-2 py-1 rounded-lg bg-amber-500/15 hover:bg-amber-500 text-amber-700 dark:text-amber-300 hover:text-white border border-amber-500/30 text-[10px] font-medium flex items-center gap-1 transition-all active:scale-95 cursor-pointer shadow-2xs"
-                          title="记录今日艾宾浩斯复现打卡"
+                          className="p-1.5 rounded-lg bg-[#C4845C]/10 hover:bg-[#C4845C] text-[#A8623B] dark:text-[#E0A378] hover:text-white dark:hover:text-stone-950 flex items-center justify-center transition-colors active:scale-95 cursor-pointer"
+                          title="记录今日复习打卡"
+                          aria-label="记录今日复习打卡"
                         >
-                          <CheckCheck className="w-3 h-3" />
-                          <span className="hidden sm:inline">打卡</span>
+                          <CheckCheck className="w-3.5 h-3.5" />
                         </button>
                       ) : null}
 
@@ -936,7 +932,7 @@ export const NotebookModal: React.FC<NotebookModalProps> = ({ isOpen, onClose })
                         }}
                         onMouseDown={(e) => e.stopPropagation()}
                         onTouchStart={(e) => e.stopPropagation()}
-                        className="p-2 rounded-full hover:bg-stone-100 dark:hover:bg-slate-800 text-stone-400 hover:text-[#516050] dark:hover:text-[#8FB996] active:scale-95 transition-all"
+                        className="p-1.5 rounded-full hover:bg-stone-100 dark:hover:bg-slate-800 text-stone-400 hover:text-stone-900 dark:hover:text-stone-100 active:scale-95 transition-colors"
                         title="朗读发音 (UK)"
                       >
                         <Volume2 className="w-4 h-4" />
@@ -988,8 +984,8 @@ export const NotebookModal: React.FC<NotebookModalProps> = ({ isOpen, onClose })
                 {/* Micro Status Hint */}
                 <div className="flex items-center px-1 text-[11px] text-stone-500 dark:text-stone-400">
                   <div className="flex items-center gap-1.5">
-                    <span className="w-1.5 h-1.5 rounded-full bg-[#516050] dark:bg-[#8FB996] animate-pulse" />
-                    <span>
+                    <span className="w-1.5 h-1.5 rounded-full bg-stone-900 dark:bg-stone-100" />
+                    <span className="tabular-nums">
                       已选 <strong className="text-stone-900 dark:text-stone-100 font-semibold">{selectedWords.size}</strong> 词
                     </span>
                   </div>
@@ -997,63 +993,63 @@ export const NotebookModal: React.FC<NotebookModalProps> = ({ isOpen, onClose })
 
                 {/* 5 Refined Action Buttons (Aligned with 4-Tier Mastery System) */}
                 <div className="grid grid-cols-5 gap-1.5">
-                  {/* 1. 🎯 Match Cambridge IELTS Official Reading Passage */}
+                  {/* 1. Match Cambridge IELTS Official Reading Passage */}
                   <button
                     id="batch-generate-ielts-btn"
                     onClick={handleBatchGenerateIELTS}
                     disabled={selectedWords.size === 0}
-                    className="py-2 px-1 rounded-xl bg-[#516050] hover:bg-[#3F4C3E] text-white text-xs font-semibold flex flex-col items-center justify-center gap-1 shadow-sm transition-all active:scale-95 disabled:opacity-35 disabled:pointer-events-none"
-                    title="根据所选生词，智能匹配命中率最高的剑雅真题"
+                    className="py-2 px-1 rounded-xl bg-stone-900 hover:bg-stone-800 dark:bg-stone-100 dark:text-stone-950 text-white text-xs font-semibold flex flex-col items-center justify-center gap-1 transition-colors active:scale-95 disabled:opacity-35 disabled:pointer-events-none"
+                    title="根据所选生词匹配剑雅真题"
                   >
-                    <BookOpen className="w-3.5 h-3.5 text-amber-300" />
+                    <BookOpen className="w-3.5 h-3.5 opacity-85" />
                     <span className="tracking-tight text-[10px]">真题匹配</span>
                   </button>
 
-                  {/* 2. ⏳ Mark Learning (Level 2 学习中) */}
+                  {/* 2. Mark Learning (Level 2) */}
                   <button
                     id="batch-mark-learning-btn"
                     onClick={() => handleBatchSetMastery(2)}
                     disabled={selectedWords.size === 0}
-                    className="py-2 px-1 rounded-xl bg-amber-50 dark:bg-amber-950/40 text-amber-800 dark:text-amber-300 border border-amber-200/80 dark:border-amber-800/60 hover:bg-amber-100/80 text-xs font-medium flex flex-col items-center justify-center gap-1 transition-all active:scale-95 disabled:opacity-35 disabled:pointer-events-none"
-                    title="批量标记为学习中 (Level 2)"
+                    className="py-2 px-1 rounded-xl bg-[#C4845C]/10 dark:bg-[#D89B75]/15 text-[#A8623B] dark:text-[#E0A378] hover:bg-[#C4845C]/18 text-xs font-medium flex flex-col items-center justify-center gap-1 transition-colors active:scale-95 disabled:opacity-35 disabled:pointer-events-none"
+                    title="批量标记为学习中"
                   >
-                    <RotateCcw className="w-3.5 h-3.5 text-amber-600 dark:text-amber-400" />
+                    <RotateCcw className="w-3.5 h-3.5" />
                     <span className="tracking-tight text-[10px]">标学习中</span>
                   </button>
 
-                  {/* 3. ✔ Mark Mastered (Level 3 已掌握) */}
+                  {/* 3. Mark Mastered (Level 3) */}
                   <button
                     id="batch-mark-mastered-btn"
                     onClick={() => handleBatchSetMastery(3)}
                     disabled={selectedWords.size === 0}
-                    className="py-2 px-1 rounded-xl bg-emerald-50 dark:bg-emerald-950/40 text-emerald-700 dark:text-emerald-300 border border-emerald-200/80 dark:border-emerald-800/60 hover:bg-emerald-100/80 text-xs font-medium flex flex-col items-center justify-center gap-1 transition-all active:scale-95 disabled:opacity-35 disabled:pointer-events-none"
-                    title="批量标记为已掌握 (Level 3 ✔)"
+                    className="py-2 px-1 rounded-xl bg-stone-900/[0.06] dark:bg-white/[0.1] text-stone-800 dark:text-stone-200 hover:bg-stone-900/[0.12] dark:hover:bg-white/[0.16] text-xs font-medium flex flex-col items-center justify-center gap-1 transition-colors active:scale-95 disabled:opacity-35 disabled:pointer-events-none"
+                    title="批量标记为已掌握"
                   >
-                    <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600 dark:text-emerald-400" />
+                    <CheckCircle2 className="w-3.5 h-3.5" />
                     <span className="tracking-tight text-[10px]">标已掌握</span>
                   </button>
 
-                  {/* 4. 🏷 Batch Add Tag */}
+                  {/* 4. Batch Add Tag */}
                   <button
                     id="batch-add-tags-btn"
                     onClick={() => setIsTagModalOpen(true)}
                     disabled={selectedWords.size === 0}
-                    className="py-2 px-1 rounded-xl bg-stone-100 dark:bg-slate-800 text-stone-700 dark:text-stone-300 border border-stone-200/70 dark:border-slate-700 hover:bg-stone-200/80 text-xs font-medium flex flex-col items-center justify-center gap-1 transition-all active:scale-95 disabled:opacity-35 disabled:pointer-events-none"
-                    title="批量添加场景分类标签"
+                    className="py-2 px-1 rounded-xl bg-stone-100 dark:bg-slate-800 text-stone-700 dark:text-stone-300 hover:bg-stone-200/80 text-xs font-medium flex flex-col items-center justify-center gap-1 transition-colors active:scale-95 disabled:opacity-35 disabled:pointer-events-none"
+                    title="批量添加标签"
                   >
                     <Tag className="w-3.5 h-3.5 text-stone-500 dark:text-stone-400" />
                     <span className="tracking-tight text-[10px]">加标签</span>
                   </button>
 
-                  {/* 5. 🗑 Batch Delete */}
+                  {/* 5. Batch Delete */}
                   <button
                     id="batch-delete-btn"
                     onClick={handleBatchDelete}
                     disabled={selectedWords.size === 0}
-                    className="py-2 px-1 rounded-xl bg-rose-50 dark:bg-rose-950/30 text-rose-600 dark:text-rose-400 border border-rose-200/70 dark:border-rose-900/50 hover:bg-rose-100/80 text-xs font-medium flex flex-col items-center justify-center gap-1 transition-all active:scale-95 disabled:opacity-35 disabled:pointer-events-none"
+                    className="py-2 px-1 rounded-xl bg-rose-500/8 dark:bg-rose-500/12 text-rose-600 dark:text-rose-400 hover:bg-rose-500/14 text-xs font-medium flex flex-col items-center justify-center gap-1 transition-colors active:scale-95 disabled:opacity-35 disabled:pointer-events-none"
                     title="从生词本中批量移除"
                   >
-                    <Trash2 className="w-3.5 h-3.5 text-rose-500" />
+                    <Trash2 className="w-3.5 h-3.5" />
                     <span className="tracking-tight text-[10px]">移除</span>
                   </button>
                 </div>
@@ -1067,7 +1063,7 @@ export const NotebookModal: React.FC<NotebookModalProps> = ({ isOpen, onClose })
               <div className="w-full max-w-sm rounded-2xl bg-white dark:bg-[#151D2E] border border-stone-200 dark:border-slate-700 p-5 shadow-2xl space-y-4">
                 <div className="flex items-center justify-between">
                   <div className="flex items-center gap-2">
-                    <Tag className="w-4 h-4 text-[#516050] dark:text-[#8FB996]" />
+                    <Tag className="w-4 h-4 text-stone-700 dark:text-stone-300" />
                     <h4 className="font-serif-luxury text-base font-semibold text-stone-900 dark:text-stone-100">
                       为 {selectedWords.size} 个生词批量添加标签
                     </h4>
@@ -1088,7 +1084,7 @@ export const NotebookModal: React.FC<NotebookModalProps> = ({ isOpen, onClose })
                       <button
                         key={tag}
                         onClick={() => handleApplyBatchTag(tag)}
-                        className="px-2.5 py-1 rounded-full text-xs bg-stone-100 dark:bg-slate-800 text-stone-700 dark:text-stone-300 hover:bg-[#516050] hover:text-white dark:hover:bg-[#8FB996] dark:hover:text-stone-900 transition-colors"
+                        className="px-2.5 py-1 rounded-full text-xs bg-stone-100 dark:bg-slate-800 text-stone-700 dark:text-stone-300 hover:bg-stone-900 hover:text-white dark:hover:bg-stone-100 dark:hover:text-stone-950 transition-colors"
                       >
                         + {tag}
                       </button>
@@ -1105,7 +1101,7 @@ export const NotebookModal: React.FC<NotebookModalProps> = ({ isOpen, onClose })
                       value={customTagInput}
                       onChange={(e) => setCustomTagInput(e.target.value)}
                       placeholder="输入标签名称 (如: Topic 3, Daily Talk)..."
-                      className="flex-1 px-3 py-1.5 text-xs rounded-xl bg-stone-50 dark:bg-slate-900 border border-stone-200 dark:border-slate-800 text-stone-800 dark:text-stone-100 placeholder:text-stone-400 focus:outline-hidden focus:ring-1 focus:ring-[#516050]"
+                      className="flex-1 px-3 py-1.5 text-xs rounded-xl bg-stone-50 dark:bg-slate-900 border border-stone-200 dark:border-slate-800 text-stone-800 dark:text-stone-100 placeholder:text-stone-400 focus:outline-hidden focus:ring-1 focus:ring-stone-400"
                       onKeyDown={(e) => {
                         if (e.key === 'Enter' && customTagInput.trim()) {
                           handleApplyBatchTag(customTagInput);
@@ -1115,7 +1111,7 @@ export const NotebookModal: React.FC<NotebookModalProps> = ({ isOpen, onClose })
                     <button
                       onClick={() => handleApplyBatchTag(customTagInput)}
                       disabled={!customTagInput.trim()}
-                      className="px-3.5 py-1.5 rounded-xl bg-[#516050] hover:bg-[#3F4C3E] text-white text-xs font-semibold disabled:opacity-40 transition-all shadow-xs"
+                      className="px-3.5 py-1.5 rounded-xl bg-stone-900 hover:bg-stone-800 dark:bg-stone-100 dark:hover:bg-white text-white dark:text-stone-950 text-xs font-semibold disabled:opacity-40 transition-all shadow-xs"
                     >
                       添加
                     </button>
@@ -1125,41 +1121,71 @@ export const NotebookModal: React.FC<NotebookModalProps> = ({ isOpen, onClose })
             </div>
           )}
 
-          {/* Minimalist Flashcard Rapid Flow Overlay */}
+          {/* Editorial Stacked Index-Card Flashcard Review Overlay */}
           <AnimatePresence>
             {isFlashcardOpen && (
               <motion.div
-                initial={{ opacity: 0, y: 16 }}
+                initial={{ opacity: 0, y: 12 }}
                 animate={{ opacity: 1, y: 0 }}
-                exit={{ opacity: 0, y: 16 }}
-                transition={{ duration: 0.2 }}
-                className="absolute inset-0 z-50 flex flex-col bg-[#FAF8F5] dark:bg-[#0F1523] p-5 pt-[var(--android-safe-top,max(3.25rem,calc(env(safe-area-inset-top,44px)+0.85rem)))] select-none overflow-hidden"
+                exit={{ opacity: 0, y: 12 }}
+                transition={{ duration: 0.2, ease: [0.22, 1, 0.36, 1] }}
+                className="absolute inset-0 z-[60] flex flex-col bg-[#F5F1E9] dark:bg-[#0C1017] px-5 pb-5 pt-[var(--android-safe-top,max(3.25rem,calc(env(safe-area-inset-top,44px)+0.85rem)))] select-none overflow-hidden"
               >
-                {/* Minimalist Top Header */}
-                <div className="flex items-center justify-between pb-3.5">
-                  <h3 className="font-serif-luxury text-xl font-semibold text-stone-900 dark:text-stone-100">
-                    闪卡速刷
-                  </h3>
-                  <div className="flex items-center gap-2.5">
+                {/* Soft Editorial Ambient Warmth */}
+                <div
+                  aria-hidden="true"
+                  className="pointer-events-none absolute inset-0 opacity-80 dark:opacity-35"
+                  style={{
+                    background:
+                      'radial-gradient(circle at 18% 12%, rgba(235, 218, 198, 0.55) 0%, transparent 55%), radial-gradient(circle at 84% 88%, rgba(212, 222, 215, 0.48) 0%, transparent 55%)'
+                  }}
+                />
+
+                {/* Minimalist Top Bar: Close / Progress Title / Detail Trigger */}
+                <div className="relative z-10 flex items-center justify-between pb-3">
+                  <button
+                    type="button"
+                    aria-label="关闭闪卡复习"
+                    onClick={() => setIsFlashcardOpen(false)}
+                    className="w-9 h-9 rounded-full bg-white/75 hover:bg-white dark:bg-white/[0.08] dark:hover:bg-white/[0.14] border border-stone-900/[0.06] dark:border-white/[0.08] text-stone-600 hover:text-stone-900 dark:text-stone-300 dark:hover:text-white flex items-center justify-center transition-colors cursor-pointer"
+                  >
+                    <X className="w-4 h-4" />
+                  </button>
+
+                  <div className="flex items-center gap-1.5 text-[13px] font-semibold text-stone-800 dark:text-stone-100 tabular-nums">
+                    <span>语境闪卡</span>
                     {flashcardIndex < flashcardDeck.length && (
-                      <span className="text-xs font-mono tabular-nums text-stone-500 dark:text-stone-400">
-                        {flashcardIndex + 1} / {flashcardDeck.length}
-                      </span>
+                      <>
+                        <span className="text-stone-300 dark:text-stone-600" aria-hidden="true">·</span>
+                        <span className="font-mono text-xs text-stone-500 dark:text-stone-400">
+                          {flashcardIndex + 1} / {flashcardDeck.length}
+                        </span>
+                      </>
                     )}
+                  </div>
+
+                  {flashcardIndex < flashcardDeck.length ? (
                     <button
                       type="button"
-                      onClick={() => setIsFlashcardOpen(false)}
-                      className="p-2 rounded-full hover:bg-stone-200/60 dark:hover:bg-slate-800 text-stone-500 hover:text-stone-800 dark:hover:text-stone-200 transition-colors cursor-pointer"
+                      onClick={() => {
+                        const card = flashcardDeck[flashcardIndex];
+                        if (card) {
+                          openWordDetail(card, null, 'fullscreen');
+                        }
+                      }}
+                      className="h-9 px-2.5 rounded-full text-xs font-medium text-stone-500 hover:text-stone-900 dark:text-stone-400 dark:hover:text-stone-100 hover:bg-stone-900/[0.04] dark:hover:bg-white/[0.06] transition-colors cursor-pointer"
                     >
-                      <X className="w-5 h-5" />
+                      详情
                     </button>
-                  </div>
+                  ) : (
+                    <div className="w-9" />
+                  )}
                 </div>
 
-                {/* Subtle Hairline Progress Bar */}
-                <div className="w-full h-1 bg-stone-200/70 dark:bg-slate-800 rounded-full overflow-hidden">
+                {/* Hairline Progress Indicator */}
+                <div className="relative z-10 w-full h-[2px] bg-stone-900/[0.08] dark:bg-white/[0.08] rounded-full overflow-hidden">
                   <div
-                    className="h-full bg-[#516050] dark:bg-[#8FB996] transition-all duration-300"
+                    className="h-full bg-stone-900 dark:bg-stone-100 transition-all duration-300 ease-out"
                     style={{
                       width: `${
                         flashcardDeck.length > 0
@@ -1170,35 +1196,40 @@ export const NotebookModal: React.FC<NotebookModalProps> = ({ isOpen, onClose })
                   />
                 </div>
 
-                {/* Main Card Body or Completion Screen */}
+                {/* Main Stacked Index Card or Completion Screen */}
                 {flashcardIndex < flashcardDeck.length ? (
                   (() => {
                     const currentCard = flashcardDeck[flashcardIndex];
                     const mastery = (currentCard.masteryLevel ?? (currentCard.isStarred ? 1 : 0)) as MasteryLevel;
                     const primaryExample = currentCard.examples?.[0];
+                    const escapedTarget = currentCard.word.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+                    const highlightParts = primaryExample?.en
+                      ? primaryExample.en.split(new RegExp(`(${escapedTarget}[a-z]*)`, 'gi'))
+                      : [];
                     return (
-                      <div className="flex-1 flex flex-col justify-between py-4 min-h-0">
-                        {/* Stacked Physical Card Container */}
-                        <div className="flex-1 relative flex flex-col min-h-0 pb-2">
-                          {/* Back Stack Layers for Tactile Depth */}
+                      <div className="relative z-10 flex-1 flex flex-col justify-between pt-5 pb-1 min-h-0">
+                        {/* Physical 3-Layer Stacked Index Card Deck */}
+                        <div className="flex-1 relative flex flex-col min-h-0 mb-6">
+                          {/* Depth Layer 3 (Bottom-most physical card) */}
                           {flashcardIndex + 2 < flashcardDeck.length && (
-                            <div className="absolute inset-x-6 -bottom-1.5 h-6 rounded-3xl bg-white/50 dark:bg-slate-800/40 border border-stone-200/60 dark:border-slate-800/60 pointer-events-none" />
+                            <div className="absolute inset-x-7 top-4 -bottom-3.5 rounded-[28px] bg-[#FAF8F3]/75 dark:bg-[#111827]/70 border border-stone-900/[0.06] dark:border-white/[0.06] pointer-events-none transition-all" />
                           )}
+                          {/* Depth Layer 2 (Middle physical card) */}
                           {flashcardIndex + 1 < flashcardDeck.length && (
-                            <div className="absolute inset-x-3 -bottom-0.5 h-6 rounded-3xl bg-white/80 dark:bg-slate-800/70 border border-stone-200/80 dark:border-slate-800 shadow-2xs pointer-events-none" />
+                            <div className="absolute inset-x-3.5 top-2 -bottom-2 rounded-[28px] bg-[#FDFCF9]/92 dark:bg-[#141D2E]/90 border border-stone-900/[0.07] dark:border-white/[0.09] shadow-[0_12px_28px_rgba(28,25,23,0.06)] dark:shadow-[0_14px_30px_rgba(0,0,0,0.4)] pointer-events-none transition-all" />
                           )}
 
                           <AnimatePresence mode="wait" initial={false} custom={flashcardDirection}>
                             <motion.div
                               key={currentCard.word}
                               custom={flashcardDirection}
-                              initial={{ opacity: 0, x: flashcardDirection * 48, scale: 0.98 }}
+                              initial={{ opacity: 0, x: flashcardDirection * 28, scale: 0.985 }}
                               animate={{ opacity: 1, x: 0, scale: 1 }}
-                              exit={{ opacity: 0, x: flashcardDirection * -48, scale: 0.98 }}
-                              transition={{ type: 'spring', damping: 28, stiffness: 340 }}
+                              exit={{ opacity: 0, x: flashcardDirection * -28, scale: 0.985 }}
+                              transition={{ duration: 0.16, ease: [0.22, 1, 0.36, 1] }}
                               drag="x"
                               dragConstraints={{ left: 0, right: 0 }}
-                              dragElastic={0.45}
+                              dragElastic={0.42}
                               onDragStart={() => {
                                 isCardSwipingRef.current = true;
                               }}
@@ -1222,24 +1253,24 @@ export const NotebookModal: React.FC<NotebookModalProps> = ({ isOpen, onClose })
                                 if (isCardSwipingRef.current) return;
                                 setIsFlashcardFlipped(prev => !prev);
                               }}
-                              className="flex-1 rounded-3xl bg-white dark:bg-[#151D2E] border border-stone-200/90 dark:border-slate-800 shadow-[0_16px_40px_-12px_rgba(20,20,19,0.08)] p-6 flex flex-col justify-between cursor-grab active:cursor-grabbing relative overflow-y-auto touch-pan-y z-10"
+                              className="flex-1 rounded-[28px] bg-gradient-to-b from-white to-[#FCFBF8] dark:from-[#161F31] dark:to-[#121A2A] border border-stone-900/[0.07] dark:border-white/[0.08] shadow-[0_22px_50px_-12px_rgba(28,25,23,0.11)] dark:shadow-[0_24px_54px_-12px_rgba(0,0,0,0.55)] px-6 py-5 flex flex-col justify-between cursor-grab active:cursor-grabbing relative overflow-y-auto no-scrollbar touch-pan-y z-10"
                             >
-                              {/* Card Top Bar: Context Source & Mastery Ring */}
-                              <div className="flex items-center justify-between gap-2 pb-3 border-b border-stone-100 dark:border-slate-800/80">
-                                <div className="flex items-center gap-2 min-w-0 text-xs text-stone-500 dark:text-stone-400">
-                                  <span className="font-mono text-[11px] text-[#516050] dark:text-[#8FB996] font-semibold">
+                              {/* Top Quiet Editorial Metadata Kicker */}
+                              <div className="flex items-center justify-between gap-2 text-[11.5px] text-stone-500 dark:text-stone-400">
+                                <div className="flex items-center gap-1.5 min-w-0">
+                                  <span className="font-mono font-medium text-stone-600 dark:text-stone-300 tabular-nums shrink-0">
                                     No.{String(flashcardIndex + 1).padStart(2, '0')}
                                   </span>
                                   {currentCard.sourceContext && (
                                     <>
-                                      <span aria-hidden="true">·</span>
+                                      <span className="text-stone-300 dark:text-stone-600" aria-hidden="true">·</span>
                                       <span className="truncate">{currentCard.sourceContext}</span>
                                     </>
                                   )}
                                   {currentCard.categories?.[0] && (
                                     <>
-                                      <span aria-hidden="true">·</span>
-                                      <span className="text-[#8C7A5B] dark:text-amber-400/90 font-medium shrink-0">
+                                      <span className="text-stone-300 dark:text-stone-600" aria-hidden="true">·</span>
+                                      <span className="text-amber-700/90 dark:text-amber-400/90 font-medium shrink-0">
                                         {currentCard.categories[0]}
                                       </span>
                                     </>
@@ -1248,63 +1279,81 @@ export const NotebookModal: React.FC<NotebookModalProps> = ({ isOpen, onClose })
 
                                 <div
                                   onClick={(e) => e.stopPropagation()}
-                                  className="shrink-0 flex items-center gap-1.5"
+                                  className="shrink-0"
                                 >
-                                  <MasteryBadge level={mastery} size={24} interactive={false} />
+                                  <MasteryBadge level={mastery} size={22} interactive={false} />
                                 </div>
                               </div>
 
-                              {/* Card Hero Center: Word + Phonetic Audio + Contextual Quote + Flip Meaning */}
-                              <div className="my-auto py-4 space-y-5">
-                                {/* Word & Phonetic Header */}
-                                <div className="text-center space-y-2.5">
-                                  <h2 className="font-serif-luxury text-4xl sm:text-5xl font-bold text-stone-900 dark:text-stone-50 tracking-tight">
+                              {/* Editorial Center: Grand Serif Headword + Phonetic + Context Memory */}
+                              <div className="my-auto py-4 flex flex-col">
+                                <div className="text-center space-y-2.5 pb-5">
+                                  <h2 className="font-serif-luxury text-[40px] leading-[1.12] font-semibold text-stone-900 dark:text-stone-50 tracking-tight break-words">
                                     {currentCard.word}
                                   </h2>
 
-                                  <div className="flex items-center justify-center gap-2.5 flex-wrap">
-                                    <span className="text-xs font-mono italic text-[#516050] dark:text-[#8FB996] font-medium">
+                                  <div className="flex items-center justify-center gap-2 text-xs text-stone-500 dark:text-stone-400">
+                                    <span className="font-serif-luxury italic text-stone-600 dark:text-stone-300">
                                       {formatPartOfSpeech(currentCard.partOfSpeech, currentCard.word)}
                                     </span>
-                                    <span className="text-stone-300 dark:text-slate-700" aria-hidden="true">·</span>
+                                    <span className="text-stone-300 dark:text-stone-600" aria-hidden="true">·</span>
                                     <button
                                       type="button"
                                       onClick={(e) => {
                                         e.stopPropagation();
                                         speakWord(currentCard.word, 'en-GB');
                                       }}
-                                      className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-[#F3EFE6]/90 hover:bg-[#516050] dark:bg-slate-800 text-stone-700 dark:text-stone-200 hover:text-white transition-colors text-xs cursor-pointer"
+                                      className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-md hover:bg-stone-900/[0.05] dark:hover:bg-white/[0.08] text-stone-600 dark:text-stone-300 hover:text-stone-950 dark:hover:text-white transition-colors cursor-pointer"
                                     >
-                                      <Volume2 className="w-3.5 h-3.5" />
-                                      <span className="font-mono">{currentCard.phoneticUk || `/${currentCard.word}/`}</span>
+                                      <span className="font-mono text-[12.5px]">
+                                        {currentCard.phoneticUk || `/${currentCard.word}/`}
+                                      </span>
+                                      <Volume2 className="w-3.5 h-3.5 text-stone-700 dark:text-stone-200" />
                                     </button>
                                   </div>
                                 </div>
 
-                                {/* Contextual Example Box (Always visible to anchor memory, expands translation on flip) */}
+                                {/* Clean Hairline Divider + Contextual Quote (Zero nested box) */}
                                 {primaryExample && (
-                                  <div className="p-4 rounded-2xl bg-[#FAF8F5] dark:bg-slate-900/70 border border-stone-200/70 dark:border-slate-800/90 space-y-2 text-left">
-                                    <div className="flex items-start justify-between gap-2">
-                                      <p className="text-sm sm:text-[15px] font-serif-luxury italic text-stone-800 dark:text-stone-200 leading-relaxed">
-                                        “{primaryExample.en}”
-                                      </p>
+                                  <div className="border-t border-stone-900/[0.07] dark:border-white/[0.08] pt-4 space-y-2 text-left">
+                                    <div className="flex items-center justify-between gap-2">
+                                      <span className="text-[10.5px] font-semibold tracking-[0.14em] text-stone-400 dark:text-stone-500 uppercase">
+                                        原文语境
+                                      </span>
                                       <button
                                         type="button"
                                         onClick={(e) => {
                                           e.stopPropagation();
                                           speakWord(primaryExample.en, 'en-GB');
                                         }}
-                                        className="p-1.5 rounded-full text-stone-400 hover:text-[#516050] hover:bg-stone-200/50 dark:hover:bg-slate-800 transition-colors shrink-0 cursor-pointer"
+                                        className="p-1.5 -mr-1.5 rounded-full text-stone-400 hover:text-stone-900 dark:hover:text-stone-100 hover:bg-stone-900/[0.05] dark:hover:bg-white/[0.08] transition-colors shrink-0 cursor-pointer"
                                         title="朗读例句"
                                       >
                                         <Volume2 className="w-3.5 h-3.5" />
                                       </button>
                                     </div>
+                                    <p className="font-serif-luxury text-[15.5px] leading-[1.68] text-stone-700 dark:text-stone-200">
+                                      “
+                                      {highlightParts.map((part, pIdx) =>
+                                        part.toLowerCase().startsWith(currentCard.word.toLowerCase()) ? (
+                                          <strong
+                                            key={pIdx}
+                                            className="font-semibold text-stone-950 dark:text-white border-b-[1.5px] border-amber-700 dark:border-amber-400 pb-[1px]"
+                                          >
+                                            {part}
+                                          </strong>
+                                        ) : (
+                                          <React.Fragment key={pIdx}>{part}</React.Fragment>
+                                        )
+                                      )}
+                                      ”
+                                    </p>
                                     {isFlashcardFlipped && primaryExample.cn && (
                                       <motion.p
                                         initial={{ opacity: 0, y: 4 }}
                                         animate={{ opacity: 1, y: 0 }}
-                                        className="text-xs text-stone-500 dark:text-stone-400 pt-1.5 border-t border-stone-200/60 dark:border-slate-800"
+                                        transition={{ duration: 0.16 }}
+                                        className="text-xs leading-relaxed text-stone-500 dark:text-stone-400 pt-1"
                                       >
                                         {primaryExample.cn}
                                       </motion.p>
@@ -1312,18 +1361,18 @@ export const NotebookModal: React.FC<NotebookModalProps> = ({ isOpen, onClose })
                                   </div>
                                 )}
 
-                                {/* Revealed Meaning Section or Subtle Reveal Affordance */}
+                                {/* Revealed Definition (Seamless on paper — zero dashed wireframe!) */}
                                 <AnimatePresence mode="wait" initial={false}>
-                                  {isFlashcardFlipped ? (
+                                  {isFlashcardFlipped && (
                                     <motion.div
                                       key="meaning-revealed"
                                       initial={{ opacity: 0, y: 8 }}
                                       animate={{ opacity: 1, y: 0 }}
-                                      exit={{ opacity: 0, y: -6 }}
-                                      transition={{ duration: 0.18 }}
-                                      className="p-4 rounded-2xl bg-[#516050]/[0.06] dark:bg-[#8FB996]/[0.08] border border-[#516050]/20 dark:border-[#8FB996]/20 text-center space-y-1.5"
+                                      exit={{ opacity: 0, y: -4 }}
+                                      transition={{ duration: 0.18, ease: [0.22, 1, 0.36, 1] }}
+                                      className="mt-4 pt-4 border-t border-stone-900/[0.07] dark:border-white/[0.08] text-center space-y-1.5"
                                     >
-                                      <p className="text-base sm:text-lg font-semibold text-stone-900 dark:text-stone-100">
+                                      <p className="text-[17px] font-semibold text-stone-900 dark:text-stone-50 leading-snug">
                                         {currentCard.definitionCn}
                                       </p>
                                       {currentCard.definition && (
@@ -1332,57 +1381,40 @@ export const NotebookModal: React.FC<NotebookModalProps> = ({ isOpen, onClose })
                                         </p>
                                       )}
                                     </motion.div>
-                                  ) : (
-                                    <motion.div
-                                      key="meaning-hidden"
-                                      initial={{ opacity: 0 }}
-                                      animate={{ opacity: 1 }}
-                                      exit={{ opacity: 0 }}
-                                      className="py-3 px-4 rounded-2xl border border-dashed border-stone-200 dark:border-slate-800 text-center"
-                                    >
-                                      <span className="text-xs text-stone-400 dark:text-stone-500">
-                                        轻触卡片显现中文释义
-                                      </span>
-                                    </motion.div>
                                   )}
                                 </AnimatePresence>
                               </div>
 
-                              {/* Card Bottom Navigation Bar: Prev / Dots / Next */}
+                              {/* Quiet Editorial Card Footer: Prev / Flip Hint / Next */}
                               <div
                                 onClick={(e) => e.stopPropagation()}
-                                className="flex items-center justify-between pt-3 border-t border-stone-100 dark:border-slate-800/80"
+                                className="flex items-center justify-between pt-2 text-[11.5px] text-stone-400 dark:text-stone-500"
                               >
                                 <button
                                   type="button"
+                                  aria-label="上一词"
                                   onClick={() => handleNavigateFlashcard(-1)}
                                   disabled={flashcardIndex === 0}
-                                  className="inline-flex items-center gap-1 text-xs font-medium text-stone-500 hover:text-stone-900 dark:text-stone-400 dark:hover:text-stone-100 disabled:opacity-30 disabled:pointer-events-none py-1 px-2 rounded-lg hover:bg-stone-100 dark:hover:bg-slate-800 transition-colors cursor-pointer"
+                                  className="w-8 h-8 -ml-1.5 rounded-full flex items-center justify-center text-stone-400 hover:text-stone-900 dark:hover:text-stone-100 hover:bg-stone-900/[0.04] dark:hover:bg-white/[0.06] disabled:opacity-25 disabled:pointer-events-none transition-colors cursor-pointer"
                                 >
                                   <ChevronLeft className="w-4 h-4" />
-                                  <span>上一词</span>
                                 </button>
-
-                                <div className="flex items-center justify-center gap-1.5 max-w-[160px] overflow-hidden">
-                                  {flashcardDeck.slice(0, 12).map((_, idx) => (
-                                    <span
-                                      key={idx}
-                                      className={`h-1.5 rounded-full transition-all duration-200 ${
-                                        idx === flashcardIndex
-                                          ? 'w-4 bg-[#516050] dark:bg-[#8FB996]'
-                                          : 'w-1.5 bg-stone-200 dark:bg-slate-700'
-                                      }`}
-                                    />
-                                  ))}
-                                </div>
 
                                 <button
                                   type="button"
+                                  onClick={() => setIsFlashcardFlipped(prev => !prev)}
+                                  className="px-2 py-1 text-[11.5px] text-stone-400 hover:text-stone-700 dark:text-stone-500 dark:hover:text-stone-300 transition-colors cursor-pointer"
+                                >
+                                  {isFlashcardFlipped ? '轻触收起释义' : '轻触卡片任意处查看释义'}
+                                </button>
+
+                                <button
+                                  type="button"
+                                  aria-label="下一词"
                                   onClick={() => handleNavigateFlashcard(1)}
                                   disabled={flashcardIndex >= flashcardDeck.length - 1}
-                                  className="inline-flex items-center gap-1 text-xs font-medium text-stone-500 hover:text-stone-900 dark:text-stone-400 dark:hover:text-stone-100 disabled:opacity-30 disabled:pointer-events-none py-1 px-2 rounded-lg hover:bg-stone-100 dark:hover:bg-slate-800 transition-colors cursor-pointer"
+                                  className="w-8 h-8 -mr-1.5 rounded-full flex items-center justify-center text-stone-400 hover:text-stone-900 dark:hover:text-stone-100 hover:bg-stone-900/[0.04] dark:hover:bg-white/[0.06] disabled:opacity-25 disabled:pointer-events-none transition-colors cursor-pointer"
                                 >
-                                  <span>下一词</span>
                                   <ChevronRight className="w-4 h-4" />
                                 </button>
                               </div>
@@ -1390,49 +1422,75 @@ export const NotebookModal: React.FC<NotebookModalProps> = ({ isOpen, onClose })
                           </AnimatePresence>
                         </div>
 
-                        {/* Minimalist Dual Bottom Buttons: 不熟 / 已掌握 */}
-                        <div className="pt-3 grid grid-cols-2 gap-3 shrink-0">
+                        {/* Tactile 3-Tier Spaced-Repetition Action Bar */}
+                        <div className="grid grid-cols-[1fr_1fr_1.2fr] gap-2.5 shrink-0">
+                          <button
+                            type="button"
+                            onClick={() => handleFlashcardDecision(1)}
+                            className="py-2.5 px-2 rounded-2xl bg-white/85 hover:bg-white dark:bg-white/[0.07] dark:hover:bg-white/[0.12] border border-stone-900/[0.08] dark:border-white/[0.08] text-center transition-all active:scale-[0.97] cursor-pointer"
+                          >
+                            <span className="block text-[13px] font-semibold text-stone-900 dark:text-stone-100 leading-tight">
+                              生疏
+                            </span>
+                            <span className="block text-[10.5px] text-stone-500 dark:text-stone-400 mt-0.5 tabular-nums">
+                              10 分钟后
+                            </span>
+                          </button>
+
                           <button
                             type="button"
                             onClick={() => handleFlashcardDecision(2)}
-                            className="h-12 rounded-2xl bg-stone-200/75 hover:bg-stone-200 dark:bg-slate-800 dark:hover:bg-slate-700 text-stone-800 dark:text-stone-200 font-semibold text-sm flex items-center justify-center gap-2 transition-all active:scale-95 cursor-pointer"
+                            className="py-2.5 px-2 rounded-2xl bg-white/85 hover:bg-white dark:bg-white/[0.07] dark:hover:bg-white/[0.12] border border-stone-900/[0.08] dark:border-white/[0.08] text-center transition-all active:scale-[0.97] cursor-pointer"
                           >
-                            <RotateCcw className="w-4 h-4 text-stone-500 dark:text-stone-400" />
-                            <span>不熟</span>
+                            <span className="block text-[13px] font-semibold text-stone-900 dark:text-stone-100 leading-tight">
+                              模糊
+                            </span>
+                            <span className="block text-[10.5px] text-stone-500 dark:text-stone-400 mt-0.5 tabular-nums">
+                              1 天后
+                            </span>
                           </button>
 
                           <button
                             type="button"
                             onClick={() => handleFlashcardDecision(3)}
-                            className="h-12 rounded-2xl bg-[#516050] hover:bg-[#3F4C3E] dark:bg-[#8FB996] dark:text-stone-950 text-white font-semibold text-sm flex items-center justify-center gap-2 shadow-xs transition-all active:scale-95 cursor-pointer"
+                            className="py-2.5 px-2 rounded-2xl bg-stone-900 hover:bg-stone-800 dark:bg-stone-100 dark:hover:bg-white border border-stone-900 dark:border-stone-100 text-center shadow-[0_8px_20px_-6px_rgba(28,25,23,0.28)] dark:shadow-none transition-all active:scale-[0.97] cursor-pointer"
                           >
-                            <Check className="w-4 h-4 stroke-[2.5]" />
-                            <span>已掌握</span>
+                            <span className="block text-[13px] font-semibold text-stone-50 dark:text-stone-950 leading-tight">
+                              已掌握
+                            </span>
+                            <span className="block text-[10.5px] text-stone-300 dark:text-stone-600 mt-0.5 tabular-nums">
+                              7 天后复习
+                            </span>
                           </button>
                         </div>
                       </div>
                     );
                   })()
                 ) : (
-                  /* Session Complete State */
-                  <div className="flex-1 flex flex-col items-center justify-center text-center p-6 space-y-5">
-                    <div className="w-14 h-14 rounded-full bg-emerald-100 dark:bg-emerald-950/60 flex items-center justify-center text-[#516050] dark:text-[#8FB996]">
-                      <CheckCheck className="w-7 h-7" />
+                  /* Editorial Session Complete State */
+                  <div className="relative z-10 flex-1 flex flex-col items-center justify-center text-center p-6 space-y-6">
+                    <div className="w-12 h-12 rounded-2xl bg-white/90 dark:bg-white/[0.08] border border-stone-900/[0.07] dark:border-white/[0.1] shadow-sm flex items-center justify-center text-stone-900 dark:text-stone-100">
+                      <CheckCheck className="w-6 h-6" />
                     </div>
-                    <h4 className="font-serif-luxury text-2xl font-bold text-stone-900 dark:text-stone-100">
-                      本轮速刷完成
-                    </h4>
+                    <div className="space-y-1">
+                      <h4 className="font-serif-luxury text-2xl font-semibold text-stone-900 dark:text-stone-100">
+                        本轮语境复习完成
+                      </h4>
+                      <p className="text-xs text-stone-500 dark:text-stone-400">
+                        记忆曲线已同步更新
+                      </p>
+                    </div>
 
                     <div className="grid grid-cols-2 gap-3 w-full max-w-xs">
-                      <div className="p-3.5 rounded-2xl bg-white dark:bg-[#151D2E] border border-stone-200/80 dark:border-slate-800">
-                        <span className="text-xs text-stone-400 block">不熟</span>
-                        <span className="font-mono text-2xl font-bold text-stone-700 dark:text-stone-200 tabular-nums">
+                      <div className="p-4 rounded-2xl bg-white/90 dark:bg-[#151D2E] border border-stone-900/[0.07] dark:border-white/[0.08]">
+                        <span className="text-xs text-stone-500 dark:text-stone-400 block">待强化</span>
+                        <span className="font-mono text-2xl font-bold text-stone-800 dark:text-stone-200 tabular-nums mt-1 block">
                           {flashcardStats.learning}
                         </span>
                       </div>
-                      <div className="p-3.5 rounded-2xl bg-white dark:bg-[#151D2E] border border-stone-200/80 dark:border-slate-800">
-                        <span className="text-xs text-stone-400 block">已掌握</span>
-                        <span className="font-mono text-2xl font-bold text-[#516050] dark:text-[#8FB996] tabular-nums">
+                      <div className="p-4 rounded-2xl bg-white/90 dark:bg-[#151D2E] border border-stone-900/[0.07] dark:border-white/[0.08]">
+                        <span className="text-xs text-stone-500 dark:text-stone-400 block">已掌握</span>
+                        <span className="font-mono text-2xl font-bold text-stone-950 dark:text-white tabular-nums mt-1 block">
                           {flashcardStats.mastered}
                         </span>
                       </div>
@@ -1441,7 +1499,7 @@ export const NotebookModal: React.FC<NotebookModalProps> = ({ isOpen, onClose })
                     <button
                       type="button"
                       onClick={() => setIsFlashcardOpen(false)}
-                      className="px-6 py-3 rounded-full bg-[#516050] hover:bg-[#3F4C3E] text-white text-xs font-semibold shadow-xs transition-all active:scale-95 cursor-pointer"
+                      className="px-7 py-2.5 rounded-2xl bg-stone-900 hover:bg-stone-800 dark:bg-stone-100 dark:hover:bg-white text-stone-50 dark:text-stone-950 text-xs font-semibold transition-all active:scale-[0.98] cursor-pointer"
                     >
                       返回生词本
                     </button>

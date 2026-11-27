@@ -9,7 +9,6 @@ import {
   Search,
   RotateCcw,
   Clock,
-  Target,
   CheckCircle2,
   ArrowRight,
   ChevronRight,
@@ -202,12 +201,12 @@ export const IELTSArchivesTab: React.FC<IELTSArchivesTabProps> = ({ onOpenReview
 
   const getBandScoreStyle = (band: number) => {
     if (band >= 8.0) {
-      return 'bg-emerald-500/10 text-emerald-700 dark:text-emerald-300 border-emerald-500/20';
+      return 'bg-stone-900/[0.08] text-stone-900 dark:bg-white/[0.12] dark:text-stone-100 border-stone-900/15 dark:border-white/20';
     }
     if (band >= 7.0) {
       return 'bg-stone-900/[0.05] dark:bg-white/[0.08] text-stone-800 dark:text-stone-100 border-stone-900/[0.06] dark:border-white/[0.08]';
     }
-    return 'bg-amber-500/10 text-amber-700 dark:text-amber-300 border-amber-500/20';
+    return 'bg-[#C4845C]/10 text-[#A8623B] dark:text-[#E0A378] border-[#C4845C]/20';
   };
 
   const getWordChipStyle = (wordText: string) => {
@@ -217,7 +216,7 @@ export const IELTSArchivesTab: React.FC<IELTSArchivesTabProps> = ({ onOpenReview
         level,
         label: '已掌握',
         className:
-          'bg-emerald-500/10 hover:bg-emerald-500/18 dark:bg-emerald-500/15 dark:hover:bg-emerald-500/25 text-emerald-700 dark:text-emerald-300 border-emerald-500/20'
+          'bg-stone-900/[0.08] hover:bg-stone-900/[0.14] dark:bg-white/[0.12] dark:hover:bg-white/[0.18] text-stone-900 dark:text-stone-100 border-stone-900/15 dark:border-white/20'
       };
     }
     if (level >= 1) {
@@ -225,102 +224,145 @@ export const IELTSArchivesTab: React.FC<IELTSArchivesTabProps> = ({ onOpenReview
         level,
         label: '学习中',
         className:
-          'bg-stone-900/[0.06] hover:bg-stone-900/[0.10] dark:bg-white/[0.08] dark:hover:bg-white/[0.14] text-stone-800 dark:text-stone-200 border-stone-900/[0.08] dark:border-white/10'
+          'bg-stone-900/[0.05] hover:bg-stone-900/[0.09] dark:bg-white/[0.08] dark:hover:bg-white/[0.14] text-stone-800 dark:text-stone-200 border-stone-900/[0.07] dark:border-white/10'
       };
     }
     return {
       level: 0,
       label: '未收录',
       className:
-        'bg-stone-900/[0.03] hover:bg-stone-900/[0.07] dark:bg-white/[0.04] dark:hover:bg-white/[0.09] text-stone-600 dark:text-stone-400 border-stone-900/[0.05] dark:border-white/5'
+        'bg-stone-900/[0.025] hover:bg-stone-900/[0.06] dark:bg-white/[0.04] dark:hover:bg-white/[0.09] text-stone-600 dark:text-stone-400 border-stone-900/[0.05] dark:border-white/5'
     };
   };
 
   return (
     <div className="space-y-4 pb-8 animate-in fade-in duration-300">
-      {/* 1. IELTS Academic Analytics Hero Capsule */}
+      {/* 1. IELTS Academic Analytics Overview Card */}
       <div className="rounded-3xl bg-white/80 dark:bg-[#151C28]/88 border border-stone-900/[0.06] dark:border-white/[0.07] p-5 shadow-[0_4px_24px_-4px_rgba(0,0,0,0.03)] dark:shadow-[0_4px_24px_-4px_rgba(0,0,0,0.3)] space-y-4">
         {/* Header Title & Total Count */}
         <div className="flex items-center justify-between">
           <h3 className="text-base font-semibold text-stone-800 dark:text-stone-100">
-            雅思模考档案
+            模考成绩概览
           </h3>
           <span className="text-[11px] font-mono text-stone-400 dark:text-stone-500 tabular-nums">
             累计归档 {analytics.totalTests} 篇
           </span>
         </div>
 
-        {/* Hero KPI Grid */}
-        <div className="grid grid-cols-4 gap-2">
-          {/* Average Band */}
-          <div className="p-3 rounded-2xl bg-white/60 dark:bg-white/[0.04] border border-stone-900/[0.05] dark:border-white/[0.05] text-center">
-            <span className="text-[10px] font-sans text-stone-400 block mb-0.5 whitespace-nowrap">平均分数</span>
-            <span className="text-xl font-mono font-bold text-stone-800 dark:text-stone-100 tracking-tight tabular-nums">
-              {analytics.avgBand > 0 ? analytics.avgBand.toFixed(1) : '--'}
-            </span>
-            <span className="text-[9px] font-sans text-stone-400 block mt-0.5">Band</span>
+        {/* Band Arc Gauge + 3-Row Clean Ledger */}
+        <div className="flex items-center gap-5 pt-0.5">
+          {/* 240° IELTS Band Arc Gauge */}
+          <div className="relative w-24 h-20 shrink-0 flex items-center justify-center">
+            <svg width="96" height="80" viewBox="0 0 96 80" aria-hidden="true">
+              <path
+                d="M 15.1 66 A 38 38 0 1 1 80.9 66"
+                fill="none"
+                strokeWidth="7"
+                strokeLinecap="round"
+                className="stroke-stone-900/[0.08] dark:stroke-white/[0.10]"
+              />
+              {analytics.avgBand > 0 && (
+                <path
+                  d="M 15.1 66 A 38 38 0 1 1 80.9 66"
+                  fill="none"
+                  strokeWidth="7"
+                  strokeLinecap="round"
+                  strokeDasharray={159.17}
+                  strokeDashoffset={159.17 * (1 - Math.min(1, Math.max(0, analytics.avgBand / 9)))}
+                  className="stroke-stone-900 dark:stroke-stone-100 transition-all duration-700 ease-out"
+                />
+              )}
+            </svg>
+            <div className="absolute top-[25px] inset-x-0 flex flex-col items-center pointer-events-none">
+              <span className="text-[22px] font-mono font-bold text-stone-800 dark:text-stone-100 leading-none tracking-tight tabular-nums">
+                {analytics.avgBand > 0 ? analytics.avgBand.toFixed(1) : '--'}
+              </span>
+              <span className="text-[9.5px] font-sans font-semibold tracking-[0.12em] text-stone-400 dark:text-stone-500 mt-1.5 uppercase">
+                Band
+              </span>
+            </div>
           </div>
 
-          {/* Peak Band */}
-          <div className="p-3 rounded-2xl bg-white/60 dark:bg-white/[0.04] border border-stone-900/[0.05] dark:border-white/[0.05] text-center">
-            <span className="text-[10px] font-sans text-stone-400 block mb-0.5 whitespace-nowrap">最高表现</span>
-            <span className="text-xl font-mono font-bold text-emerald-600 dark:text-emerald-400 tracking-tight tabular-nums">
-              {analytics.maxBand > 0 ? analytics.maxBand.toFixed(1) : '--'}
-            </span>
-            <span className="text-[9px] font-sans text-stone-400 block mt-0.5">Peak</span>
-          </div>
+          {/* Unlined 3-Row Metrics Ledger */}
+          <div className="flex-1 min-w-0 space-y-2.5">
+            <div className="flex items-baseline justify-between gap-2">
+              <span className="text-xs font-sans text-stone-500 dark:text-stone-400 shrink-0">
+                最高表现
+              </span>
+              <span className="text-[13px] font-mono font-semibold text-stone-900 dark:text-white tabular-nums truncate">
+                {analytics.maxBand > 0 ? analytics.maxBand.toFixed(1) : '--'}
+                <span className="text-[11px] font-sans font-normal text-stone-400 dark:text-stone-500 ml-1">
+                  Peak
+                </span>
+              </span>
+            </div>
 
-          {/* Correct Accuracy */}
-          <div className="p-3 rounded-2xl bg-white/60 dark:bg-white/[0.04] border border-stone-900/[0.05] dark:border-white/[0.05] text-center">
-            <span className="text-[10px] font-sans text-stone-400 block mb-0.5 whitespace-nowrap">正确率</span>
-            <span className="text-xl font-mono font-bold text-stone-800 dark:text-stone-100 tracking-tight tabular-nums">
-              {analytics.totalQuestions > 0 ? `${analytics.accuracyRate}%` : '--'}
-            </span>
-            <span className="text-[9px] font-sans text-stone-400 block mt-0.5 tabular-nums">
-              {analytics.totalCorrect}/{analytics.totalQuestions}题
-            </span>
-          </div>
+            <div className="flex items-baseline justify-between gap-2">
+              <span className="text-xs font-sans text-stone-500 dark:text-stone-400 shrink-0">
+                答题正确率
+              </span>
+              <span className="text-[13px] font-mono font-semibold text-stone-800 dark:text-stone-100 tabular-nums truncate">
+                {analytics.totalQuestions > 0 ? `${analytics.accuracyRate}%` : '--'}
+                <span className="text-[11px] font-sans font-normal text-stone-400 dark:text-stone-500 ml-1.5">
+                  {analytics.totalCorrect}/{analytics.totalQuestions} 题
+                </span>
+              </span>
+            </div>
 
-          {/* Average Time */}
-          <div className="p-3 rounded-2xl bg-white/60 dark:bg-white/[0.04] border border-stone-900/[0.05] dark:border-white/[0.05] text-center">
-            <span className="text-[10px] font-sans text-stone-400 block mb-0.5 whitespace-nowrap">篇均用时</span>
-            <span className="text-xl font-mono font-bold text-stone-800 dark:text-stone-100 tracking-tight tabular-nums">
-              {analytics.avgTimeMinutes > 0 ? `${analytics.avgTimeMinutes}m` : '--'}
-            </span>
-            <span
-              className={`text-[9px] font-sans block mt-0.5 whitespace-nowrap ${
-                analytics.totalTests === 0
-                  ? 'text-stone-400'
-                  : analytics.isTimeWarning
-                  ? 'text-amber-600 dark:text-amber-400 font-medium'
-                  : 'text-emerald-600 dark:text-emerald-400 font-medium'
-              }`}
-            >
-              {analytics.timeStatusLabel}
-            </span>
+            <div className="flex items-baseline justify-between gap-2">
+              <span className="text-xs font-sans text-stone-500 dark:text-stone-400 shrink-0">
+                篇均用时
+              </span>
+              {analytics.avgTimeMinutes > 0 ? (
+                <span className="text-[13px] font-mono font-semibold text-stone-800 dark:text-stone-100 tabular-nums truncate">
+                  {analytics.avgTimeMinutes}m
+                  <span
+                    className={`text-[11px] font-sans font-medium ml-1.5 ${
+                      analytics.isTimeWarning
+                        ? 'text-[#B86E42] dark:text-[#E0A378]'
+                        : 'text-stone-500 dark:text-stone-400'
+                    }`}
+                  >
+                    {analytics.timeStatusLabel}
+                  </span>
+                </span>
+              ) : (
+                <span className="text-xs font-sans text-stone-400 dark:text-stone-500">
+                  暂无记录
+                </span>
+              )}
+            </div>
           </div>
         </div>
 
-        {/* Diagnostic Skills Breakdown Gauge */}
-        <div className="pt-1 space-y-2 border-t border-stone-900/[0.05] dark:border-white/[0.06]">
-          <div className="flex items-center justify-between text-[11px] text-stone-500 dark:text-stone-400 font-sans">
-            <span className="flex items-center gap-1.5">
-              <Target className="w-3.5 h-3.5 text-emerald-500 dark:text-emerald-400" />
-              <span>学术真题理解度</span>
-            </span>
+        {/* 5-Segment Comprehension Meter */}
+        <div className="pt-3 space-y-2 border-t border-stone-900/[0.05] dark:border-white/[0.06]">
+          <div className="flex items-center justify-between text-xs font-sans">
+            <span className="text-stone-500 dark:text-stone-400">真题理解度</span>
             <span className="font-mono font-semibold text-stone-700 dark:text-stone-200 tabular-nums">
               {analytics.totalQuestions > 0
                 ? `${analytics.accuracyRate}% · ${analytics.comprehensionTier}`
                 : '暂无评估'}
             </span>
           </div>
-          <div className="h-1.5 w-full bg-stone-900/[0.06] dark:bg-white/[0.08] rounded-full overflow-hidden flex">
-            <div
-              className="h-full bg-gradient-to-r from-emerald-400 to-teal-500 dark:from-emerald-400 dark:to-teal-400 rounded-full transition-all duration-700"
-              style={{
-                width: `${analytics.totalQuestions > 0 ? analytics.accuracyRate : 0}%`
-              }}
-            />
+          <div className="grid grid-cols-5 gap-1.5">
+            {[0, 1, 2, 3, 4].map(segIdx => {
+              const fillPct =
+                analytics.totalQuestions > 0
+                  ? Math.max(0, Math.min(100, (analytics.accuracyRate - segIdx * 20) * 5))
+                  : 0;
+              return (
+                <div
+                  key={segIdx}
+                  className="h-1 rounded-full bg-stone-900/[0.07] dark:bg-white/[0.08] overflow-hidden"
+                >
+                  <div
+                    className="h-full rounded-full bg-stone-900 dark:bg-stone-100 transition-all duration-700 ease-out"
+                    style={{ width: `${fillPct}%` }}
+                  />
+                </div>
+              );
+            })}
           </div>
         </div>
       </div>
@@ -386,12 +428,12 @@ export const IELTSArchivesTab: React.FC<IELTSArchivesTabProps> = ({ onOpenReview
           <BookOpen className="w-9 h-9 text-stone-400 mx-auto opacity-50" />
           <div>
             <p className="text-xs font-semibold text-stone-700 dark:text-stone-300">
-              {searchQuery || activeFilter !== 'ALL' ? '没有匹配的模考记录' : '暂无已归档的雅思模考卷'}
+              {searchQuery || activeFilter !== 'ALL' ? '没有匹配的模考记录' : '暂无模考记录'}
             </p>
             <p className="text-[11px] text-stone-400 mt-1">
               {searchQuery || activeFilter !== 'ALL'
-                ? '可以尝试切换筛选标签或清空搜索关键词'
-                : '在雅思精读空间完成计时模考后，系统将自动生成权威评分与诊断归档于此'}
+                ? '尝试切换筛选条件或清空关键词'
+                : '完成计时模考后，成绩与复盘会自动保存在这里'}
             </p>
           </div>
           {searchQuery || activeFilter !== 'ALL' ? (
@@ -401,17 +443,17 @@ export const IELTSArchivesTab: React.FC<IELTSArchivesTabProps> = ({ onOpenReview
                 setSearchQuery('');
                 setActiveFilter('ALL');
               }}
-              className="inline-flex items-center gap-1.5 px-4 py-2 rounded-2xl bg-stone-900/10 hover:bg-stone-900/15 dark:bg-white/10 dark:hover:bg-white/15 text-stone-700 dark:text-stone-200 text-xs font-semibold transition-all cursor-pointer"
+              className="inline-flex items-center gap-1.5 px-4 py-2 rounded-xl bg-stone-900/10 hover:bg-stone-900/15 dark:bg-white/10 dark:hover:bg-white/15 text-stone-700 dark:text-stone-200 text-xs font-medium transition-colors cursor-pointer"
             >
-              <span>重置筛选条件</span>
+              <span>重置筛选</span>
             </button>
           ) : (
             <button
               type="button"
               onClick={handleGoToIELTS}
-              className="inline-flex items-center gap-1.5 px-4 py-2 rounded-2xl bg-stone-900 text-white dark:bg-white dark:text-stone-950 text-xs font-semibold transition-all cursor-pointer"
+              className="inline-flex items-center gap-1.5 px-4 py-2 rounded-xl bg-stone-900 text-white dark:bg-white dark:text-stone-950 text-xs font-medium transition-colors cursor-pointer"
             >
-              <span>进入雅思精读空间</span>
+              <span>去真题精读</span>
               <ArrowRight className="w-3.5 h-3.5" />
             </button>
           )}

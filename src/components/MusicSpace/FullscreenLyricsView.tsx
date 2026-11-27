@@ -6,7 +6,7 @@ import { lookupLyricTerm, cleanWordText, getLyricLineTranslation } from '../../u
 import { withColorAlpha } from '../../utils/colorExtractor';
 import { triggerHighRefreshBoost } from '../../utils/displayRefreshRate';
 import { collectWord } from '../../db';
-import { ChevronLeft, Type, MoveVertical, X, RotateCcw, SlidersHorizontal, Clock, Sparkles, Play } from 'lucide-react';
+import { ChevronLeft, Type, MoveVertical, X, RotateCcw, SlidersHorizontal, Clock, Play, Pause } from 'lucide-react';
 
 const formatTime = (timeSec: number) => {
   if (isNaN(timeSec) || timeSec < 0) return '00:00';
@@ -70,6 +70,7 @@ export const FullscreenLyricsView: React.FC<FullscreenLyricsViewProps> = React.m
     lrcText: '',
   }), []);
   const currentSong: SongItem = songs[currentSongIndex] || songs[0] || fallbackSong;
+  const isPlaying = useAppStore(s => s.isPlaying);
   const setIsPlaying = useAppStore(s => s.setIsPlaying);
 
   const [showTranslation, setShowTranslation] = useState(false);
@@ -966,59 +967,59 @@ export const FullscreenLyricsView: React.FC<FullscreenLyricsViewProps> = React.m
         />
       </div>
 
-      {/* Top Header: Left Minimalist ‹ Button, Right [ 译 ] Capsule */}
+      {/* Top Header: Left Minimalist ‹ Button, Full Unclipped Title, Right [ 译 ] Toggle */}
       <div
         onClick={(e) => e.stopPropagation()}
-        className="relative w-full px-5 pt-[var(--android-safe-top,max(3.25rem,calc(env(safe-area-inset-top,44px)+0.85rem)))] pb-3 flex items-center justify-between z-40 pointer-events-auto cursor-default"
+        className="relative w-full px-4 pt-[var(--android-safe-top,max(3.25rem,calc(env(safe-area-inset-top,44px)+0.85rem)))] pb-2.5 flex items-center justify-between gap-2 z-40 pointer-events-auto cursor-default"
       >
         {/* Left: Minimalist Back Button */}
-        <div className="flex items-center gap-2 min-w-[70px]">
+        <div className="w-10 shrink-0 flex items-center justify-start">
           <button
             id="lyrics-header-back-btn"
             onClick={onClose}
-            className="w-8 h-8 rounded-full bg-stone-900/5 dark:bg-white/10 hover:bg-stone-900/10 dark:hover:bg-white/15 active:scale-95 text-stone-700 dark:text-stone-300 backdrop-blur-md flex items-center justify-center transition-all border border-stone-200/50 dark:border-white/5"
+            className="w-8 h-8 rounded-full bg-stone-900/[0.05] dark:bg-white/10 hover:bg-stone-900/10 dark:hover:bg-white/15 active:scale-95 text-stone-700 dark:text-stone-200 backdrop-blur-md flex items-center justify-center transition-all border border-stone-200/60 dark:border-white/10 cursor-pointer"
             aria-label="Return to player"
-            title="Return to gallery player"
+            title="返回播放器"
           >
-            <ChevronLeft className="w-5 h-5 -ml-0.5" />
+            <ChevronLeft className="w-4.5 h-4.5 -ml-0.5" />
           </button>
         </div>
 
-        {/* Center: Song Title & Artist */}
-        <div className="flex-1 px-2 flex flex-col items-center justify-center text-center overflow-hidden pointer-events-none select-none">
+        {/* Center: Song Title & Artist (Full available width so titles don't clip prematurely) */}
+        <div className="flex-1 min-w-0 px-1 flex flex-col items-center justify-center text-center overflow-hidden pointer-events-none select-none">
           <p
-            className="font-sans text-[9px] uppercase tracking-[0.25em] text-[#78716C] dark:text-stone-400 font-normal truncate max-w-[180px]"
+            className="font-sans text-[9px] uppercase tracking-[0.22em] text-stone-500 dark:text-stone-400 font-normal truncate w-full"
           >
             {currentSong.artist ? currentSong.artist.toUpperCase() : 'ETHEREAL SOUNDS'}
           </p>
           <h2
-            className="font-serif-luxury text-[13px] sm:text-sm font-normal text-[#292524] dark:text-stone-100 tracking-[0.15em] uppercase truncate max-w-[200px] leading-tight mt-0.5"
+            className="font-serif-luxury text-[13px] sm:text-[14px] font-normal text-stone-900 dark:text-stone-100 tracking-[0.08em] uppercase truncate w-full leading-tight mt-0.5"
           >
             {currentSong.title}
           </h2>
         </div>
 
-        {/* Right: Minimalist [ 译 ] Capsule Toggle */}
-        <div className="min-w-[70px] flex items-center justify-end">
+        {/* Right: Minimalist [ 译 ] Toggle */}
+        <div className="w-10 shrink-0 flex items-center justify-end">
           <button
             id="lyrics-translation-toggle-btn"
             onClick={() => {
               setShowTranslation(!showTranslation);
             }}
-            className={`px-3 py-1 rounded-full text-xs font-medium tracking-wide backdrop-blur-md transition-all active:scale-95 border ${
+            className={`w-8 h-8 rounded-full text-xs font-medium backdrop-blur-md flex items-center justify-center transition-all active:scale-95 border cursor-pointer ${
               showTranslation
-                ? 'bg-[#516050] text-white border-[#516050] shadow-xs'
-                : 'bg-stone-900/5 dark:bg-white/10 text-stone-700 dark:text-stone-300 border-stone-200/60 dark:border-white/10 hover:bg-stone-900/10 dark:hover:bg-white/15'
+                ? 'bg-stone-900 text-white border-stone-900 dark:bg-stone-100 dark:text-stone-900 dark:border-stone-100 shadow-xs'
+                : 'bg-stone-900/[0.05] dark:bg-white/10 text-stone-700 dark:text-stone-200 border-stone-200/60 dark:border-white/10 hover:bg-stone-900/10 dark:hover:bg-white/15'
             }`}
             aria-label="Toggle translation"
-            title="Toggle lyric translations"
+            title="切换中文翻译"
           >
             译
           </button>
         </div>
       </div>
 
-      {/* Top Selection Banner during touch long-press (Refined dark blur bar below header) */}
+      {/* Top Selection Banner during touch long-press (Clean Chinese HUD) */}
       <AnimatePresence>
         {gestureState.isLongPressing && (
           <motion.div
@@ -1052,32 +1053,32 @@ export const FullscreenLyricsView: React.FC<FullscreenLyricsViewProps> = React.m
                       : 'text-stone-100'
                   }`}
                 >
-                  {gestureState.isSavingDown ? `★ "${gestureState.selectedText}"` : `"${gestureState.selectedText}"`}
+                  “{gestureState.selectedText}”
                 </span>
               </div>
 
-              {/* Right: Dynamic State Indicator */}
+              {/* Right: Dynamic State Indicator (Clean Chinese) */}
               <div className="flex-shrink-0 flex items-center pl-2">
                 {gestureState.isEscapingUp ? (
-                  <span className="text-xs font-semibold text-rose-300 tracking-wide font-sans animate-bounce flex items-center gap-1">
-                    ✕ Cancel
+                  <span className="text-xs font-medium text-rose-300 font-sans">
+                    松手取消
                   </span>
                 ) : gestureState.isSavingDown ? (
-                  <span className="text-xs font-semibold text-emerald-300 tracking-wide font-sans animate-bounce flex items-center gap-1">
-                    ★ Save
+                  <span className="text-xs font-medium text-[#30D158] font-sans">
+                    松手收录生词本
                   </span>
                 ) : gestureState.isDwellLocked ? (
-                  <span className="text-xs text-emerald-300 dark:text-emerald-400 font-sans tracking-wide flex items-center gap-1.5">
-                    <span className="inline-block w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />
-                    <span>Locked · ↓ Save · ↑ Cancel</span>
+                  <span className="text-xs text-emerald-300 font-sans flex items-center gap-1.5">
+                    <span className="inline-block w-1.5 h-1.5 rounded-full bg-[#30D158]" />
+                    <span>已锁定 · 下滑收录 · 上滑取消</span>
                   </span>
                 ) : gestureState.isMultiWord ? (
-                  <span className="text-xs text-amber-300/90 font-sans tracking-wide flex items-center gap-1">
-                    <span>Selecting · Hold to Lock</span>
+                  <span className="text-xs text-amber-300/95 font-sans">
+                    划选词组 · 停顿锁定
                   </span>
                 ) : (
-                  <span className="text-xs text-stone-300 font-sans tracking-wide">
-                    ↓ Save · ↑ Cancel · Release to View
+                  <span className="text-xs text-stone-300 font-sans">
+                    下滑收录 · 上滑取消 · 松手查词
                   </span>
                 )}
               </div>
@@ -1100,18 +1101,18 @@ export const FullscreenLyricsView: React.FC<FullscreenLyricsViewProps> = React.m
               style={{ top: '42%' }}
               className="absolute left-0 right-0 z-30 pointer-events-none flex items-center -translate-y-1/2 px-3 sm:px-6"
             >
-              {/* Left: Subtle Minimalist Time Stamp in the gutter */}
-              <div className="pointer-events-auto flex items-center shrink-0 w-12 sm:w-14">
-                <span className="text-[11px] font-mono font-medium text-stone-400 dark:text-stone-500 tracking-wider select-none">
+              {/* Left: Subtle Minimalist Time Stamp */}
+              <div className="pointer-events-auto flex items-center shrink-0">
+                <span className="text-[10px] font-mono tabular-nums font-medium text-stone-500 dark:text-stone-400 bg-[#FAF8F5]/85 dark:bg-[#0D1117]/85 backdrop-blur-sm px-1.5 py-0.5 rounded-md tracking-wider select-none">
                   {formatTime((parsedLyrics[aimedLyricIndex]?.timeMs || 0) / 1000)}
                 </span>
               </div>
 
-              {/* Center Guide Line: ultra-faint dashed hairline between gutters */}
-              <div className="flex-1 h-[1px] mx-1 border-b border-dashed border-stone-300/40 dark:border-white/15 opacity-60" />
+              {/* Center Guide Line: ultra-faint dashed hairline */}
+              <div className="flex-1 h-[1px] mx-2 border-b border-dashed border-stone-300/50 dark:border-white/15 opacity-70" />
 
-              {/* Right: Delicate Minimalist Play Action Icon in the gutter */}
-              <div className="pointer-events-auto flex items-center justify-end shrink-0 w-12 sm:w-14">
+              {/* Right: Delicate Minimalist Play Action Icon */}
+              <div className="pointer-events-auto flex items-center justify-end shrink-0">
                 <button
                   id="lyrics-seek-play-btn"
                   type="button"
@@ -1119,7 +1120,7 @@ export const FullscreenLyricsView: React.FC<FullscreenLyricsViewProps> = React.m
                     e.stopPropagation();
                     handleSeekToLine(aimedLyricIndex);
                   }}
-                  className="w-7 h-7 rounded-full bg-stone-300/30 dark:bg-white/10 hover:bg-stone-400/40 dark:hover:bg-white/20 text-stone-600 dark:text-stone-300 hover:text-stone-900 dark:hover:text-white transition-all flex items-center justify-center cursor-pointer active:scale-90 shadow-2xs"
+                  className="w-7 h-7 rounded-full bg-white/85 dark:bg-stone-800/90 hover:bg-stone-900 hover:text-white dark:hover:bg-white dark:hover:text-stone-900 text-stone-700 dark:text-stone-200 border border-stone-200/70 dark:border-white/10 backdrop-blur-sm transition-all flex items-center justify-center cursor-pointer active:scale-90 shadow-2xs"
                   title="跳转播放此句歌词"
                 >
                   <Play className="w-3 h-3 fill-current ml-0.5" />
@@ -1130,18 +1131,20 @@ export const FullscreenLyricsView: React.FC<FullscreenLyricsViewProps> = React.m
         </AnimatePresence>
 
 
-        {/* Main Flowing Lyrics Canvas (Safe horizontal gutters px-16 sm:px-20 ensure zero boundary bleed) */}
+        {/* Main Flowing Lyrics Canvas (Airy horizontal padding + soft top/bottom edge fade mask) */}
         <div
           ref={containerRef}
           onScroll={handleScroll}
           style={{
             gap: `${lineSpacing}px`,
-            contain: 'layout paint'
+            contain: 'layout paint',
+            maskImage: 'linear-gradient(to bottom, transparent 0%, black 6%, black 88%, transparent 100%)',
+            WebkitMaskImage: 'linear-gradient(to bottom, transparent 0%, black 6%, black 88%, transparent 100%)'
           }}
-          className="flex-1 w-full overflow-y-auto no-scrollbar px-16 sm:px-20 pt-8 pb-[160px] flex flex-col text-center select-none z-20"
+          className="flex-1 w-full overflow-y-auto no-scrollbar px-7 sm:px-9 pt-10 pb-[180px] flex flex-col text-center select-none z-20"
         >
           {/* Top Spacer */}
-          <div className="h-12 flex-shrink-0" />
+          <div className="h-10 flex-shrink-0" />
 
           {parsedLyrics.map((line, lIdx) => {
             const isActive = lIdx === activeLyricIndex;
@@ -1164,7 +1167,7 @@ export const FullscreenLyricsView: React.FC<FullscreenLyricsViewProps> = React.m
 
             const translation = showTranslation ? (line.translation || getLyricLineTranslation(line.rawText)) : '';
 
-            const lineOpacity = isDimmed ? 0.18 : isAimed ? 1 : isActive ? 1 : isScrubbing ? 0.45 : 0.38;
+            const lineOpacity = isDimmed ? 0.18 : isAimed ? 1 : isActive ? 1 : isScrubbing ? 0.65 : 0.62;
             const isHighlightedLine = isActive || isAimed;
             const lineScale = isAimed ? 1.02 : isActive ? activeScaleFactor : 1;
 
@@ -1211,7 +1214,7 @@ export const FullscreenLyricsView: React.FC<FullscreenLyricsViewProps> = React.m
                     // O(1) lookup from precomputed vocabulary book matrix
                     const isSaved = Boolean(savedSpanLookup[lIdx]?.[sIdx]);
                     const savedUnderlineClasses = isSaved
-                      ? 'underline decoration-[#455743] dark:decoration-[#84AA87] underline-offset-[5px] decoration-[1.5px]'
+                      ? 'underline decoration-stone-700/75 dark:decoration-stone-300/75 underline-offset-[5px] decoration-[1.5px] font-medium'
                       : '';
 
                     // Determine connected rounded edges for multi-word gesture selection
@@ -1232,11 +1235,11 @@ export const FullscreenLyricsView: React.FC<FullscreenLyricsViewProps> = React.m
                       if (isEscaping) {
                         selectionClasses = `${rounded} bg-rose-500/20 dark:bg-rose-500/30 text-rose-800 dark:text-rose-200 line-through opacity-80 shadow-xs`;
                       } else if (isSaving) {
-                        selectionClasses = `${rounded} bg-emerald-500/25 dark:bg-emerald-500/35 text-emerald-950 dark:text-emerald-100 shadow-sm ring-1 ring-emerald-500/50`;
+                        selectionClasses = `${rounded} bg-[#30D158]/22 dark:bg-[#30D158]/30 text-emerald-950 dark:text-emerald-100 shadow-sm ring-1 ring-[#30D158]/50`;
                       } else if (isLocked) {
-                        selectionClasses = `${rounded} bg-[#516050]/25 dark:bg-[#7EA783]/30 text-stone-950 dark:text-white shadow-sm ring-1 ring-[#516050]/50 dark:ring-[#8FB996]/60`;
+                        selectionClasses = `${rounded} bg-stone-900/15 dark:bg-white/22 text-stone-950 dark:text-white shadow-sm ring-1 ring-stone-900/25 dark:ring-white/35`;
                       } else {
-                        selectionClasses = `${rounded} bg-[#516050]/20 dark:bg-[#7EA783]/25 text-stone-950 dark:text-white`;
+                        selectionClasses = `${rounded} bg-stone-900/10 dark:bg-white/15 text-stone-950 dark:text-white`;
                       }
                     } else if (isAnchorSpan) {
                       const rounded = isSingleAnchor
@@ -1246,7 +1249,7 @@ export const FullscreenLyricsView: React.FC<FullscreenLyricsViewProps> = React.m
                         : isLastAnchor
                         ? 'rounded-r-md rounded-l-none'
                         : 'rounded-none';
-                      selectionClasses = `${rounded} bg-[#516050]/15 dark:bg-[#7EA783]/20 text-stone-950 dark:text-white`;
+                      selectionClasses = `${rounded} bg-stone-900/10 dark:bg-white/16 text-stone-950 dark:text-white`;
                     } else if (isActive) {
                       // Whole sentence active line styling (cohesive, unified, highly legible)
                       selectionClasses = `text-stone-950 dark:text-stone-50 ${savedUnderlineClasses}`;
@@ -1255,7 +1258,7 @@ export const FullscreenLyricsView: React.FC<FullscreenLyricsViewProps> = React.m
                       selectionClasses = `text-stone-900 dark:text-stone-100 ${savedUnderlineClasses}`;
                     } else {
                       // Unfocused background lines
-                      selectionClasses = `text-stone-600 dark:text-stone-400 hover:text-stone-900 dark:hover:text-stone-200 ${savedUnderlineClasses}`;
+                      selectionClasses = `text-stone-700 dark:text-stone-300 hover:text-stone-950 dark:hover:text-stone-100 ${savedUnderlineClasses}`;
                     }
 
                     return (
@@ -1298,12 +1301,27 @@ export const FullscreenLyricsView: React.FC<FullscreenLyricsViewProps> = React.m
         </div>
       </div>
 
-      {/* Bottom-Right Minimalist Single Settings Capsule Trigger */}
+      {/* Bottom-Right Paired Floating Controls: Mini Play/Pause + Settings */}
       <div
         id="lyrics-adjust-triggers"
         onClick={(e) => e.stopPropagation()}
-        className="absolute right-4 bottom-6 z-30 flex items-center select-none cursor-default"
+        className="absolute right-4 bottom-6 z-30 flex items-center gap-2 select-none cursor-default"
       >
+        <button
+          id="lyrics-mini-play-btn"
+          type="button"
+          onClick={() => setIsPlaying(!isPlaying)}
+          aria-label={isPlaying ? '暂停播放' : '继续播放'}
+          title={isPlaying ? '暂停播放' : '继续播放'}
+          className="w-9 h-9 rounded-full flex items-center justify-center backdrop-blur-md transition-all active:scale-95 border cursor-pointer shadow-xs bg-white/85 dark:bg-stone-900/85 text-stone-800 dark:text-stone-100 border-stone-200/85 dark:border-white/10 hover:bg-white dark:hover:bg-stone-800"
+        >
+          {isPlaying ? (
+            <Pause className="w-3.5 h-3.5 fill-current" />
+          ) : (
+            <Play className="w-3.5 h-3.5 fill-current ml-0.5" />
+          )}
+        </button>
+
         <button
           id="lyrics-settings-modal-btn"
           type="button"
@@ -1312,14 +1330,14 @@ export const FullscreenLyricsView: React.FC<FullscreenLyricsViewProps> = React.m
           title="歌词与排版设置"
           className={`w-9 h-9 rounded-full flex items-center justify-center backdrop-blur-md transition-all active:scale-95 border cursor-pointer relative shadow-xs ${
             isSettingsOpen
-              ? 'bg-[#516050] text-white border-[#516050]'
-              : 'bg-white/80 dark:bg-stone-900/80 text-stone-700 dark:text-stone-200 border-stone-200/90 dark:border-stone-800 hover:border-stone-300 dark:hover:border-stone-700'
+              ? 'bg-stone-900 text-white border-stone-900 dark:bg-stone-100 dark:text-stone-900 dark:border-stone-100'
+              : 'bg-white/85 dark:bg-stone-900/85 text-stone-700 dark:text-stone-200 border-stone-200/85 dark:border-white/10 hover:bg-white dark:hover:bg-stone-800'
           }`}
         >
           <SlidersHorizontal className="w-4 h-4" />
-          {/* Subtle indicator dot if custom sync offset or layout is applied */}
+          {/* Subtle indicator dot if custom sync offset is applied */}
           {currentOffset !== 0 && (
-            <span className="absolute -top-0.5 -right-0.5 w-2.5 h-2.5 rounded-full bg-emerald-500 ring-2 ring-white dark:ring-stone-900" />
+            <span className="absolute -top-0.5 -right-0.5 w-2.5 h-2.5 rounded-full bg-[#30D158] ring-2 ring-white dark:ring-stone-900" />
           )}
         </button>
       </div>
@@ -1327,7 +1345,10 @@ export const FullscreenLyricsView: React.FC<FullscreenLyricsViewProps> = React.m
       {/* Slide-Up Bottom Unified Settings Sheet (Layout & Sync) */}
       <AnimatePresence>
         {isSettingsOpen && (
-          <div className="absolute inset-0 z-50 flex flex-col justify-end pointer-events-auto overflow-hidden">
+          <div
+            style={{ transform: 'translate3d(0, 0, 0)' }}
+            className="absolute inset-0 z-50 flex flex-col justify-end pointer-events-auto overflow-hidden isolate"
+          >
             {/* Backdrop click to dismiss */}
             <motion.div
               initial={{ opacity: 0 }}
@@ -1379,7 +1400,7 @@ export const FullscreenLyricsView: React.FC<FullscreenLyricsViewProps> = React.m
                     <Clock className="w-3.5 h-3.5" />
                     <span>歌词微调</span>
                     {currentOffset !== 0 && (
-                      <span className="w-1.5 h-1.5 rounded-full bg-emerald-500" />
+                      <span className="w-1.5 h-1.5 rounded-full bg-[#30D158]" />
                     )}
                   </button>
                 </div>
@@ -1420,11 +1441,11 @@ export const FullscreenLyricsView: React.FC<FullscreenLyricsViewProps> = React.m
                   {/* Font Size Control */}
                   <div className="space-y-1.5">
                     <div className="flex items-center justify-between text-xs">
-                      <span className="font-medium text-stone-600 dark:text-stone-300 flex items-center gap-1.5">
-                        <Type className="w-3.5 h-3.5 text-[#516050] dark:text-[#8FB996]" />
+                      <span className="font-medium text-stone-700 dark:text-stone-200 flex items-center gap-1.5">
+                        <Type className="w-3.5 h-3.5 text-stone-500 dark:text-stone-400" />
                         <span>歌词字号</span>
                       </span>
-                      <span className="font-mono text-stone-400 dark:text-stone-500 font-semibold">
+                      <span className="font-mono tabular-nums text-stone-500 dark:text-stone-400 font-medium">
                         {fontSize}px
                       </span>
                     </div>
@@ -1438,20 +1459,20 @@ export const FullscreenLyricsView: React.FC<FullscreenLyricsViewProps> = React.m
                         step={1}
                         value={fontSize}
                         onChange={(e) => handleFontSizeChange(parseFloat(e.target.value))}
-                        className="flex-1 accent-[#516050] dark:accent-[#8FB996] h-1.5 bg-stone-200 dark:bg-stone-700 rounded-lg cursor-pointer appearance-none"
+                        className="flex-1 accent-stone-900 dark:accent-stone-100 h-1.5 bg-stone-200 dark:bg-stone-700 rounded-lg cursor-pointer appearance-none"
                       />
-                      <span className="font-serif-luxury text-base text-stone-700 dark:text-stone-200 font-semibold">A</span>
+                      <span className="font-serif-luxury text-base text-stone-800 dark:text-stone-100 font-semibold">A</span>
                     </div>
                   </div>
 
                   {/* Line Spacing Control */}
                   <div className="space-y-1.5 pt-1">
                     <div className="flex items-center justify-between text-xs">
-                      <span className="font-medium text-stone-600 dark:text-stone-300 flex items-center gap-1.5">
-                        <MoveVertical className="w-3.5 h-3.5 text-[#516050] dark:text-[#8FB996]" />
+                      <span className="font-medium text-stone-700 dark:text-stone-200 flex items-center gap-1.5">
+                        <MoveVertical className="w-3.5 h-3.5 text-stone-500 dark:text-stone-400" />
                         <span>行间距</span>
                       </span>
-                      <span className="font-mono text-stone-400 dark:text-stone-500 font-semibold">
+                      <span className="font-mono tabular-nums text-stone-500 dark:text-stone-400 font-medium">
                         {lineSpacing}px
                       </span>
                     </div>
@@ -1465,9 +1486,9 @@ export const FullscreenLyricsView: React.FC<FullscreenLyricsViewProps> = React.m
                         step={2}
                         value={lineSpacing}
                         onChange={(e) => handleLineSpacingChange(parseFloat(e.target.value))}
-                        className="flex-1 accent-[#516050] dark:accent-[#8FB996] h-1.5 bg-stone-200 dark:bg-stone-700 rounded-lg cursor-pointer appearance-none"
+                        className="flex-1 accent-stone-900 dark:accent-stone-100 h-1.5 bg-stone-200 dark:bg-stone-700 rounded-lg cursor-pointer appearance-none"
                       />
-                      <MoveVertical className="w-4.5 h-4.5 text-stone-700 dark:text-stone-200" />
+                      <MoveVertical className="w-4.5 h-4.5 text-stone-800 dark:text-stone-100" />
                     </div>
                   </div>
                 </div>
@@ -1476,21 +1497,21 @@ export const FullscreenLyricsView: React.FC<FullscreenLyricsViewProps> = React.m
               {/* Tab 2: Lyrics Sync & Offset */}
               {activeSettingsTab === 'sync' && (
                 <div className="space-y-3 pt-0.5">
-                  {/* Status Indicator Pill */}
-                  <div className="flex items-center justify-between bg-stone-100/90 dark:bg-stone-800/80 px-3 py-2 rounded-xl border border-stone-200/60 dark:border-stone-750">
+                  {/* Status Indicator Row */}
+                  <div className="flex items-center justify-between bg-stone-100/90 dark:bg-stone-800/80 px-3.5 py-2.5 rounded-xl border border-stone-200/60 dark:border-stone-700/60">
                     <div className="flex items-center gap-2">
-                      <Clock className="w-3.5 h-3.5 text-[#516050] dark:text-[#8FB996]" />
+                      <Clock className="w-3.5 h-3.5 text-stone-500 dark:text-stone-400" />
                       <span className="text-xs font-medium text-stone-700 dark:text-stone-300">
                         当前时间偏移
                       </span>
                     </div>
                     <span
-                      className={`text-xs font-mono font-bold px-2 py-0.5 rounded-full ${
+                      className={`text-xs font-mono tabular-nums font-semibold ${
                         currentOffset > 0
-                          ? 'bg-emerald-500/15 text-emerald-700 dark:text-emerald-300 border border-emerald-500/25'
+                          ? 'text-emerald-600 dark:text-[#30D158]'
                           : currentOffset < 0
-                          ? 'bg-amber-500/15 text-amber-700 dark:text-amber-300 border border-amber-500/25'
-                          : 'bg-stone-200/80 dark:bg-stone-700 text-stone-600 dark:text-stone-300'
+                          ? 'text-amber-600 dark:text-amber-400'
+                          : 'text-stone-500 dark:text-stone-400'
                       }`}
                     >
                       {currentOffset > 0
@@ -1506,28 +1527,28 @@ export const FullscreenLyricsView: React.FC<FullscreenLyricsViewProps> = React.m
                     <button
                       type="button"
                       onClick={() => handleOffsetStep(0.5)}
-                      className="py-1.5 px-1 rounded-xl bg-white dark:bg-stone-800 border border-stone-200/80 dark:border-stone-700 hover:border-emerald-500/50 text-xs font-mono text-stone-700 dark:text-stone-200 active:scale-95 transition-all cursor-pointer shadow-2xs"
+                      className="py-1.5 px-1 rounded-xl bg-white dark:bg-stone-800 border border-stone-200/80 dark:border-stone-700 hover:border-stone-400 dark:hover:border-stone-500 text-xs font-mono tabular-nums text-stone-700 dark:text-stone-200 active:scale-95 transition-all cursor-pointer shadow-2xs"
                     >
                       +0.5s
                     </button>
                     <button
                       type="button"
                       onClick={() => handleOffsetStep(0.2)}
-                      className="py-1.5 px-1 rounded-xl bg-white dark:bg-stone-800 border border-stone-200/80 dark:border-stone-700 hover:border-emerald-500/50 text-xs font-mono text-stone-700 dark:text-stone-200 active:scale-95 transition-all cursor-pointer shadow-2xs"
+                      className="py-1.5 px-1 rounded-xl bg-white dark:bg-stone-800 border border-stone-200/80 dark:border-stone-700 hover:border-stone-400 dark:hover:border-stone-500 text-xs font-mono tabular-nums text-stone-700 dark:text-stone-200 active:scale-95 transition-all cursor-pointer shadow-2xs"
                     >
                       +0.2s
                     </button>
                     <button
                       type="button"
                       onClick={() => handleOffsetStep(-0.2)}
-                      className="py-1.5 px-1 rounded-xl bg-white dark:bg-stone-800 border border-stone-200/80 dark:border-stone-700 hover:border-amber-500/50 text-xs font-mono text-stone-700 dark:text-stone-200 active:scale-95 transition-all cursor-pointer shadow-2xs"
+                      className="py-1.5 px-1 rounded-xl bg-white dark:bg-stone-800 border border-stone-200/80 dark:border-stone-700 hover:border-stone-400 dark:hover:border-stone-500 text-xs font-mono tabular-nums text-stone-700 dark:text-stone-200 active:scale-95 transition-all cursor-pointer shadow-2xs"
                     >
                       -0.2s
                     </button>
                     <button
                       type="button"
                       onClick={() => handleOffsetStep(-0.5)}
-                      className="py-1.5 px-1 rounded-xl bg-white dark:bg-stone-800 border border-stone-200/80 dark:border-stone-700 hover:border-amber-500/50 text-xs font-mono text-stone-700 dark:text-stone-200 active:scale-95 transition-all cursor-pointer shadow-2xs"
+                      className="py-1.5 px-1 rounded-xl bg-white dark:bg-stone-800 border border-stone-200/80 dark:border-stone-700 hover:border-stone-400 dark:hover:border-stone-500 text-xs font-mono tabular-nums text-stone-700 dark:text-stone-200 active:scale-95 transition-all cursor-pointer shadow-2xs"
                     >
                       -0.5s
                     </button>
@@ -1535,7 +1556,7 @@ export const FullscreenLyricsView: React.FC<FullscreenLyricsViewProps> = React.m
 
                   {/* Range Slider for Fine Continuous Tuning */}
                   <div className="space-y-1 pt-1">
-                    <div className="flex items-center justify-between text-[10px] font-mono text-stone-400 dark:text-stone-500">
+                    <div className="flex items-center justify-between text-[10px] font-mono tabular-nums text-stone-400 dark:text-stone-500">
                       <span>延后 (-5s)</span>
                       <span>0s</span>
                       <span>提前 (+5s)</span>
@@ -1548,7 +1569,7 @@ export const FullscreenLyricsView: React.FC<FullscreenLyricsViewProps> = React.m
                       step={0.1}
                       value={currentOffset}
                       onChange={(e) => handleOffsetChange(parseFloat(e.target.value))}
-                      className="w-full accent-[#516050] dark:accent-[#8FB996] h-1.5 bg-stone-200 dark:bg-stone-700 rounded-lg cursor-pointer appearance-none"
+                      className="w-full accent-stone-900 dark:accent-stone-100 h-1.5 bg-stone-200 dark:bg-stone-700 rounded-lg cursor-pointer appearance-none"
                     />
                   </div>
                 </div>

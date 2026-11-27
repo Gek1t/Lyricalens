@@ -41,63 +41,98 @@ export function initializeDatabase(): Promise<void> {
     try {
       const existingCount = await db.words.count();
       if (existingCount === 0) {
+        const dedupedSeeds = new Map<string, WordItem>();
         for (const seed of SEED_WORDS) {
+          const lower = seed.word.toLowerCase().trim();
+          if (lower && !dedupedSeeds.has(lower)) {
+            dedupedSeeds.set(lower, { ...seed, word: lower } as WordItem);
+          }
+        }
+        const initialBatch = Array.from(dedupedSeeds.values());
+        if (initialBatch.length > 0) {
           try {
-            const lower = seed.word.toLowerCase().trim();
-            await db.words.put({ ...seed, word: lower } as WordItem);
-          } catch {}
+            await db.transaction('rw', db.words, async () => {
+              await db.words.bulkPut(initialBatch);
+            });
+          } catch {
+            for (const item of initialBatch) {
+              try {
+                await db.words.put(item);
+              } catch {}
+            }
+          }
         }
       } else {
         // 1. Seed or sync initial vocabulary words safely without throwing uniqueness constraint errors
         const existingWords = await db.words.toArray();
         const existingMap = new Map(existingWords.filter(w => w && w.word).map(w => [w.word.toLowerCase().trim(), w]));
+        const seedByLower = new Map(SEED_WORDS.map(s => [s.word.toLowerCase().trim(), s]));
+        const wordsToPut: WordItem[] = [];
+        const updatedIds = new Set<number>();
+
         for (const seed of SEED_WORDS) {
-          try {
-            const lower = seed.word.toLowerCase().trim();
-            const existing = existingMap.get(lower);
-            if (!existing) {
-              await db.words.put({ ...seed, word: lower } as WordItem);
-            } else if (existing.id && typeof existing.masteryLevel === 'undefined') {
-              await db.words.update(existing.id, { masteryLevel: seed.masteryLevel ?? 1 });
-            }
-          } catch {}
+          const lower = seed.word.toLowerCase().trim();
+          const existing = existingMap.get(lower);
+          if (!existing) {
+            wordsToPut.push({ ...seed, word: lower } as WordItem);
+          } else if (existing.id && typeof existing.masteryLevel === 'undefined') {
+            wordsToPut.push({ ...existing, masteryLevel: seed.masteryLevel ?? 1 });
+            updatedIds.add(existing.id);
+          }
         }
 
         // 2. Backfill missing mastery levels on existing data if needed
-        try {
-          const STOP_WORDS = new Set([
-            'the', 'a', 'an', 'in', 'on', 'at', 'by', 'for', 'with', 'about', 'against', 'between', 'into',
-            'through', 'during', 'before', 'after', 'above', 'below', 'to', 'from', 'up', 'down',
-            'and', 'but', 'or', 'nor', 'so', 'yet', 'of', 'off', 'over', 'under',
-            'is', 'am', 'are', 'was', 'were', 'be', 'been', 'being',
-            'have', 'has', 'had', 'do', 'does', 'did',
-            'it', 'its', 'this', 'that', 'these', 'those',
-            'i', 'you', 'he', 'she', 'we', 'they', 'me', 'him', 'her', 'us', 'them', 'my', 'your', 'his', 'their', 'our',
-            'room', 'light', 'gentle', 'morning', 'filters', 'quiet', 'breathing', 'soft', 'notes', 'like', 'blooming', 'flower', 'every', 'whisper', 'holds', 'stillness', 'warm', 'silent', 'space', 'beneath', 'concrete'
-          ]);
+        const STOP_WORDS = new Set([
+          'the', 'a', 'an', 'in', 'on', 'at', 'by', 'for', 'with', 'about', 'against', 'between', 'into',
+          'through', 'during', 'before', 'after', 'above', 'below', 'to', 'from', 'up', 'down',
+          'and', 'but', 'or', 'nor', 'so', 'yet', 'of', 'off', 'over', 'under',
+          'is', 'am', 'are', 'was', 'were', 'be', 'been', 'being',
+          'have', 'has', 'had', 'do', 'does', 'did',
+          'it', 'its', 'this', 'that', 'these', 'those',
+          'i', 'you', 'he', 'she', 'we', 'they', 'me', 'him', 'her', 'us', 'them', 'my', 'your', 'his', 'their', 'our',
+          'room', 'light', 'gentle', 'morning', 'filters', 'quiet', 'breathing', 'soft', 'notes', 'like', 'blooming', 'flower', 'every', 'whisper', 'holds', 'stillness', 'warm', 'silent', 'space', 'beneath', 'concrete'
+        ]);
 
-          const seedWordsSet = new Set(SEED_WORDS.map(s => s.word.toLowerCase()));
-          const idsToDelete: number[] = [];
-
-          for (const w of existingWords) {
-            if (!w || !w.word) continue;
-            const lower = w.word.toLowerCase();
-            if (!seedWordsSet.has(lower) && STOP_WORDS.has(lower) && w.sourceContext === 'Daily Collect' && w.id) {
-              idsToDelete.push(w.id);
-              continue;
-            }
-
-            if (w.id && typeof w.masteryLevel === 'undefined') {
-              const seedMatch = SEED_WORDS.find(s => s.word.toLowerCase() === lower);
-              const level: MasteryLevel = seedMatch?.masteryLevel ?? (w.isStarred ? 1 : 0);
-              await db.words.update(w.id, { masteryLevel: level });
-            }
+        const idsToDelete: number[] = [];
+        for (const w of existingWords) {
+          if (!w || !w.word) continue;
+          const lower = w.word.toLowerCase();
+          if (!seedByLower.has(lower) && STOP_WORDS.has(lower) && w.sourceContext === 'Daily Collect' && w.id) {
+            idsToDelete.push(w.id);
+            continue;
           }
 
-          if (idsToDelete.length > 0) {
-            await db.words.bulkDelete(idsToDelete);
+          if (w.id && typeof w.masteryLevel === 'undefined' && !updatedIds.has(w.id)) {
+            const seedMatch = seedByLower.get(lower);
+            const level: MasteryLevel = seedMatch?.masteryLevel ?? (w.isStarred ? 1 : 0);
+            wordsToPut.push({ ...w, masteryLevel: level });
+            updatedIds.add(w.id);
           }
-        } catch {}
+        }
+
+        if (wordsToPut.length > 0 || idsToDelete.length > 0) {
+          try {
+            await db.transaction('rw', db.words, async () => {
+              if (wordsToPut.length > 0) {
+                await db.words.bulkPut(wordsToPut);
+              }
+              if (idsToDelete.length > 0) {
+                await db.words.bulkDelete(idsToDelete);
+              }
+            });
+          } catch {
+            for (const item of wordsToPut) {
+              try {
+                await db.words.put(item);
+              } catch {}
+            }
+            if (idsToDelete.length > 0) {
+              try {
+                await db.words.bulkDelete(idsToDelete);
+              } catch {}
+            }
+          }
+        }
       }
 
       // 3. Clean up demo songs from database if they exist and seed defaults
@@ -188,28 +223,42 @@ export async function cycleWordMastery(wordStr: string, itemData?: Partial<WordI
   }
 }
 
-// Helper: Bulk update mastery level for multiple words
+// Helper: Bulk update mastery level for multiple words in a single atomic transaction
 export async function bulkUpdateMastery(words: string[], level: MasteryLevel): Promise<void> {
-  const normalizedList = words.map(w => w.trim().toLowerCase());
-  const items = await db.words.where('word').anyOfIgnoreCase(normalizedList).toArray();
-  for (const item of items) {
-    if (item.id) {
-      await db.words.update(item.id, { masteryLevel: level });
+  if (words.length === 0) return;
+  const normalizedList = words.map(w => w.trim().toLowerCase()).filter(Boolean);
+  if (normalizedList.length === 0) return;
+  await db.transaction('rw', db.words, async () => {
+    const items = await db.words.where('word').anyOfIgnoreCase(normalizedList).toArray();
+    const updated = items
+      .filter(item => typeof item.id === 'number')
+      .map(item => ({ ...item, masteryLevel: level }));
+    if (updated.length > 0) {
+      await db.words.bulkPut(updated);
     }
-  }
+  });
+  triggerDebouncedCloudSync();
 }
 
-// Helper: Bulk add tags/categories to multiple words
+// Helper: Bulk add tags/categories to multiple words in a single atomic transaction
 export async function bulkAddTags(words: string[], newTags: string[]): Promise<void> {
-  const normalizedList = words.map(w => w.trim().toLowerCase());
-  const items = await db.words.where('word').anyOfIgnoreCase(normalizedList).toArray();
-  for (const item of items) {
-    if (item.id) {
-      const currentCats = item.categories || [];
-      const updatedCats = Array.from(new Set([...currentCats, ...newTags]));
-      await db.words.update(item.id, { categories: updatedCats });
+  if (words.length === 0 || newTags.length === 0) return;
+  const normalizedList = words.map(w => w.trim().toLowerCase()).filter(Boolean);
+  if (normalizedList.length === 0) return;
+  await db.transaction('rw', db.words, async () => {
+    const items = await db.words.where('word').anyOfIgnoreCase(normalizedList).toArray();
+    const updated = items
+      .filter(item => typeof item.id === 'number')
+      .map(item => {
+        const currentCats = item.categories || [];
+        const updatedCats = Array.from(new Set([...currentCats, ...newTags]));
+        return { ...item, categories: updatedCats };
+      });
+    if (updated.length > 0) {
+      await db.words.bulkPut(updated);
     }
-  }
+  });
+  triggerDebouncedCloudSync();
 }
 
 // Helper: Bulk delete words
@@ -239,22 +288,30 @@ export async function recordWordReview(wordStr: string, promoteMastery = false):
       reviewCount: currentReviews + 1,
       masteryLevel: nextMastery
     });
+    triggerDebouncedCloudSync();
   }
 }
 
-// Helper: Bulk record review for multiple words
+// Helper: Bulk record review for multiple words in a single atomic transaction
 export async function bulkRecordWordReviews(words: string[]): Promise<void> {
-  const normalizedList = words.map(w => w.trim().toLowerCase());
-  const items = await db.words.where('word').anyOfIgnoreCase(normalizedList).toArray();
+  if (words.length === 0) return;
+  const normalizedList = words.map(w => w.trim().toLowerCase()).filter(Boolean);
+  if (normalizedList.length === 0) return;
   const now = Date.now();
-  for (const item of items) {
-    if (item.id) {
-      await db.words.update(item.id, {
+  await db.transaction('rw', db.words, async () => {
+    const items = await db.words.where('word').anyOfIgnoreCase(normalizedList).toArray();
+    const updated = items
+      .filter(item => typeof item.id === 'number')
+      .map(item => ({
+        ...item,
         lastReviewedTimestamp: now,
         reviewCount: (item.reviewCount || 0) + 1
-      });
+      }));
+    if (updated.length > 0) {
+      await db.words.bulkPut(updated);
     }
-  }
+  });
+  triggerDebouncedCloudSync();
 }
 
 // Helper: Quick add/collect word silently in < 100ms
@@ -265,12 +322,14 @@ export async function collectWord(item: Partial<WordItem> & { word: string }): P
     
     if (existing && existing.id) {
       // Already exists; ensure it's starred if requested or update timestamp
+      const now = Date.now();
       await db.words.update(existing.id, {
         isStarred: true,
-        addedTimestamp: Date.now(),
+        addedTimestamp: now,
         ...(item.sourceContext ? { sourceContext: item.sourceContext } : {})
       });
-      return { ...existing, isStarred: true, addedTimestamp: Date.now() };
+      triggerDebouncedCloudSync();
+      return { ...existing, isStarred: true, addedTimestamp: now };
     }
 
     // Create new word item (Level 0: 新学 default)

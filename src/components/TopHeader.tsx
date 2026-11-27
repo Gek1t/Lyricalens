@@ -191,7 +191,7 @@ export const TopHeader: React.FC<TopHeaderProps> = ({
                   transformOrigin: 'top right',
                   willChange: 'transform, opacity'
                 }}
-                className="absolute right-0 top-11 w-60 rounded-2xl p-2 bg-[#FDFBF7] dark:bg-[#141B2B] border border-stone-200/85 dark:border-slate-800/95 shadow-[0_18px_40px_-10px_rgba(0,0,0,0.22),0_4px_12px_rgba(0,0,0,0.08)] dark:shadow-[0_20px_45px_-10px_rgba(0,0,0,0.78)] z-[60] space-y-1 hardware-accelerated"
+                className="absolute right-0 top-11 w-56 rounded-2xl p-1.5 bg-[#FDFCF9] dark:bg-[#141822] border border-stone-200/90 dark:border-white/[0.1] shadow-[0_18px_40px_-10px_rgba(0,0,0,0.2),0_4px_12px_rgba(0,0,0,0.06)] dark:shadow-[0_20px_45px_-10px_rgba(0,0,0,0.78)] z-[60] space-y-0.5 hardware-accelerated"
               >
                 <button
                   id="menu-open-notebook-btn"
@@ -199,10 +199,10 @@ export const TopHeader: React.FC<TopHeaderProps> = ({
                     setIsMenuOpen(false);
                     onOpenNotebook?.();
                   }}
-                  className="w-full flex items-center gap-3 px-3 py-2.5 text-xs font-medium text-stone-700 dark:text-stone-200 hover:bg-stone-200/60 dark:hover:bg-slate-800/80 active:scale-[0.98] rounded-xl transition-all text-left cursor-pointer"
+                  className="w-full flex items-center gap-3 px-3 py-2.5 text-xs font-medium text-stone-800 dark:text-stone-200 hover:bg-stone-900/[0.05] dark:hover:bg-white/[0.06] active:scale-[0.98] rounded-xl transition-all text-left cursor-pointer"
                 >
-                  <BookMarked className="w-4 h-4 text-[#516050] dark:text-[#8FB996] shrink-0" />
-                  <span>Vocabulary Vault</span>
+                  <BookMarked className="w-4 h-4 text-stone-600 dark:text-stone-300 shrink-0" />
+                  <span>生词本</span>
                 </button>
 
                 <button
@@ -212,28 +212,29 @@ export const TopHeader: React.FC<TopHeaderProps> = ({
                     toggleAutoPronounce();
                     showToast(
                       nextVal
-                        ? '已开启默认点词朗读'
-                        : '已关闭默认点词朗读 · 仅点击喇叭图标时发音'
+                        ? '已开启点词自动朗读'
+                        : '已关闭点词自动朗读 · 仅点击喇叭图标时发音'
                     );
                   }}
-                  className="w-full flex items-center justify-between gap-2 px-3 py-2.5 text-xs font-medium text-stone-700 dark:text-stone-200 hover:bg-stone-200/60 dark:hover:bg-slate-800/80 active:scale-[0.98] rounded-xl transition-all text-left cursor-pointer"
+                  className="w-full flex items-center justify-between gap-2 px-3 py-2.5 text-xs font-medium text-stone-800 dark:text-stone-200 hover:bg-stone-900/[0.05] dark:hover:bg-white/[0.06] active:scale-[0.98] rounded-xl transition-all text-left cursor-pointer"
                 >
                   <div className="flex items-center gap-3 min-w-0">
                     {autoPronounce ? (
-                      <Volume2 className="w-4 h-4 text-emerald-600 dark:text-emerald-400 shrink-0" />
+                      <Volume2 className="w-4 h-4 text-stone-600 dark:text-stone-300 shrink-0" />
                     ) : (
-                      <VolumeX className="w-4 h-4 text-stone-400 shrink-0" />
+                      <VolumeX className="w-4 h-4 text-stone-400 dark:text-stone-500 shrink-0" />
                     )}
-                    <span className="truncate">默认点词朗读</span>
+                    <span className="truncate">点词自动朗读</span>
                   </div>
                   <span
-                    className={`px-2 py-0.5 rounded-full text-[10px] font-semibold shrink-0 transition-colors ${
+                    aria-hidden="true"
+                    className={`w-7 h-4 rounded-full p-0.5 flex items-center transition-colors shrink-0 ${
                       autoPronounce
-                        ? 'bg-emerald-500/15 text-emerald-700 dark:text-emerald-300'
-                        : 'bg-stone-200/80 dark:bg-slate-800 text-stone-500 dark:text-stone-400'
+                        ? 'bg-stone-900 dark:bg-stone-100 justify-end'
+                        : 'bg-stone-200/90 dark:bg-white/[0.14] justify-start'
                     }`}
                   >
-                    {autoPronounce ? '已开启' : '已关闭'}
+                    <span className="w-3 h-3 rounded-full bg-white dark:bg-stone-950 shadow-2xs" />
                   </span>
                 </button>
 
@@ -243,31 +244,31 @@ export const TopHeader: React.FC<TopHeaderProps> = ({
                     toggleTheme();
                     setIsMenuOpen(false);
                   }}
-                  className="w-full flex items-center gap-3 px-3 py-2.5 text-xs font-medium text-stone-700 dark:text-stone-200 hover:bg-stone-200/60 dark:hover:bg-slate-800/80 active:scale-[0.98] rounded-xl transition-all text-left cursor-pointer"
+                  className="w-full flex items-center gap-3 px-3 py-2.5 text-xs font-medium text-stone-800 dark:text-stone-200 hover:bg-stone-900/[0.05] dark:hover:bg-white/[0.06] active:scale-[0.98] rounded-xl transition-all text-left cursor-pointer"
                 >
                   {isDark ? (
                     <>
-                      <Sun className="w-4 h-4 text-amber-500 shrink-0" />
-                      <span>Warm Cream Paper Mode</span>
+                      <Sun className="w-4 h-4 text-stone-600 dark:text-stone-300 shrink-0" />
+                      <span>浅色模式</span>
                     </>
                   ) : (
                     <>
-                      <Moon className="w-4 h-4 text-indigo-500 shrink-0" />
-                      <span>Obsidian Dark Mode</span>
+                      <Moon className="w-4 h-4 text-stone-600 dark:text-stone-300 shrink-0" />
+                      <span>深色模式</span>
                     </>
                   )}
                 </button>
 
-                <div className="pt-1 mt-1 border-t border-stone-200/70 dark:border-slate-800/80">
+                <div className="pt-1 mt-1 border-t border-stone-200/70 dark:border-white/[0.08]">
                   <button
                     id="menu-open-settings-btn"
                     onClick={() => {
                       setIsMenuOpen(false);
                       openPersonalHub('settings');
                     }}
-                    className="w-full flex items-center gap-3 px-3 py-2.5 text-xs font-medium text-stone-700 dark:text-stone-200 hover:bg-stone-200/60 dark:hover:bg-slate-800/80 active:scale-[0.98] rounded-xl transition-all text-left cursor-pointer"
+                    className="w-full flex items-center gap-3 px-3 py-2.5 text-xs font-medium text-stone-800 dark:text-stone-200 hover:bg-stone-900/[0.05] dark:hover:bg-white/[0.06] active:scale-[0.98] rounded-xl transition-all text-left cursor-pointer"
                   >
-                    <Settings className="w-4 h-4 text-stone-500 dark:text-stone-400 shrink-0" />
+                    <Settings className="w-4 h-4 text-stone-600 dark:text-stone-300 shrink-0" />
                     <span>同步与偏好设置</span>
                   </button>
                 </div>

@@ -602,14 +602,14 @@ export const SpotifyLogo = ({ className = "w-5 h-5" }: { className?: string }) =
 
 export const LocalAudioLogo = ({ className = "w-5 h-5" }: { className?: string }) => (
   <svg viewBox="0 0 24 24" fill="none" className={className}>
-    <rect width="24" height="24" rx="5.5" fill="#4B5848" />
+    <rect width="24" height="24" rx="5.5" fill="#292524" />
     <path
       d="M7 8h10M7 12h10M7 16h6"
       stroke="#FFFFFF"
       strokeWidth="1.8"
       strokeLinecap="round"
     />
-    <circle cx="15.5" cy="16" r="1.5" fill="#8FB996" />
+    <circle cx="15.5" cy="16" r="1.5" fill="#D6D3D1" />
   </svg>
 );
 
@@ -723,8 +723,8 @@ export const MAJOR_MUSIC_PLATFORMS: MusicPlatformOption[] = [
     enTitle: 'LOCAL AUDIO STORAGE',
     tagline: '支持 MP3 / FLAC / LRC 歌词批量入库',
     icon: LocalAudioLogo,
-    brandColor: 'text-[#516050] dark:text-[#8FB996]',
-    brandHex: '#4B5848',
+    brandColor: 'text-stone-800 dark:text-stone-200',
+    brandHex: '#292524',
     badge: '离线存储',
     placeholder: '点击选择本地音频文件...',
     defaultPlaylistUrl: 'local-files'
@@ -2619,27 +2619,22 @@ export const SettingsSyncTab: React.FC = () => {
 
   return (
     <div className="space-y-4 pb-8 animate-in fade-in duration-300">
-      {/* 1. 查词与语音朗读偏好 (全局默认点词自动发音开关 + 英/美口音切换) */}
-      <div className="rounded-3xl bg-white/80 dark:bg-[#151C28]/88 border border-stone-900/[0.06] dark:border-white/[0.07] p-5 shadow-[0_4px_24px_-4px_rgba(0,0,0,0.03)] dark:shadow-[0_4px_24px_-4px_rgba(0,0,0,0.3)] space-y-4">
+      {/* 1. 查词与朗读 */}
+      <div className="rounded-3xl bg-white/85 dark:bg-[#151C28]/88 border border-stone-900/[0.06] dark:border-white/[0.07] p-5 shadow-[0_2px_18px_-4px_rgba(28,25,23,0.04)] dark:shadow-[0_4px_24px_-4px_rgba(0,0,0,0.3)] space-y-4">
         <div className="flex items-center justify-between">
-          <h3 className="text-base font-semibold text-stone-800 dark:text-stone-100">
-            查词与语音朗读偏好
+          <h3 className="text-[15px] font-semibold text-stone-900 dark:text-stone-100 tracking-tight">
+            查词与朗读
           </h3>
-          <span className="text-[11px] font-mono text-stone-400 dark:text-stone-500">
-            {autoPronounce ? '默认朗读已开启' : '仅手动点击发音'} · {accentPreference === 'en-GB' ? 'RP 英音' : 'GA 美音'}
-          </span>
         </div>
 
         {/* 默认点按单词自动朗读主开关 */}
-        <div className="p-3.5 rounded-2xl bg-white/65 dark:bg-white/[0.04] border border-stone-900/[0.05] dark:border-white/[0.06] flex items-center justify-between gap-3">
+        <div className="p-3.5 rounded-2xl bg-stone-900/[0.025] dark:bg-white/[0.035] border border-stone-900/[0.05] dark:border-white/[0.06] flex items-center justify-between gap-3">
           <div className="min-w-0">
             <span className="text-xs font-semibold text-stone-800 dark:text-stone-100 block">
-              默认点按单词自动朗读
+              点词自动朗读
             </span>
-            <span className="text-[10.5px] text-stone-500 dark:text-stone-400 block mt-0.5 leading-relaxed">
-              {autoPronounce
-                ? '已开启：在任何界面点按单词查词时将默认自动播放发音'
-                : '已关闭：点按单词查词保持静音，仅在点击喇叭图标时朗读'}
+            <span className="text-[11px] text-stone-500 dark:text-stone-400 block mt-0.5">
+              查词时自动播放读音
             </span>
           </div>
           <button
@@ -2648,26 +2643,26 @@ export const SettingsSyncTab: React.FC = () => {
             onClick={handleAutoPronounceToggle}
             aria-pressed={autoPronounce}
             className={`w-11 h-6 rounded-full transition-colors cursor-pointer relative p-0.5 shrink-0 ${
-              autoPronounce ? 'bg-emerald-500' : 'bg-stone-300 dark:bg-stone-700'
+              autoPronounce ? 'bg-stone-900 dark:bg-stone-100' : 'bg-stone-300 dark:bg-stone-700'
             }`}
           >
             <div
-              className={`w-5 h-5 rounded-full bg-white transition-transform transform shadow-xs ${
+              className={`w-5 h-5 rounded-full bg-white dark:bg-stone-950 transition-transform transform shadow-xs ${
                 autoPronounce ? 'translate-x-5' : 'translate-x-0'
               }`}
             />
           </button>
         </div>
 
-        {/* 口音选择 (点击实时试听) */}
-        <div className="pt-1">
-          <label className="block text-[11px] font-sans font-medium text-stone-500 dark:text-stone-400 mb-2.5">
-            标准词典发音口音 (点击即刻试听)
+        {/* 口音选择 */}
+        <div className="pt-0.5">
+          <label className="block text-[11px] font-sans font-medium text-stone-500 dark:text-stone-400 mb-2">
+            词典口音
           </label>
           <div className="grid grid-cols-2 gap-2.5">
             {[
-              { id: 'en-GB', label: '英式发音 (RP)', desc: '剑桥雅思听力官方标准音' },
-              { id: 'en-US', label: '美式发音 (GA)', desc: '北美通用自然标准发音' }
+              { id: 'en-GB', label: '英式 · RP', desc: '剑桥标准音' },
+              { id: 'en-US', label: '美式 · GA', desc: '北美通用音' }
             ].map(acc => {
               const isSelected = accentPreference === acc.id;
               return (
@@ -2675,10 +2670,10 @@ export const SettingsSyncTab: React.FC = () => {
                   key={acc.id}
                   type="button"
                   onClick={() => handleAccentChange(acc.id as 'en-GB' | 'en-US')}
-                  className={`p-3 rounded-2xl border text-left transition-all cursor-pointer flex items-start justify-between gap-2 ${
+                  className={`p-3 rounded-2xl border text-left transition-colors cursor-pointer flex items-start justify-between gap-2 ${
                     isSelected
-                      ? 'bg-stone-900 text-white dark:bg-white dark:text-stone-950 border-stone-900 dark:border-white shadow-xs'
-                      : 'bg-white/60 dark:bg-white/[0.04] border-stone-900/[0.06] dark:border-white/[0.06] text-stone-700 dark:text-stone-300 hover:bg-white/80'
+                      ? 'bg-stone-900 text-white dark:bg-stone-100 dark:text-stone-950 border-stone-900 dark:border-stone-100'
+                      : 'bg-stone-900/[0.025] dark:bg-white/[0.035] border-stone-900/[0.06] dark:border-white/[0.06] text-stone-700 dark:text-stone-300 hover:bg-stone-900/[0.05]'
                   }`}
                 >
                   <div className="min-w-0">
@@ -2693,7 +2688,7 @@ export const SettingsSyncTab: React.FC = () => {
                   </div>
                   <Volume2
                     className={`w-3.5 h-3.5 shrink-0 mt-0.5 ${
-                      isSelected ? 'text-emerald-400 dark:text-emerald-600' : 'text-stone-400'
+                      isSelected ? 'text-stone-300 dark:text-stone-600' : 'text-stone-400'
                     }`}
                   />
                 </button>
@@ -2798,13 +2793,13 @@ export const SettingsSyncTab: React.FC = () => {
         {/* 动态专属平台操作区 (全流媒体平台统一支持：优先唤起本地 App 授权 + 扫码降级 + 歌单链接导入) */}
         {activeMusicPlatform === 'local' ? (
           /* 本地音频专属导入区 (不显示网络歌单同步栏) */
-          <div className="p-3.5 rounded-2xl bg-white/60 dark:bg-white/[0.04] border border-stone-900/[0.05] dark:border-white/[0.06] flex items-center justify-between gap-3">
+          <div className="p-3.5 rounded-2xl bg-stone-900/[0.025] dark:bg-white/[0.035] border border-stone-900/[0.05] dark:border-white/[0.06] flex items-center justify-between gap-3">
             <div className="min-w-0">
               <span className="text-xs font-semibold text-stone-800 dark:text-stone-200 block">
-                本地离线音频与歌词导入
+                本地音频与歌词导入
               </span>
-              <span className="text-[10px] text-stone-400 block mt-0.5">
-                支持同时选择多个 .mp3 / .flac / .wav 及同名 .lrc 歌词文件
+              <span className="text-[10.5px] text-stone-400 block mt-0.5">
+                支持 .mp3 / .flac / .wav 及 .lrc 歌词
               </span>
             </div>
             <div className="shrink-0">
@@ -2959,11 +2954,11 @@ export const SettingsSyncTab: React.FC = () => {
                     <div className="min-w-0">
                       <span className="text-xs font-semibold text-stone-800 dark:text-stone-200 block truncate">
                         {activeMusicPlatform === 'netease'
-                          ? '网易云账号未登录'
-                          : `${currentPlatformOpt.name}账号未登录`}
+                          ? '网易云未登录'
+                          : `${currentPlatformOpt.name}未登录`}
                       </span>
-                      <span className="text-[10px] text-stone-400 block truncate">
-                        支持手机验证码秒级免跳端登录或{currentPlatformOpt.shortName}扫码授权
+                      <span className="text-[10.5px] text-stone-400 block truncate">
+                        验证码或扫码授权
                       </span>
                     </div>
                   </div>
@@ -3057,18 +3052,18 @@ export const SettingsSyncTab: React.FC = () => {
                 <div className="space-y-2 pt-1 animate-in fade-in duration-200">
                   <div className="flex items-center justify-between">
                     <span className="text-[11px] font-medium text-stone-600 dark:text-stone-400 flex items-center gap-1.5">
-                      <ListMusic className="w-3.5 h-3.5 text-emerald-600 dark:text-emerald-400" />
-                      <span>我的云端歌单 (点击一键载入)</span>
+                      <ListMusic className="w-3.5 h-3.5 text-stone-700 dark:text-stone-300" />
+                      <span>我的云端歌单</span>
                     </span>
-                    <span className="text-[10px] text-stone-400 font-mono">
+                    <span className="text-[10px] text-stone-400 font-mono tabular-nums">
                       {isLoadingPlaylists ? '加载中...' : `共 ${currentPlaylists.length} 个`}
                     </span>
                   </div>
 
                   {isLoadingPlaylists ? (
                     <div className="py-5 text-center text-stone-400 text-xs flex items-center justify-center gap-2">
-                      <RefreshCw className="w-3.5 h-3.5 animate-spin text-emerald-600 dark:text-emerald-400" />
-                      <span>正在获取云端歌单...</span>
+                      <RefreshCw className="w-3.5 h-3.5 animate-spin text-stone-700 dark:text-stone-300" />
+                      <span>正在获取歌单...</span>
                     </div>
                   ) : currentPlaylists.length === 0 ? (
                     <div className="py-3 text-center text-stone-400 text-xs">
@@ -3121,58 +3116,110 @@ export const SettingsSyncTab: React.FC = () => {
           </div>
         )}
 
-        {/* 播放音质规格 (紧凑 5 档分段控件) */}
-        <div className="pt-2 border-t border-stone-900/[0.05] dark:border-white/[0.06] space-y-2">
-          <div className="flex items-center justify-between">
-            <span className="text-[11px] font-sans font-medium text-stone-500 dark:text-stone-400">
-              播放音质规格
-            </span>
-            <span className="text-[10px] font-mono text-stone-400">
-              {AUDIO_QUALITY_OPTIONS.find(o => o.key === audioQuality)?.desc.split('·')[0]?.trim()}
-            </span>
-          </div>
+        {/* 播放音质 (5 档精度滑轨) */}
+        {(() => {
+          const activeIdx = Math.max(
+            0,
+            AUDIO_QUALITY_OPTIONS.findIndex(o => o.key === audioQuality)
+          );
+          const activeOpt = AUDIO_QUALITY_OPTIONS[activeIdx] || AUDIO_QUALITY_OPTIONS[0];
+          const fillPercent =
+            AUDIO_QUALITY_OPTIONS.length > 1
+              ? (activeIdx / (AUDIO_QUALITY_OPTIONS.length - 1)) * 100
+              : 0;
 
-          <div className="grid grid-cols-5 gap-1 p-1 rounded-2xl bg-stone-900/[0.04] dark:bg-white/[0.05]">
-            {AUDIO_QUALITY_OPTIONS.map(opt => {
-              const isSelected = audioQuality === opt.key;
-              return (
-                <button
-                  key={opt.key}
-                  type="button"
-                  onClick={() => setAudioQuality(opt.key)}
-                  className={`py-1.5 px-1 rounded-xl text-center transition-all cursor-pointer whitespace-nowrap ${
-                    isSelected
-                      ? 'bg-white dark:bg-stone-800 text-stone-900 dark:text-white shadow-xs font-semibold'
-                      : 'text-stone-500 dark:text-stone-400 hover:text-stone-800 dark:hover:text-stone-200'
-                  }`}
+          return (
+            <div className="pt-3 border-t border-stone-900/[0.05] dark:border-white/[0.06] space-y-3">
+              <div className="flex items-center justify-between gap-2">
+                <span className="text-xs font-sans font-medium text-stone-700 dark:text-stone-200">
+                  播放音质
+                </span>
+                <span className="text-[11px] font-mono font-semibold text-stone-800 dark:text-stone-200 tabular-nums">
+                  {activeOpt.label}
+                  {activeOpt.badge !== activeOpt.label && !activeOpt.label.includes(activeOpt.badge)
+                    ? ` · ${activeOpt.badge}`
+                    : ` · ${activeOpt.bitrate}`}
+                </span>
+              </div>
+
+              <div
+                role="radiogroup"
+                aria-label="播放音质"
+                className="relative pt-1 pb-0.5 select-none"
+              >
+                {/* Horizontal Track spanning from node 1 center (10%) to node 5 center (90%) */}
+                <div
+                  aria-hidden="true"
+                  className="pointer-events-none absolute top-[14px] left-[10%] right-[10%] h-[2.5px] rounded-full bg-stone-900/[0.09] dark:bg-white/[0.12] overflow-hidden"
                 >
-                  <span className="text-[11px] block leading-tight">{opt.label}</span>
-                  <span className="text-[9px] font-mono text-stone-400 dark:text-stone-500 block mt-0.5">
-                    {opt.badge}
-                  </span>
-                </button>
-              );
-            })}
-          </div>
-        </div>
+                  <div
+                    className="h-full rounded-full bg-stone-900 dark:bg-stone-100 transition-all duration-200 ease-out"
+                    style={{ width: `${fillPercent}%` }}
+                  />
+                </div>
+
+                {/* 5 Full-Column Interactive Nodes + Centered Labels */}
+                <div className="relative grid grid-cols-5">
+                  {AUDIO_QUALITY_OPTIONS.map((opt, idx) => {
+                    const isSelected = idx === activeIdx;
+                    const isPassed = idx < activeIdx;
+                    const shortLabel = opt.key === 'lossless' ? 'SQ' : opt.label;
+                    return (
+                      <button
+                        key={opt.key}
+                        type="button"
+                        role="radio"
+                        aria-checked={isSelected}
+                        onClick={() => setAudioQuality(opt.key)}
+                        className="group flex flex-col items-center py-0.5 cursor-pointer focus:outline-none"
+                        title={`${opt.label} (${opt.bitrate}) · ${opt.desc}`}
+                      >
+                        <span className="h-[18px] flex items-center justify-center">
+                          <span
+                            className={`rounded-full transition-all duration-200 ${
+                              isSelected
+                                ? 'w-3.5 h-3.5 bg-white dark:bg-[#151C28] border-[2.5px] border-stone-900 dark:border-stone-100 shadow-[0_2px_6px_rgba(28,25,23,0.18)] dark:shadow-[0_2px_8px_rgba(0,0,0,0.45)]'
+                                : isPassed
+                                ? 'w-1.5 h-1.5 bg-stone-900 dark:bg-stone-100 group-hover:scale-125'
+                                : 'w-1.5 h-1.5 bg-stone-300 dark:bg-stone-600 group-hover:bg-stone-500 dark:group-hover:bg-stone-400 group-hover:scale-125'
+                            }`}
+                          />
+                        </span>
+                        <span
+                          className={`mt-2 text-[11px] leading-none whitespace-nowrap transition-colors ${
+                            isSelected
+                              ? 'font-semibold text-stone-900 dark:text-white'
+                              : 'font-medium text-stone-400 dark:text-stone-500 group-hover:text-stone-700 dark:group-hover:text-stone-300'
+                          }`}
+                        >
+                          {shortLabel}
+                        </span>
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+            </div>
+          );
+        })()}
 
         {/* 底部同步状态与曲目预览开关 */}
         <div className="flex items-center justify-between text-[11px] text-stone-500 dark:text-stone-400 pt-1 border-t border-stone-900/[0.05] dark:border-white/[0.06]">
           <div className="flex items-center gap-1.5 min-w-0">
-            <CheckCircle2 className="w-3.5 h-3.5 text-emerald-500 shrink-0" />
-            <span className="truncate">
+            <CheckCircle2 className="w-3.5 h-3.5 text-stone-600 dark:text-stone-300 shrink-0" />
+            <span className="truncate tabular-nums">
               {lastSyncTime
                 ? `上次同步：${lastSyncTime}`
-                : `当前已载入 ${songs.length} 首曲目`}
+                : `已载入 ${songs.length} 首曲目`}
             </span>
           </div>
 
           <button
             type="button"
             onClick={() => setShowTrackListPreview(!showTrackListPreview)}
-            className="text-[11px] text-stone-700 dark:text-stone-300 hover:text-stone-950 dark:hover:text-white font-medium cursor-pointer shrink-0 whitespace-nowrap"
+            className="text-[11px] text-stone-700 dark:text-stone-300 hover:text-stone-950 dark:hover:text-white font-medium cursor-pointer shrink-0 whitespace-nowrap tabular-nums"
           >
-            {showTrackListPreview ? '收起曲目' : `查看已入库 (${songs.length} 首)`}
+            {showTrackListPreview ? '收起曲目' : `查看曲目 (${songs.length})`}
           </button>
         </div>
 
@@ -3194,17 +3241,17 @@ export const SettingsSyncTab: React.FC = () => {
         const currentConfigured = isProviderConfigured(currentMeta.id);
 
         return (
-          <div className="relative z-20 rounded-3xl bg-white/80 dark:bg-[#151C28]/88 border border-stone-900/[0.06] dark:border-white/[0.07] p-5 space-y-4 shadow-[0_4px_24px_-4px_rgba(0,0,0,0.03)] dark:shadow-[0_4px_24px_-4px_rgba(0,0,0,0.3)]">
+          <div className="relative z-20 rounded-3xl bg-white/85 dark:bg-[#151C28]/88 border border-stone-900/[0.06] dark:border-white/[0.07] p-5 space-y-4 shadow-[0_2px_18px_-4px_rgba(28,25,23,0.04)] dark:shadow-[0_4px_24px_-4px_rgba(0,0,0,0.3)]">
             {/* 顶栏：标题与配置密钥按钮 */}
             <div className="flex items-center justify-between">
-              <h3 className="text-base font-semibold text-stone-800 dark:text-stone-100">
+              <h3 className="text-[15px] font-semibold text-stone-900 dark:text-stone-100 tracking-tight">
                 AI 引擎与模型
               </h3>
 
               <div className="flex items-center gap-2">
                 {pingResult.status === 'success' && (
-                  <span className="inline-flex items-center gap-1.5 text-[11px] font-mono font-medium text-emerald-600 dark:text-emerald-400">
-                    <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse" />
+                  <span className="inline-flex items-center gap-1.5 text-[11px] font-mono font-medium text-stone-700 dark:text-stone-200 tabular-nums">
+                    <span className="w-1.5 h-1.5 rounded-full bg-stone-900 dark:bg-stone-100" />
                     <span>{pingResult.latency ? `${pingResult.latency}ms` : '已连通'}</span>
                   </span>
                 )}
@@ -3212,7 +3259,7 @@ export const SettingsSyncTab: React.FC = () => {
                 <button
                   type="button"
                   onClick={() => setIsAiConfigModalOpen(true)}
-                  className="px-3 py-1.5 rounded-xl bg-white/70 hover:bg-white dark:bg-white/[0.08] dark:hover:bg-white/[0.14] border border-stone-900/[0.06] dark:border-white/[0.08] text-stone-700 dark:text-stone-200 text-xs font-medium flex items-center gap-1.5 transition-all cursor-pointer"
+                  className="px-3 py-1.5 rounded-xl bg-stone-900/[0.04] hover:bg-stone-900/[0.08] dark:bg-white/[0.08] dark:hover:bg-white/[0.14] border border-stone-900/[0.06] dark:border-white/[0.08] text-stone-700 dark:text-stone-200 text-xs font-medium flex items-center gap-1.5 transition-colors cursor-pointer"
                 >
                   <Key className="w-3.5 h-3.5 text-stone-500 dark:text-stone-400" />
                   <span>配置密钥</span>
@@ -3220,17 +3267,17 @@ export const SettingsSyncTab: React.FC = () => {
               </div>
             </div>
 
-            {/* 1. 服务商下拉选择框 (清晰区分已就绪 vs 待配置) */}
+            {/* 1. 服务商下拉选择框 */}
             <div className="space-y-1.5 relative">
               <label className="text-[11px] font-sans font-medium text-stone-500 dark:text-stone-400">
-                智能解析服务商
+                解析服务商
               </label>
               <button
                 type="button"
                 aria-expanded={isProviderDropdownOpen}
                 aria-haspopup="listbox"
                 onClick={() => setIsProviderDropdownOpen(!isProviderDropdownOpen)}
-                className="w-full h-11 px-3.5 rounded-2xl bg-white/60 dark:bg-white/[0.05] border border-stone-900/[0.06] dark:border-white/[0.08] hover:border-stone-900/12 dark:hover:border-white/15 flex items-center justify-between text-left transition-all cursor-pointer"
+                className="w-full h-11 px-3.5 rounded-2xl bg-stone-900/[0.025] dark:bg-white/[0.05] border border-stone-900/[0.06] dark:border-white/[0.08] hover:border-stone-900/12 dark:hover:border-white/15 flex items-center justify-between text-left transition-colors cursor-pointer"
               >
                 <div className="flex items-center gap-2.5 min-w-0">
                   <div
@@ -3246,13 +3293,13 @@ export const SettingsSyncTab: React.FC = () => {
                   <span
                     className={`inline-flex items-center gap-1 text-[11px] font-medium ${
                       currentConfigured
-                        ? 'text-emerald-600 dark:text-emerald-400'
+                        ? 'text-stone-800 dark:text-stone-200'
                         : 'text-stone-400 dark:text-stone-500'
                     }`}
                   >
                     <span
                       className={`w-1.5 h-1.5 rounded-full ${
-                        currentConfigured ? 'bg-emerald-500' : 'bg-stone-300 dark:bg-stone-600'
+                        currentConfigured ? 'bg-stone-900 dark:bg-stone-100' : 'bg-stone-300 dark:bg-stone-600'
                       }`}
                     />
                     <span>{currentConfigured ? '已就绪' : '待配置'}</span>
@@ -3421,7 +3468,7 @@ export const SettingsSyncTab: React.FC = () => {
                             <span
                               className={`w-1.5 h-1.5 rounded-full shrink-0 transition-colors ${
                                 isSelected
-                                  ? 'bg-[#516050] dark:bg-[#8FB996]'
+                                  ? 'bg-stone-900 dark:bg-stone-100'
                                   : 'bg-stone-300 dark:bg-stone-600'
                               }`}
                             />
@@ -3438,7 +3485,7 @@ export const SettingsSyncTab: React.FC = () => {
                     {activeModel ? `当前型号: ${activeModel}` : '尚未选定模型'}
                   </span>
                   <div className="flex items-center gap-2.5 shrink-0">
-                    {currentConfigured || (!isGemini && isLocalAiEndpoint(aiConfig.customBaseUrl)) ? (
+                    {(currentConfigured || (!isGemini && isLocalAiEndpoint(aiConfig.customBaseUrl))) && (
                       <button
                         type="button"
                         onClick={handleFetchAndDetectModels}
@@ -3447,19 +3494,11 @@ export const SettingsSyncTab: React.FC = () => {
                       >
                         {isFetchingModels ? '探测中...' : '探测模型'}
                       </button>
-                    ) : (
-                      <button
-                        type="button"
-                        onClick={() => setIsAiConfigModalOpen(true)}
-                        className="text-[11px] text-stone-800 dark:text-stone-200 font-medium hover:underline cursor-pointer"
-                      >
-                        配置密钥
-                      </button>
                     )}
                     <button
                       type="button"
                       onClick={() => setIsCustomModelInput(true)}
-                      className="text-[11px] text-stone-500 dark:text-stone-400 hover:underline cursor-pointer"
+                      className="text-[11px] text-stone-600 dark:text-stone-300 hover:text-stone-900 dark:hover:text-white font-medium hover:underline cursor-pointer"
                     >
                       修改
                     </button>
@@ -3472,9 +3511,9 @@ export const SettingsSyncTab: React.FC = () => {
       })()}
 
       {/* 4. 数据存储与备份管理 */}
-      <div className="rounded-3xl bg-white/80 dark:bg-[#151C28]/88 border border-stone-900/[0.06] dark:border-white/[0.07] p-5 space-y-4 shadow-[0_4px_24px_-4px_rgba(0,0,0,0.03)] dark:shadow-[0_4px_24px_-4px_rgba(0,0,0,0.3)]">
+      <div className="rounded-3xl bg-white/85 dark:bg-[#151C28]/88 border border-stone-900/[0.06] dark:border-white/[0.07] p-5 space-y-4 shadow-[0_2px_18px_-4px_rgba(28,25,23,0.04)] dark:shadow-[0_4px_24px_-4px_rgba(0,0,0,0.3)]">
         <div className="flex items-center justify-between">
-          <h3 className="text-base font-semibold text-stone-800 dark:text-stone-100">
+          <h3 className="text-[15px] font-semibold text-stone-900 dark:text-stone-100 tracking-tight">
             数据存储与备份
           </h3>
           <button
@@ -3487,9 +3526,9 @@ export const SettingsSyncTab: React.FC = () => {
           </button>
         </div>
 
-        {/* 4-Stat Horizontal Summary (Unified Palette) */}
+        {/* 4-Stat Horizontal Summary */}
         <div className="grid grid-cols-4 gap-2">
-          <div className="p-2.5 rounded-2xl bg-white/60 dark:bg-white/[0.04] border border-stone-900/[0.05] dark:border-white/[0.05] text-center">
+          <div className="p-2.5 rounded-2xl bg-stone-900/[0.025] dark:bg-white/[0.04] border border-stone-900/[0.04] dark:border-white/[0.05] text-center">
             <span className="text-[10px] text-stone-400 block mb-0.5 whitespace-nowrap">词库总计</span>
             <span className="text-base font-bold font-mono text-stone-800 dark:text-stone-100 tabular-nums">
               {dbStats.wordsCount}
@@ -3497,15 +3536,15 @@ export const SettingsSyncTab: React.FC = () => {
             <span className="text-[9px] text-stone-400 block">词</span>
           </div>
 
-          <div className="p-2.5 rounded-2xl bg-white/60 dark:bg-white/[0.04] border border-stone-900/[0.05] dark:border-white/[0.05] text-center">
+          <div className="p-2.5 rounded-2xl bg-stone-900/[0.025] dark:bg-white/[0.04] border border-stone-900/[0.04] dark:border-white/[0.05] text-center">
             <span className="text-[10px] text-stone-400 block mb-0.5 whitespace-nowrap">已掌握词</span>
-            <span className="text-base font-bold font-mono text-emerald-600 dark:text-emerald-400 tabular-nums">
+            <span className="text-base font-bold font-mono text-stone-900 dark:text-white tabular-nums">
               {dbStats.masteredCount}
             </span>
             <span className="text-[9px] text-stone-400 block">词</span>
           </div>
 
-          <div className="p-2.5 rounded-2xl bg-white/60 dark:bg-white/[0.04] border border-stone-900/[0.05] dark:border-white/[0.05] text-center">
+          <div className="p-2.5 rounded-2xl bg-stone-900/[0.025] dark:bg-white/[0.04] border border-stone-900/[0.04] dark:border-white/[0.05] text-center">
             <span className="text-[10px] text-stone-400 block mb-0.5 whitespace-nowrap">模考档案</span>
             <span className="text-base font-bold font-mono text-stone-800 dark:text-stone-100 tabular-nums">
               {dbStats.testsCount}
@@ -3513,7 +3552,7 @@ export const SettingsSyncTab: React.FC = () => {
             <span className="text-[9px] text-stone-400 block">篇</span>
           </div>
 
-          <div className="p-2.5 rounded-2xl bg-white/60 dark:bg-white/[0.04] border border-stone-900/[0.05] dark:border-white/[0.05] text-center">
+          <div className="p-2.5 rounded-2xl bg-stone-900/[0.025] dark:bg-white/[0.04] border border-stone-900/[0.04] dark:border-white/[0.05] text-center">
             <span className="text-[10px] text-stone-400 block mb-0.5 whitespace-nowrap">入库曲目</span>
             <span className="text-base font-bold font-mono text-stone-800 dark:text-stone-100 tabular-nums">
               {dbStats.songsCount}
@@ -3523,20 +3562,20 @@ export const SettingsSyncTab: React.FC = () => {
         </div>
 
         {/* Clean Temporary Cache */}
-        <div className="pt-2 flex items-center justify-between border-t border-stone-900/[0.05] dark:border-white/[0.06]">
+        <div className="pt-2.5 flex items-center justify-between border-t border-stone-900/[0.05] dark:border-white/[0.06]">
           <div>
             <span className="text-xs font-medium text-stone-800 dark:text-stone-200 block">
-              清理音频临时缓存
+              清理音频缓存
             </span>
-            <span className="text-[10px] text-stone-400">
-              清理歌词轴微调与播放缓存（不影响生词与模考记录）
+            <span className="text-[10.5px] text-stone-400">
+              不影响生词与模考记录
             </span>
           </div>
           <button
             type="button"
             onClick={handleClearAudioCache}
             disabled={isCleaningCache}
-            className="px-3 py-1.5 rounded-xl bg-stone-900/[0.05] hover:bg-rose-500/10 hover:text-rose-600 dark:bg-white/[0.06] dark:hover:bg-rose-500/15 dark:hover:text-rose-300 text-stone-700 dark:text-stone-300 text-xs font-medium flex items-center gap-1.5 transition-all cursor-pointer shrink-0 whitespace-nowrap"
+            className="px-3 py-1.5 rounded-xl bg-stone-900/[0.05] hover:bg-rose-500/10 hover:text-rose-600 dark:bg-white/[0.06] dark:hover:bg-rose-500/15 dark:hover:text-rose-300 text-stone-700 dark:text-stone-300 text-xs font-medium flex items-center gap-1.5 transition-colors cursor-pointer shrink-0 whitespace-nowrap"
           >
             <Trash2 className="w-3.5 h-3.5" />
             <span>{isCleaningCache ? '清理中...' : '清理缓存'}</span>
@@ -3544,19 +3583,19 @@ export const SettingsSyncTab: React.FC = () => {
         </div>
 
         {/* Action Buttons: Export & Import */}
-        <div className="grid grid-cols-2 gap-2.5 pt-2 border-t border-stone-900/[0.05] dark:border-white/[0.06]">
+        <div className="grid grid-cols-2 gap-2.5 pt-2.5 border-t border-stone-900/[0.05] dark:border-white/[0.06]">
           <button
             type="button"
             onClick={handleExportBackup}
             disabled={isExporting}
-            className="py-2.5 px-3 rounded-2xl bg-white/70 hover:bg-white dark:bg-white/[0.06] dark:hover:bg-white/[0.12] border border-stone-900/[0.06] dark:border-white/[0.08] text-stone-800 dark:text-stone-100 text-xs font-semibold flex items-center justify-center gap-2 transition-all cursor-pointer"
+            className="py-2.5 px-3 rounded-xl bg-stone-900/[0.03] hover:bg-stone-900/[0.06] dark:bg-white/[0.06] dark:hover:bg-white/[0.12] border border-stone-900/[0.06] dark:border-white/[0.08] text-stone-800 dark:text-stone-100 text-xs font-medium flex items-center justify-center gap-2 transition-colors cursor-pointer"
           >
-            <Download className="w-3.5 h-3.5 text-stone-600 dark:text-stone-300" />
+            <Download className="w-3.5 h-3.5 text-stone-500 dark:text-stone-300" />
             <span>{isExporting ? '导出中...' : '导出 JSON 备份'}</span>
           </button>
 
-          <label className="py-2.5 px-3 rounded-2xl bg-white/70 hover:bg-white dark:bg-white/[0.06] dark:hover:bg-white/[0.12] border border-stone-900/[0.06] dark:border-white/[0.08] text-stone-800 dark:text-stone-100 text-xs font-semibold flex items-center justify-center gap-2 transition-all cursor-pointer">
-            <Upload className="w-3.5 h-3.5 text-emerald-600 dark:text-emerald-400" />
+          <label className="py-2.5 px-3 rounded-xl bg-stone-900/[0.03] hover:bg-stone-900/[0.06] dark:bg-white/[0.06] dark:hover:bg-white/[0.12] border border-stone-900/[0.06] dark:border-white/[0.08] text-stone-800 dark:text-stone-100 text-xs font-medium flex items-center justify-center gap-2 transition-colors cursor-pointer">
+            <Upload className="w-3.5 h-3.5 text-stone-500 dark:text-stone-300" />
             <span>{isImporting ? '恢复中...' : '恢复备份文件'}</span>
             <input
               type="file"
@@ -3639,7 +3678,7 @@ export const SettingsSyncTab: React.FC = () => {
                     }`}
                   >
                     <Phone className="w-3.5 h-3.5" style={{ color: brandHex }} />
-                    <span>手机验证码 (推荐)</span>
+                    <span>手机验证码</span>
                   </button>
                   <button
                     type="button"
@@ -3746,7 +3785,7 @@ export const SettingsSyncTab: React.FC = () => {
 
                           {qrStatus === 'waiting_confirm' && (
                             <div className="absolute inset-0 bg-white/92 dark:bg-stone-900/92 flex flex-col items-center justify-center p-4 text-center space-y-2 animate-in fade-in">
-                              <div className="w-12 h-12 rounded-full bg-emerald-500/20 text-emerald-600 dark:text-emerald-400 flex items-center justify-center animate-bounce">
+                              <div className="w-12 h-12 rounded-full bg-stone-900/10 dark:bg-white/10 text-stone-900 dark:text-stone-100 flex items-center justify-center">
                                 <Smartphone className="w-6 h-6" />
                               </div>
                               <h4 className="text-xs font-bold text-stone-900 dark:text-stone-100">

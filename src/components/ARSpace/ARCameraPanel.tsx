@@ -547,16 +547,16 @@ export const ARCameraPanel: React.FC<ARCameraPanelProps> = ({ onOpenNotebook }) 
     };
   }, []);
 
-  // Subtle floating physics when frozen
+  // Subtle floating physics when frozen (only while AR space is active)
   useEffect(() => {
-    if (!isFrozen) return;
+    if (!isFrozen || activeSpace !== 0) return;
 
     const interval = setInterval(() => {
       setBobOffset(prev => (prev + 0.04) % (Math.PI * 2));
     }, 45);
 
     return () => clearInterval(interval);
-  }, [isFrozen]);
+  }, [isFrozen, activeSpace]);
 
   // Toggle Camera Facing Mode (Front / Back)
   const toggleCameraFacing = () => {
@@ -1005,31 +1005,34 @@ export const ARCameraPanel: React.FC<ARCameraPanelProps> = ({ onOpenNotebook }) 
                 animate={{ opacity: 1, y: 0, scale: 1, filter: 'blur(0px)' }}
                 exit={{ opacity: 0, y: 12, scale: 0.96, filter: 'blur(4px)' }}
                 transition={{ duration: 0.5, ease: [0.22, 1, 0.36, 1] }}
-                className="w-full max-w-[308px] rounded-[26px] bg-stone-950/82 dark:bg-stone-950/75 backdrop-blur-2xl border border-stone-900/15 dark:border-white/14 p-3.5 shadow-[0_24px_60px_rgba(28,25,23,0.22)] dark:shadow-[0_24px_60px_rgba(0,0,0,0.6)] text-white"
+                className="w-full max-w-[304px] rounded-[26px] bg-[#171615]/88 backdrop-blur-2xl border border-white/14 p-3.5 shadow-[0_24px_60px_rgba(0,0,0,0.55)] text-white"
               >
                 {/* Clean Single Desk Preview Image (Tappable) */}
                 <div
                   onClick={handleTrySampleScene}
-                  className="group relative w-full h-40 rounded-[18px] overflow-hidden bg-stone-900 cursor-pointer"
+                  className="group relative w-full h-40 rounded-[18px] overflow-hidden bg-stone-900 cursor-pointer ring-1 ring-white/10"
                 >
                   <img
                     src={SAMPLE_DESK_IMAGE_URL}
                     alt="书房实景示例"
                     className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-700 ease-out"
                   />
-                  <div className="absolute inset-0 bg-gradient-to-t from-black/45 via-transparent to-black/10" />
+                  <div className="absolute inset-0 bg-gradient-to-t from-black/35 via-transparent to-black/10" />
 
-                  {/* Single Floating Spatial Anchor Tag on the Notebook */}
+                  {/* Single Floating Spatial Anchor Tag matching real warm-ivory capsules */}
                   <motion.div
                     initial={{ opacity: 0, scale: 0.85, y: 6 }}
                     animate={{ opacity: 1, scale: 1, y: 0 }}
                     transition={{ delay: 0.24, duration: 0.45, ease: [0.22, 1, 0.36, 1] }}
-                    className="pointer-events-none absolute top-[44%] left-[46%] flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-stone-950/75 backdrop-blur-xl border border-white/25 text-xs text-white shadow-[0_8px_24px_rgba(0,0,0,0.45)]"
+                    className="pointer-events-none absolute top-[44%] left-[44%] flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-[#FDFCF9]/95 backdrop-blur-xl border border-white/85 text-stone-900 shadow-[0_8px_24px_rgba(0,0,0,0.32)]"
                   >
-                    <span className="w-1.5 h-1.5 rounded-full bg-white/85" />
-                    <span className="font-serif font-medium tracking-wide">manuscript</span>
-                    <span className="text-white/40">·</span>
-                    <span className="text-white/80 text-[11px]">手稿</span>
+                    <span className="w-1.5 h-1.5 rounded-full bg-stone-900/75" />
+                    <span className="font-serif-luxury text-[12.5px] font-semibold tracking-wide leading-none">
+                      manuscript
+                    </span>
+                    <span className="text-[11px] text-stone-500 font-sans font-medium pl-1.5 border-l border-stone-300/80 leading-none">
+                      手稿
+                    </span>
                   </motion.div>
                 </div>
 
@@ -1039,17 +1042,17 @@ export const ARCameraPanel: React.FC<ARCameraPanelProps> = ({ onOpenNotebook }) 
                     实景拍物，即刻浮现词卡
                   </h4>
                   <p className="text-xs text-white/55 leading-relaxed">
-                    轻触下方快门定格画面，或直接载入样张体验
+                    拍下眼前物体，或先用样张体验
                   </p>
                 </div>
 
-                {/* Clean Ivory Glass Primary Button */}
+                {/* Clean Ivory Primary Button */}
                 <button
                   type="button"
                   onClick={handleTrySampleScene}
-                  className="w-full py-2.5 px-4 rounded-xl bg-[#FAF7F0] hover:bg-white text-stone-900 text-xs font-medium tracking-wide flex items-center justify-center shadow-sm transition-all cursor-pointer active:scale-[0.98]"
+                  className="w-full py-2.5 px-4 rounded-xl bg-[#FDFCF9] hover:bg-white text-stone-900 text-xs font-medium tracking-wide flex items-center justify-center shadow-sm transition-all cursor-pointer active:scale-[0.98]"
                 >
-                  <span>体验这张桌面样张</span>
+                  <span>体验桌面样张</span>
                 </button>
 
                 {/* Symmetrical Two-Column Dismiss Row */}
@@ -1074,19 +1077,38 @@ export const ARCameraPanel: React.FC<ARCameraPanelProps> = ({ onOpenNotebook }) 
           )}
         </AnimatePresence>
 
-        {/* Subtle Minimalist Hint ONLY if Camera Permission is Denied and Guide is Closed */}
+        {/* Subtle Minimalist Empty State when Camera is Unavailable and Guide is Closed */}
         {permissionDenied && !streamActive && !isFrozen && !isGuideVisible && (
           <div className="absolute inset-0 z-10 flex flex-col items-center justify-center px-8 pt-20 pb-36 text-center pointer-events-none">
-            <button
-              type="button"
-              onClick={() => startCamera(facingMode)}
-              className="pointer-events-auto flex flex-col items-center gap-3 px-6 py-4 rounded-2xl bg-stone-950/45 hover:bg-stone-950/60 backdrop-blur-xl border border-white/20 transition-all active:scale-95 cursor-pointer shadow-[0_12px_32px_rgba(0,0,0,0.3)]"
-            >
-              <Camera className="w-5 h-5 text-white/85 stroke-[1.6]" />
-              <span className="text-xs text-white/90 font-sans tracking-wide">
-                未开启相机权限 · 轻触重试或从左下角相册选图
-              </span>
-            </button>
+            <div className="pointer-events-auto w-full max-w-[264px] flex flex-col items-center gap-3.5 px-5 py-5 rounded-[22px] bg-[#171615]/84 backdrop-blur-2xl border border-white/12 shadow-[0_18px_44px_rgba(0,0,0,0.45)]">
+              <div className="w-10 h-10 rounded-full bg-white/8 border border-white/10 flex items-center justify-center">
+                <Camera className="w-[18px] h-[18px] text-white/80 stroke-[1.6]" />
+              </div>
+              <div className="space-y-1">
+                <p className="text-[13.5px] font-medium text-white/92 tracking-wide">
+                  未检测到可用相机
+                </p>
+                <p className="text-[11.5px] text-white/50 leading-relaxed">
+                  可重新连接相机，或从相册选图识词
+                </p>
+              </div>
+              <div className="w-full flex items-center gap-2 pt-1">
+                <button
+                  type="button"
+                  onClick={() => startCamera(facingMode)}
+                  className="flex-1 py-2 px-3 rounded-xl bg-white/10 hover:bg-white/16 border border-white/10 text-white/85 text-xs font-medium transition-all active:scale-[0.98] cursor-pointer"
+                >
+                  重试相机
+                </button>
+                <button
+                  type="button"
+                  onClick={handleTrySampleScene}
+                  className="flex-1 py-2 px-3 rounded-xl bg-[#FDFCF9] hover:bg-white text-stone-900 text-xs font-medium transition-all active:scale-[0.98] cursor-pointer"
+                >
+                  体验桌面样张
+                </button>
+              </div>
+            </div>
           </div>
         )}
 
@@ -1100,9 +1122,9 @@ export const ARCameraPanel: React.FC<ARCameraPanelProps> = ({ onOpenNotebook }) 
               transition={{ duration: 0.22 }}
               className="absolute inset-x-0 top-[calc(var(--android-safe-top,52px)+3.5rem)] z-30 flex justify-center pointer-events-none"
             >
-              <div className="flex items-center gap-2 px-3.5 py-1.5 rounded-full bg-stone-950/65 backdrop-blur-xl border border-white/20 text-[11px] font-sans tracking-wide text-white/95 shadow-[0_8px_24px_rgba(0,0,0,0.35)]">
-                <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-ping" />
-                <span>AI 正在识别画面物体...</span>
+              <div className="flex items-center gap-2 px-3.5 py-1.5 rounded-full bg-[#171615]/78 backdrop-blur-xl border border-white/16 text-[11px] font-sans tracking-wide text-white/92 shadow-[0_8px_24px_rgba(0,0,0,0.35)]">
+                <span className="w-1.5 h-1.5 rounded-full bg-[#FAF7F0]/90 animate-pulse" />
+                <span>正在识别画面物体…</span>
               </div>
             </motion.div>
           )}

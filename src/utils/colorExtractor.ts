@@ -100,6 +100,20 @@ export function withColorAlpha(color: string | undefined, alpha: number, fallbac
   return `rgba(${rgb[0]}, ${rgb[1]}, ${rgb[2]}, ${Number(clampedAlpha.toFixed(3))})`;
 }
 
+const MAX_PALETTE_CACHE = 80;
+const paletteCache = new Map<string, ExtractedColorTheme>();
+const inflightPaletteRequests = new Map<string, Promise<ExtractedColorTheme>>();
+
+function setPaletteCache(url: string, theme: ExtractedColorTheme): void {
+  if (paletteCache.has(url)) {
+    paletteCache.delete(url);
+  } else if (paletteCache.size >= MAX_PALETTE_CACHE) {
+    const oldestKey = paletteCache.keys().next().value;
+    if (oldestKey) paletteCache.delete(oldestKey);
+  }
+  paletteCache.set(url, theme);
+}
+
 /**
  * Intelligent Dynamic Album Color Extractor
  * Uses a Vibrant/Chromatic weighting algorithm to sample album art canvas pixels,
@@ -107,22 +121,34 @@ export function withColorAlpha(color: string | undefined, alpha: number, fallbac
  * and synthesize a cohesive 3-tone ambient light palette + Morandi matting.
  */
 export async function extractDominantPalette(imageUrl: string): Promise<ExtractedColorTheme> {
-  return new Promise((resolve) => {
-    const fallbackTheme: ExtractedColorTheme = {
-      palette: ['#7C8F6E', '#C4AC82', '#A69880'],
-      extractedHue: 110,
-      extractedSat: 25,
-      mattingBg: 'hsl(110, 10%, 92%)',
-      mattingBgDark: 'hsl(110, 12%, 14%)',
-      accentBtn: 'hsl(110, 20%, 35%)',
-      accentBtnDark: 'hsl(110, 25%, 45%)'
-    };
+  const fallbackTheme: ExtractedColorTheme = {
+    palette: ['#7C8F6E', '#C4AC82', '#A69880'],
+    extractedHue: 110,
+    extractedSat: 25,
+    mattingBg: 'hsl(110, 10%, 92%)',
+    mattingBgDark: 'hsl(110, 12%, 14%)',
+    accentBtn: 'hsl(145, 38%, 42%)',
+    accentBtnDark: 'hsl(145, 44%, 50%)'
+  };
 
-    if (!imageUrl) {
-      resolve(fallbackTheme);
-      return;
-    }
+  if (!imageUrl) {
+    return fallbackTheme;
+  }
 
+  const cached = paletteCache.get(imageUrl);
+  if (cached) {
+    // Refresh LRU recency
+    paletteCache.delete(imageUrl);
+    paletteCache.set(imageUrl, cached);
+    return cached;
+  }
+
+  const inflight = inflightPaletteRequests.get(imageUrl);
+  if (inflight) {
+    return inflight;
+  }
+
+  const promise = new Promise<ExtractedColorTheme>((resolve) => {
     const img = new Image();
     img.crossOrigin = 'anonymous';
     img.src = imageUrl;
@@ -246,10 +272,15 @@ export async function extractDominantPalette(imageUrl: string): Promise<Extracte
 
         const mattingBg = `hsl(${dominantHue}, ${Math.min(14, Math.max(6, dominantSat))}%, 92%)`;
         const mattingBgDark = `hsl(${dominantHue}, ${Math.min(18, Math.max(8, dominantSat))}%, 14%)`;
-        const accentBtn = `hsl(${dominantHue}, 24%, 34%)`;
-        const accentBtnDark = `hsl(${dominantHue}, 28%, 46%)`;
+        // Keep accent button fresh & luminous (never muddy brown) while preserving crisp white icon contrast
+        const accentSat = Math.round(Math.max(38, Math.min(68, dominantSat * 0.82 + 14)));
+        const isBrightHueRange = dominantHue >= 42 && dominantHue <= 172;
+        const accentLight = isBrightHueRange ? 41 : 49;
+        const accentLightDark = isBrightHueRange ? 47 : 55;
+        const accentBtn = `hsl(${dominantHue}, ${accentSat}%, ${accentLight}%)`;
+        const accentBtnDark = `hsl(${dominantHue}, ${Math.min(72, accentSat + 4)}%, ${accentLightDark}%)`;
 
-        resolve({
+        const extracted: ExtractedColorTheme = {
           palette: [glow1, glow2, glow3],
           extractedHue: dominantHue,
           extractedSat: dominantSat,
@@ -257,7 +288,9 @@ export async function extractDominantPalette(imageUrl: string): Promise<Extracte
           mattingBgDark,
           accentBtn,
           accentBtnDark
-        });
+        };
+        setPaletteCache(imageUrl, extracted);
+        resolve(extracted);
       } catch (err) {
         console.warn('Canvas color extraction error, falling back:', err);
         resolve(fallbackTheme);
@@ -268,6 +301,13 @@ export async function extractDominantPalette(imageUrl: string): Promise<Extracte
       resolve(fallbackTheme);
     };
   });
+
+  inflightPaletteRequests.set(imageUrl, promise);
+  promise.then(() => {
+    inflightPaletteRequests.delete(imageUrl);
+  });
+
+  return promise;
 }
 
 /**

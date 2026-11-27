@@ -5,7 +5,7 @@ import { useAppStore } from '../../store/useAppStore';
 import { SEED_PASSAGE } from '../../db/seedData';
 import { CAMBRIDGE_IELTS_PASSAGES, CambridgePassage, matchBestPassageByVocab } from '../../data/ieltsPassages';
 import { IELTSListeningSection } from '../../data/ieltsListening';
-import { IELTSTestRecord, IELTSQuestion } from '../../types';
+import { IELTSTestRecord, IELTSQuestion, WordItem } from '../../types';
 import { db, collectWord, bulkUpdateMastery } from '../../db';
 import { TopHeader } from '../TopHeader';
 import { IELTSHubView } from './IELTSHubView';
@@ -43,6 +43,10 @@ import {
   Check
 } from 'lucide-react';
 
+const EMPTY_WORDS: WordItem[] = [];
+const EMPTY_CUSTOM_PASSAGES: CambridgePassage[] = [];
+const EMPTY_TEST_RECORDS: IELTSTestRecord[] = [];
+
 interface IELTSPanelProps {
   onOpenNotebook: () => void;
 }
@@ -78,6 +82,7 @@ interface TokenizedWord {
 
 interface TokenizedParagraph {
   pIdx: number;
+  label?: string;
   tokens: TokenizedWord[];
   rawText: string;
 }
@@ -99,11 +104,13 @@ export const IELTSPanel: React.FC<IELTSPanelProps> = ({ onOpenNotebook }) => {
     text: string;
     questions: IELTSQuestion[];
   }>(SEED_PASSAGE);
-  const [drawerHeightPercent, setDrawerHeightPercent] = useState<number>(26);
-  const [isDragging, setIsDragging] = useState(false);
+  const [drawerHeightPercent, setDrawerHeightPercent] = useState<number>(28);
+  const [dragHeightPx, setDragHeightPx] = useState<number | null>(null);
+  const isDragging = dragHeightPx !== null;
+  const [readingStageHeight, setReadingStageHeight] = useState<number>(640);
   
-  // Real-time notebook words for hit calculation
-  const allDbWords = useLiveQuery(() => db.words.toArray()) || [];
+  // Real-time notebook words for hit calculation & passage highlighting (single shared Dexie subscription)
+  const allDbWords = useLiveQuery(() => db.words.toArray(), []) ?? EMPTY_WORDS;
   const userWordStrings = useMemo(() => allDbWords.map(w => w.word), [allDbWords]);
   
   // Timer & Extension States
@@ -176,8 +183,9 @@ export const IELTSPanel: React.FC<IELTSPanelProps> = ({ onOpenNotebook }) => {
   };
 
   const containerRef = useRef<HTMLDivElement>(null);
-  const dragStartYRef = useRef<number>(0);
-  const dragStartHeightRef = useRef<number>(26);
+  const readingStageRef = useRef<HTMLDivElement>(null);
+  const drawerHeightPxRef = useRef<number>(204);
+  const expandedThresholdPxRef = useRef<number>(260);
 
   const activeSpace = useAppStore(s => s.activeSpace);
   const currentQuizQuestionIndex = useAppStore(s => s.currentQuizQuestionIndex);
@@ -216,23 +224,22 @@ export const IELTSPanel: React.FC<IELTSPanelProps> = ({ onOpenNotebook }) => {
   const lastPassageScrollTopRef = useRef<number>(0);
   const quizSwipeStartRef = useRef<{ x: number; y: number } | null>(null);
 
-  // Query collected words from Dexie database to highlight in text
-  const collectedWords = useLiveQuery(() => db.words.toArray(), []);
+  // Reuse the single db.words subscription to build the highlighted-word Set
   const savedWordsSet = useMemo(() => {
-    if (!collectedWords) return new Set<string>();
+    if (allDbWords.length === 0) return new Set<string>();
     const set = new Set<string>();
-    for (const item of collectedWords) {
+    for (const item of allDbWords) {
       if (item.word) {
         const clean = cleanWordText(item.word).toLowerCase();
         if (clean) set.add(clean);
       }
     }
     return set;
-  }, [collectedWords]);
+  }, [allDbWords]);
 
   // Query custom online passages and test history from Dexie
-  const customPassages = useLiveQuery(() => db.customPassages.toArray(), []) || [];
-  const allTestRecords = useLiveQuery(() => db.ieltsTests.toArray(), []) || [];
+  const customPassages = useLiveQuery(() => db.customPassages.toArray(), []) ?? EMPTY_CUSTOM_PASSAGES;
+  const allTestRecords = useLiveQuery(() => db.ieltsTests.toArray(), []) ?? EMPTY_TEST_RECORDS;
 
   const allWorkbookPassages = useMemo(
     () => getCompleteWorkbookPassages(customPassages),
@@ -428,33 +435,87 @@ export const IELTSPanel: React.FC<IELTSPanelProps> = ({ onOpenNotebook }) => {
     };
   }, []);
 
-  // Drag to resize quiz drawer
+  // Track reading stage height so quiz drawer heights stay proportional and unclipped on any screen
+  useEffect(() => {
+    if (viewMode !== 'reading') return;
+    const el = readingStageRef.current;
+    if (!el) return;
+    const updateHeight = () => {
+      if (el.clientHeight > 0) {
+        setReadingStageHeight(el.clientHeight);
+      }
+    };
+    updateHeight();
+    if (typeof ResizeObserver === 'undefined') return;
+    const ro = new ResizeObserver(updateHeight);
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, [viewMode]);
+
+  // Drag to resize quiz drawer with 1:1 pixel tracking from any state (minimized, peek, or expanded)
   const handleDragStart = (e: React.PointerEvent<HTMLDivElement>) => {
+    if (e.button !== 0 && e.pointerType === 'mouse') return;
     e.preventDefault();
-    if (isScrollMinimized) {
-      setIsScrollMinimized(false);
-    }
-    setIsDragging(true);
-    dragStartYRef.current = e.clientY;
-    dragStartHeightRef.current = isScrollMinimized ? 26 : drawerHeightPercent;
+    e.stopPropagation();
+
+    const wasMinimized = isScrollMinimized;
+    const startY = e.clientY;
+    const startPx = drawerHeightPxRef.current;
+    let latestPx = startPx;
+    let moved = false;
+
+    setDragHeightPx(startPx);
 
     const handlePointerMove = (moveEvent: PointerEvent) => {
-      if (!containerRef.current) return;
-      const rect = containerRef.current.getBoundingClientRect();
-      const deltaY = dragStartYRef.current - moveEvent.clientY;
-      const deltaPercent = (deltaY / rect.height) * 100;
-      const nextPercent = Math.min(Math.max(dragStartHeightRef.current + deltaPercent, 18), 92);
-      setDrawerHeightPercent(nextPercent);
+      const stageEl = readingStageRef.current || containerRef.current;
+      const stageH = stageEl?.getBoundingClientRect().height || readingStageHeight;
+      if (stageH <= 0) return;
+
+      const deltaY = startY - moveEvent.clientY;
+      if (Math.abs(deltaY) > 4) {
+        moved = true;
+      }
+
+      const maxPx = Math.round(stageH * 0.92);
+      const nextPx = Math.min(Math.max(Math.round(startPx + deltaY), 56), maxPx);
+      latestPx = nextPx;
+      setDragHeightPx(nextPx);
     };
 
-    const handlePointerUp = () => {
-      setIsDragging(false);
+    const finishDrag = () => {
       window.removeEventListener('pointermove', handlePointerMove);
-      window.removeEventListener('pointerup', handlePointerUp);
+      window.removeEventListener('pointerup', finishDrag);
+      window.removeEventListener('pointercancel', finishDrag);
+      setDragHeightPx(null);
+
+      if (!moved) {
+        if (wasMinimized) {
+          setIsScrollMinimized(false);
+        }
+        return;
+      }
+
+      const stageEl = readingStageRef.current || containerRef.current;
+      const stageH = stageEl?.getBoundingClientRect().height || readingStageHeight;
+      const minimizeCutoffPx = wasMinimized ? 100 : 136;
+
+      if (latestPx < minimizeCutoffPx) {
+        setIsScrollMinimized(true);
+        setDrawerHeightPercent(28);
+      } else {
+        setIsScrollMinimized(false);
+        if (latestPx >= expandedThresholdPxRef.current) {
+          const nextPercent = Math.min(92, Math.max(38, Math.round((latestPx / Math.max(1, stageH)) * 100)));
+          setDrawerHeightPercent(nextPercent);
+        } else {
+          setDrawerHeightPercent(28);
+        }
+      }
     };
 
     window.addEventListener('pointermove', handlePointerMove);
-    window.addEventListener('pointerup', handlePointerUp);
+    window.addEventListener('pointerup', finishDrag);
+    window.addEventListener('pointercancel', finishDrag);
   };
 
   // Horizontal swipe left/right inside quiz drawer to switch questions (Item 3)
@@ -512,8 +573,26 @@ export const IELTSPanel: React.FC<IELTSPanelProps> = ({ onOpenNotebook }) => {
     }, 7000);
   }, [pendingEvidenceJumpPara, setPendingEvidenceJumpPara, currentQuizQuestionIndex, showToast]);
 
-  const effectiveDrawerHeightPercent = isScrollMinimized ? 10.5 : drawerHeightPercent;
-  const isExpanded = !isScrollMinimized && drawerHeightPercent >= 36;
+  const isExpandedResting = !isScrollMinimized && drawerHeightPercent >= 38;
+  const activePeekOptions = currentQuestion?.options?.length ? currentQuestion.options : ['TRUE', 'FALSE', 'NOT GIVEN'];
+  const activePeekHasLongOptions = activePeekOptions.some(o => o.length > 15);
+  const peekMinHeightPx = activePeekOptions.length >= 4
+    ? (activePeekHasLongOptions ? 264 : 240)
+    : 204;
+  const expandedThresholdPx = Math.max(peekMinHeightPx + 52, Math.round(readingStageHeight * 0.4));
+  const restingDrawerHeightPx = isScrollMinimized
+    ? 60
+    : isExpandedResting
+      ? Math.round((drawerHeightPercent / 100) * readingStageHeight)
+      : Math.min(
+          Math.round(readingStageHeight * 0.54),
+          Math.max(Math.round((drawerHeightPercent / 100) * readingStageHeight), peekMinHeightPx)
+        );
+  const drawerHeightPx = dragHeightPx ?? restingDrawerHeightPx;
+  drawerHeightPxRef.current = drawerHeightPx;
+  expandedThresholdPxRef.current = expandedThresholdPx;
+  const showMinimizedContent = isDragging ? drawerHeightPx <= 112 : isScrollMinimized;
+  const isExpanded = isDragging ? drawerHeightPx >= expandedThresholdPx : isExpandedResting;
 
   // Timer countdown logic with timeout detection (only runs when active space is IELTS and user started)
   useEffect(() => {
@@ -707,8 +786,11 @@ export const IELTSPanel: React.FC<IELTSPanelProps> = ({ onOpenNotebook }) => {
     const rawParagraphs = passageData.text.split('\n\n');
 
     return rawParagraphs.map((paraText, pIdx) => {
-      const cleanPara = paraText.replace(/<target(?:\s+id="[^"]+")?>([^<]+)<\/target>/gi, '$1');
-      const rawWords = cleanPara.trim().split(/\s+/);
+      const cleanPara = paraText.replace(/<target(?:\s+id="[^"]+")?>([^<]+)<\/target>/gi, '$1').trim();
+      const labelMatch = cleanPara.match(/^(Paragraph\s+[A-Z])(?:\s*[:.\-–—])?\s+([\s\S]+)$/i);
+      const label = labelMatch ? labelMatch[1].toUpperCase() : undefined;
+      const bodyText = labelMatch ? labelMatch[2].trim() : cleanPara;
+      const rawWords = bodyText.split(/\s+/).filter(Boolean);
       const tokens: TokenizedWord[] = [];
 
       rawWords.forEach((rawToken, wIdx) => {
@@ -730,14 +812,15 @@ export const IELTSPanel: React.FC<IELTSPanelProps> = ({ onOpenNotebook }) => {
           word,
           clean,
           trailing,
-          sentence: cleanPara
+          sentence: bodyText
         });
       });
 
       return {
         pIdx,
+        label,
         tokens,
-        rawText: cleanPara
+        rawText: bodyText
       };
     });
   }, [passageData]);
@@ -1106,7 +1189,7 @@ export const IELTSPanel: React.FC<IELTSPanelProps> = ({ onOpenNotebook }) => {
     setIsSubmittingTest(true);
     setIsTimerRunning(false);
     setHasStarted(false);
-    setDrawerHeightPercent(24);
+    setDrawerHeightPercent(28);
     triggerHaptic([15, 40, 20]);
 
     let correct = 0;
@@ -1170,7 +1253,7 @@ export const IELTSPanel: React.FC<IELTSPanelProps> = ({ onOpenNotebook }) => {
     setAssessmentResult(testRecord);
     setAssessmentModalOpen(true);
     setIsSubmittingTest(false);
-    setDrawerHeightPercent(26);
+    setDrawerHeightPercent(28);
   };
 
   // Generate real-time IELTS reading passage
@@ -1318,11 +1401,11 @@ export const IELTSPanel: React.FC<IELTSPanelProps> = ({ onOpenNotebook }) => {
                 }}
                 className={`flex items-center gap-1.5 px-3 py-1 rounded-full border text-[11px] font-mono tabular-nums tracking-wider font-semibold active:scale-95 transition-all cursor-pointer group focus:outline-none ${
                   isAdjustMenuOpen
-                    ? 'bg-white dark:bg-[#182132] border-[#516050]/50 dark:border-[#8FB996]/50 text-[#516050] dark:text-[#8FB996] ring-2 ring-[#516050]/12 dark:ring-[#8FB996]/15 shadow-xs'
+                    ? 'bg-white dark:bg-[#182132] border-stone-900/40 dark:border-stone-200/40 text-stone-900 dark:text-stone-100 ring-2 ring-stone-900/10 dark:ring-white/15 shadow-xs'
                     : timerSeconds <= 60 && isTimerRunning
                     ? 'bg-rose-500/12 border-rose-500/35 text-rose-700 dark:text-rose-300'
                     : isTimerRunning
-                    ? 'bg-[#516050]/10 dark:bg-[#8FB996]/15 border-[#516050]/25 dark:border-[#8FB996]/30 text-[#516050] dark:text-[#8FB996]'
+                    ? 'bg-stone-900/[0.08] dark:bg-white/[0.12] border-stone-900/20 dark:border-white/25 text-stone-900 dark:text-stone-100'
                     : 'bg-white/85 dark:bg-white/[0.06] hover:bg-white dark:hover:bg-white/[0.1] border-stone-200/80 dark:border-white/[0.08] text-stone-800 dark:text-stone-200 shadow-[0_2px_8px_rgba(0,0,0,0.03)]'
                 }`}
                 title={isTimerRunning ? 'Timer running · Click to pause/adjust' : 'Timer stopped · Click to start/adjust'}
@@ -1330,11 +1413,11 @@ export const IELTSPanel: React.FC<IELTSPanelProps> = ({ onOpenNotebook }) => {
                 <Clock className={`w-3.5 h-3.5 transition-colors ${
                   timerSeconds <= 60 && isTimerRunning
                     ? 'text-rose-500 animate-pulse'
-                    : 'text-[#516050] dark:text-[#8FB996]'
+                    : 'text-stone-700 dark:text-stone-300'
                 }`} />
                 
                 {/* Tabular Digits with In-situ Pulse Animation */}
-                <span className={`inline-block tabular-nums transition-all duration-200 ${isPulseAnim ? 'scale-110 text-[#516050] dark:text-[#8FB996] font-bold' : ''}`}>
+                <span className={`inline-block tabular-nums transition-all duration-200 ${isPulseAnim ? 'scale-110 text-stone-900 dark:text-stone-100 font-bold' : ''}`}>
                   {formatTimer(timerSeconds)}
                 </span>
 
@@ -1342,7 +1425,7 @@ export const IELTSPanel: React.FC<IELTSPanelProps> = ({ onOpenNotebook }) => {
                   {isTimerRunning ? '· 计时中' : `· P${activeCambridgeInfo.passageNum || 1}`}
                 </span>
 
-                <ChevronDown className={`w-3 h-3 text-stone-400 transition-transform duration-200 ${isAdjustMenuOpen ? 'rotate-180 text-[#516050] dark:text-[#8FB996]' : 'group-hover:translate-y-0.5'}`} />
+                <ChevronDown className={`w-3 h-3 text-stone-400 transition-transform duration-200 ${isAdjustMenuOpen ? 'rotate-180 text-stone-900 dark:text-stone-100' : 'group-hover:translate-y-0.5'}`} />
               </button>
 
               {/* In-situ Particle Floating Animation (+05:00) */}
@@ -1354,7 +1437,7 @@ export const IELTSPanel: React.FC<IELTSPanelProps> = ({ onOpenNotebook }) => {
                     animate={{ opacity: 0, y: -22, scale: 1.08 }}
                     exit={{ opacity: 0 }}
                     transition={{ duration: 0.85, ease: [0.16, 1, 0.3, 1] }}
-                    className="absolute -top-3.5 -right-3 pointer-events-none px-2 py-0.5 rounded-full bg-[#516050] dark:bg-[#6B8F71] text-white font-mono tabular-nums font-bold text-[10px] shadow-lg z-50 whitespace-nowrap"
+                    className="absolute -top-3.5 -right-3 pointer-events-none px-2 py-0.5 rounded-full bg-stone-900 dark:bg-stone-100 text-white dark:text-stone-950 font-mono tabular-nums font-bold text-[10px] shadow-lg z-50 whitespace-nowrap"
                   >
                     {particleFeedback.text}
                   </motion.div>
@@ -1402,6 +1485,7 @@ export const IELTSPanel: React.FC<IELTSPanelProps> = ({ onOpenNotebook }) => {
           </motion.div>
         ) : (
           <motion.div
+            ref={readingStageRef}
             key="ielts-stage-reading"
             initial={{ opacity: 0, y: 8 }}
             animate={{ opacity: 1, y: 0 }}
@@ -1430,7 +1514,7 @@ export const IELTSPanel: React.FC<IELTSPanelProps> = ({ onOpenNotebook }) => {
                     {/* Header Title */}
                     <div className="flex items-center justify-between border-b border-stone-200/60 dark:border-white/[0.06] pb-2.5">
                       <div className="flex items-center gap-1.5">
-                        <Clock className="w-4 h-4 text-[#516050] dark:text-[#8FB996]" />
+                        <Clock className="w-4 h-4 text-stone-700 dark:text-stone-300" />
                         <span className="text-xs font-semibold text-stone-800 dark:text-stone-100 tracking-wide font-sans-ui">
                           模考计时与加时
                         </span>
@@ -1453,7 +1537,7 @@ export const IELTSPanel: React.FC<IELTSPanelProps> = ({ onOpenNotebook }) => {
                         className={`flex-1 py-2.5 px-3 rounded-2xl text-xs font-semibold flex items-center justify-center gap-2 transition-all active:scale-98 shadow-xs cursor-pointer ${
                           isTimerRunning
                             ? 'bg-amber-500/15 hover:bg-amber-500/25 text-amber-800 dark:text-amber-300 border border-amber-500/30'
-                            : 'bg-[#516050] hover:bg-[#3F4C3E] dark:bg-[#6B8F71] dark:hover:bg-[#4A6B50] text-white'
+                            : 'bg-stone-900 hover:bg-stone-800 dark:bg-stone-100 dark:hover:bg-white text-white dark:text-stone-950'
                         }`}
                       >
                         {isTimerRunning ? (
@@ -1498,7 +1582,7 @@ export const IELTSPanel: React.FC<IELTSPanelProps> = ({ onOpenNotebook }) => {
                               onClick={() => handleAddTime(mins)}
                               className={`relative py-2.5 rounded-2xl text-xs font-mono tabular-nums font-semibold transition-all active:scale-95 border cursor-pointer flex flex-col items-center justify-center ${
                                 isLastUsed
-                                  ? 'bg-[#516050] text-white border-[#516050] shadow-xs'
+                                  ? 'bg-stone-900 dark:bg-stone-100 text-white dark:text-stone-950 border-stone-900 dark:border-stone-100 shadow-xs'
                                   : 'bg-white dark:bg-[#1A2234] border-stone-200/80 dark:border-white/[0.08] text-stone-700 dark:text-stone-200 hover:border-stone-400'
                               }`}
                             >
@@ -1564,7 +1648,7 @@ export const IELTSPanel: React.FC<IELTSPanelProps> = ({ onOpenNotebook }) => {
                             <button
                               type="button"
                               onClick={() => handleAddTime(customMinutes)}
-                              className="w-full py-2.5 rounded-2xl bg-[#516050] hover:bg-[#3F4C3E] dark:bg-[#6B8F71] text-white text-xs font-semibold tracking-wider transition-all active:scale-98 shadow-xs cursor-pointer uppercase font-mono tabular-nums"
+                              className="w-full py-2.5 rounded-2xl bg-stone-900 hover:bg-stone-800 dark:bg-stone-100 dark:hover:bg-white text-white dark:text-stone-950 text-xs font-semibold tracking-wider transition-all active:scale-98 shadow-xs cursor-pointer uppercase font-mono tabular-nums"
                             >
                               Confirm +{customMinutes} Mins
                             </button>
@@ -1596,13 +1680,13 @@ export const IELTSPanel: React.FC<IELTSPanelProps> = ({ onOpenNotebook }) => {
                     {/* Title & Description */}
                     <div className="space-y-1.5">
                       <h3 className="font-serif-luxury text-xl font-bold text-stone-900 dark:text-stone-100">
-                        Standard Time Expired
+                        模考标准时间已到
                       </h3>
-                      <p className="text-xs font-mono tabular-nums uppercase tracking-widest text-stone-500 dark:text-stone-400">
-                        STANDARD 20:00 EXPIRED
+                      <p className="text-[11px] font-mono tabular-nums tracking-wider text-stone-500 dark:text-stone-400">
+                        标准 20:00 计时结束
                       </p>
                       <p className="text-xs font-sans-ui text-stone-600 dark:text-stone-300 leading-relaxed pt-1">
-                        The official standard 20:00 mock exam duration has completed ({answeredCount}/{questions.length} answered). You can submit to view your assessment now or add extra time to continue.
+                        20 分钟标准阅读计时已结束（已答 {answeredCount}/{questions.length} 题）。你可以现在交卷查看评估报告，或加时继续完成。
                       </p>
                     </div>
 
@@ -1613,9 +1697,9 @@ export const IELTSPanel: React.FC<IELTSPanelProps> = ({ onOpenNotebook }) => {
                         id="timeout-submit-test-btn"
                         type="button"
                         onClick={handleSubmitTest}
-                        className="w-full py-3.5 px-5 rounded-full bg-[#516050] hover:bg-[#3F4C3E] dark:bg-[#6B8F71] dark:hover:bg-[#4A6B50] text-white font-sans-ui text-xs uppercase tracking-widest font-semibold flex items-center justify-center gap-2 shadow-lg active:scale-98 transition-all cursor-pointer"
+                        className="w-full py-3.5 px-5 rounded-full bg-stone-900 hover:bg-stone-800 dark:bg-stone-100 dark:hover:bg-white text-white dark:text-stone-950 font-sans-ui text-xs tracking-wide font-semibold flex items-center justify-center gap-2 shadow-lg active:scale-98 transition-all cursor-pointer"
                       >
-                        <span>Submit & View Band Score</span>
+                        <span>提交并查看评估报告</span>
                         <ArrowRight className="w-4 h-4" />
                       </button>
 
@@ -1624,10 +1708,10 @@ export const IELTSPanel: React.FC<IELTSPanelProps> = ({ onOpenNotebook }) => {
                         id="timeout-resume-extend-btn"
                         type="button"
                         onClick={() => handleAddTime(lastExtensionMinutes)}
-                        className="w-full py-3 px-5 rounded-full bg-stone-200/80 hover:bg-stone-300 dark:bg-slate-800 dark:hover:bg-slate-700 text-stone-800 dark:text-stone-200 font-sans-ui text-xs uppercase tracking-wider font-semibold flex items-center justify-center gap-2 active:scale-98 transition-all cursor-pointer font-mono tabular-nums"
+                        className="w-full py-3 px-5 rounded-full bg-stone-200/80 hover:bg-stone-300 dark:bg-white/[0.08] dark:hover:bg-white/[0.14] text-stone-800 dark:text-stone-200 font-sans-ui text-xs tracking-wide font-semibold flex items-center justify-center gap-2 active:scale-98 transition-all cursor-pointer font-mono tabular-nums"
                       >
                         <Plus className="w-3.5 h-3.5" />
-                        <span>Extend & Continue (+{lastExtensionMinutes} min)</span>
+                        <span>加时继续 (+{lastExtensionMinutes} 分钟)</span>
                       </button>
                     </div>
                   </motion.div>
@@ -1671,18 +1755,18 @@ export const IELTSPanel: React.FC<IELTSPanelProps> = ({ onOpenNotebook }) => {
                             : 'text-stone-100'
                         }`}
                       >
-                        {gestureState.isSavingDown ? `★ "${gestureState.selectedText}"` : `"${gestureState.selectedText}"`}
+                        "{gestureState.selectedText}"
                       </span>
                     </div>
 
                     <div className="flex-shrink-0 flex items-center pl-2">
                       {gestureState.isEscapingUp ? (
-                        <span className="text-xs font-semibold text-rose-300 tracking-wide font-sans-ui animate-bounce flex items-center gap-1">
-                          ✕ Release to Cancel
+                        <span className="text-xs font-semibold text-rose-300 tracking-wide font-sans-ui flex items-center gap-1">
+                          Release to Cancel
                         </span>
                       ) : gestureState.isSavingDown ? (
-                        <span className="text-xs font-semibold text-emerald-300 tracking-wide font-sans-ui animate-bounce flex items-center gap-1">
-                          ★ Release to Save to Vault
+                        <span className="text-xs font-semibold text-amber-300 tracking-wide font-sans-ui flex items-center gap-1">
+                          Release to Save
                         </span>
                       ) : gestureState.isDwellLocked ? (
                         <span className="text-xs text-emerald-300 dark:text-emerald-400 font-sans-ui tracking-wide flex items-center gap-1.5">
@@ -1739,23 +1823,17 @@ export const IELTSPanel: React.FC<IELTSPanelProps> = ({ onOpenNotebook }) => {
                           animate={{ opacity: 1, y: 0 }}
                           exit={{ opacity: 0, y: -5 }}
                           transition={{ duration: 0.2, ease: [0.16, 1, 0.3, 1] }}
-                          className="flex items-center gap-1.5 text-[11px] font-mono tabular-nums uppercase tracking-wider text-stone-400 dark:text-stone-500 min-w-0 overflow-hidden"
+                          className="flex items-center gap-1.5 text-[12px] font-sans-ui tabular-nums text-stone-400 dark:text-stone-500 min-w-0 overflow-hidden"
                         >
-                          <span className="text-stone-700 dark:text-stone-300 font-semibold whitespace-nowrap shrink-0">
+                          <span className="text-stone-800 dark:text-stone-200 font-semibold whitespace-nowrap shrink-0">
                             {normalizeVolumeKey(activeCambridgeInfo.cambridgeBook) === '2026 考场真题'
                               ? '2026 考季真题'
                               : activeCambridgeInfo.cambridgeBook}
                           </span>
-                          <span className="shrink-0">·</span>
-                          <span className="whitespace-nowrap shrink-0">TEST {activeCambridgeInfo.testNum}</span>
-                          {activeCambridgeInfo.category && (
-                            <>
-                              <span className="shrink-0">·</span>
-                              <span className="font-sans-ui normal-case text-stone-500 dark:text-stone-400 truncate">
-                                {activeCambridgeInfo.category}
-                              </span>
-                            </>
-                          )}
+                          <span aria-hidden="true" className="opacity-45 shrink-0">·</span>
+                          <span className="text-stone-500 dark:text-stone-400 whitespace-nowrap shrink-0">
+                            Test {activeCambridgeInfo.testNum}
+                          </span>
                         </motion.div>
                       </AnimatePresence>
                     </div>
@@ -1771,7 +1849,7 @@ export const IELTSPanel: React.FC<IELTSPanelProps> = ({ onOpenNotebook }) => {
                         }}
                         className={`flex items-center justify-center px-2.5 py-1 rounded-full border text-[11px] font-medium transition-all cursor-pointer active:scale-95 focus:outline-none ${
                           activeAdjustPanel
-                            ? 'bg-[#516050] text-white border-[#516050] shadow-xs'
+                            ? 'bg-stone-900 dark:bg-stone-100 text-white dark:text-stone-950 border-stone-900 dark:border-stone-100 shadow-xs'
                             : 'bg-white/85 hover:bg-white dark:bg-white/[0.06] dark:hover:bg-white/[0.1] border-stone-200/80 dark:border-white/[0.08] text-stone-700 dark:text-stone-300'
                         }`}
                         title="调节正文字号与行距 (Typography Settings)"
@@ -1787,10 +1865,10 @@ export const IELTSPanel: React.FC<IELTSPanelProps> = ({ onOpenNotebook }) => {
                           setActiveAdjustPanel(null);
                           openCambridgeSelector();
                         }}
-                        className="flex items-center gap-1 px-2.5 py-1 rounded-full bg-white/85 hover:bg-white dark:bg-white/[0.06] dark:hover:bg-white/[0.1] border border-stone-200/80 dark:border-white/[0.08] text-[#516050] dark:text-[#8FB996] text-[11px] font-medium transition-all cursor-pointer active:scale-95 shrink-0 focus:outline-none"
+                        className="flex items-center gap-1 px-2.5 py-1 rounded-full bg-white/85 hover:bg-white dark:bg-white/[0.06] dark:hover:bg-white/[0.1] border border-stone-200/80 dark:border-white/[0.08] text-stone-700 dark:text-stone-300 text-[11px] font-medium transition-all cursor-pointer active:scale-95 shrink-0 focus:outline-none"
                         title="切换剑桥雅思官方真题库"
                       >
-                        <BookOpen className="w-3 h-3" />
+                        <BookOpen className="w-3 h-3 text-stone-500 dark:text-stone-400" />
                         <span>换卷</span>
                       </button>
                     </div>
@@ -1829,7 +1907,7 @@ export const IELTSPanel: React.FC<IELTSPanelProps> = ({ onOpenNotebook }) => {
                             >
                               <span className="whitespace-nowrap">Passage {sib.passageNum}</span>
                               {isDoneSib && doneRec ? (
-                                <span className="text-[10px] text-[#516050] dark:text-[#8FB996] font-semibold whitespace-nowrap">
+                                <span className="text-[10px] text-stone-600 dark:text-stone-300 font-semibold whitespace-nowrap">
                                   ✓{doneRec.correctCount}/{doneRec.totalQuestions}
                                 </span>
                               ) : draftAnsCount > 0 && !isCurrentSib ? (
@@ -1837,7 +1915,7 @@ export const IELTSPanel: React.FC<IELTSPanelProps> = ({ onOpenNotebook }) => {
                                   {draftAnsCount}/{sib.questions.length}
                                 </span>
                               ) : isCurrentSib && answeredCount > 0 ? (
-                                <span className="text-[10px] text-[#516050] dark:text-[#8FB996] whitespace-nowrap">
+                                <span className="text-[10px] text-stone-600 dark:text-stone-300 font-semibold whitespace-nowrap">
                                   {answeredCount}/{questions.length}
                                 </span>
                               ) : null}
@@ -1889,24 +1967,36 @@ export const IELTSPanel: React.FC<IELTSPanelProps> = ({ onOpenNotebook }) => {
                         const isEvidenceHighlighted = highlightedParaIdx === para.pIdx;
 
                         return (
-                          <p
+                          <div
                             key={para.pIdx}
                             data-para-block={para.pIdx}
-                            style={{
-                              fontSize: `${fontSize}px`,
-                              lineHeight: lineSpacing
-                            }}
-                            className={`font-serif-luxury text-stone-850 dark:text-stone-150 tracking-normal select-none transition-all duration-300 subpixel-antialiased ${
+                            className={`transition-all duration-300 ${
                               isEvidenceHighlighted
-                                ? 'bg-[#516050]/[0.08] dark:bg-[#8FB996]/[0.12] ring-1 ring-[#516050]/35 dark:ring-[#8FB996]/40 rounded-2xl px-3.5 py-2.5 -mx-3.5 shadow-[0_4px_20px_rgba(81,96,80,0.08)]'
+                                ? 'bg-amber-700/[0.06] dark:bg-amber-400/[0.08] ring-1 ring-amber-700/25 dark:ring-amber-400/30 rounded-2xl px-3.5 py-2.5 -mx-3.5 shadow-[0_4px_20px_rgba(28,25,23,0.06)]'
                                 : ''
                             }`}
                           >
-                            {isEvidenceHighlighted && (
-                              <span className="inline-flex items-center gap-1 px-2 py-0.5 mr-2 mb-1 rounded-md bg-[#516050] dark:bg-[#8FB996] text-white dark:text-stone-950 font-mono text-[10px] font-bold tracking-wider uppercase align-middle">
-                                PARA {String.fromCharCode(65 + para.pIdx)} · Q{currentQuizQuestionIndex + 1} 出题定位
-                              </span>
+                            {(para.label || isEvidenceHighlighted) && (
+                              <div className="flex items-center gap-2 mb-1.5 select-none">
+                                {para.label && (
+                                  <span className="font-sans-ui text-[10.5px] font-semibold uppercase tracking-[0.14em] text-stone-400 dark:text-stone-500">
+                                    {para.label}
+                                  </span>
+                                )}
+                                {isEvidenceHighlighted && (
+                                  <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md bg-stone-900 dark:bg-stone-100 text-white dark:text-stone-950 font-sans-ui text-[10px] font-semibold tracking-wide">
+                                    Q{currentQuizQuestionIndex + 1} 出题定位
+                                  </span>
+                                )}
+                              </div>
                             )}
+                            <p
+                              style={{
+                                fontSize: `${fontSize}px`,
+                                lineHeight: lineSpacing
+                              }}
+                              className="font-serif-luxury text-stone-850 dark:text-stone-150 tracking-normal select-none subpixel-antialiased"
+                            >
                             {para.tokens.map((token, wIdx) => {
                               const isInGesture = isParaFocused && wIdx >= minWordIdx && wIdx <= maxWordIdx;
                               const isAnchor = hasAnchor && wIdx >= highlightAnchor.startWord && wIdx <= highlightAnchor.endWord;
@@ -1917,7 +2007,7 @@ export const IELTSPanel: React.FC<IELTSPanelProps> = ({ onOpenNotebook }) => {
                               const isSingleSelected = isInGesture && minWordIdx === maxWordIdx;
 
                               const savedUnderlineClasses = isSaved
-                                ? 'underline decoration-[#516050]/60 dark:decoration-[#8FB996]/70 underline-offset-[3px] decoration-[1.5px] font-medium text-stone-900 dark:text-stone-100'
+                                ? 'underline decoration-amber-700/60 dark:decoration-amber-400/70 underline-offset-[3px] decoration-[1.5px] font-medium text-stone-900 dark:text-stone-100'
                                 : '';
 
                               // Determine connected rounded edges for a seamless highlight ribbon
@@ -1941,13 +2031,13 @@ export const IELTSPanel: React.FC<IELTSPanelProps> = ({ onOpenNotebook }) => {
                                 } else if (isSaving) {
                                   selectionClasses = `${rounded} bg-emerald-500/25 dark:bg-emerald-500/35 text-emerald-950 dark:text-emerald-100 shadow-sm ring-1 ring-emerald-500/50`;
                                 } else if (isLocked) {
-                                  selectionClasses = `${rounded} bg-[#516050]/25 dark:bg-[#7EA783]/30 text-stone-950 dark:text-white shadow-sm ring-1 ring-[#516050]/50 dark:ring-[#8FB996]/60`;
+                                  selectionClasses = `${rounded} bg-stone-900/15 dark:bg-white/20 text-stone-950 dark:text-white shadow-sm ring-1 ring-stone-900/35 dark:ring-white/40`;
                                 } else {
-                                  // Free selection phase: subtle natural warm sage wash with seamless continuity
-                                  selectionClasses = `${rounded} bg-[#516050]/20 dark:bg-[#7EA783]/25 text-stone-950 dark:text-white`;
+                                  // Free selection phase: crisp editorial ink wash with seamless continuity
+                                  selectionClasses = `${rounded} bg-stone-900/12 dark:bg-white/15 text-stone-950 dark:text-white`;
                                 }
                               } else if (isAnchor) {
-                                selectionClasses = 'rounded-md bg-[#516050]/15 dark:bg-[#7EA783]/20 text-stone-950 dark:text-white';
+                                selectionClasses = 'rounded-md bg-amber-700/12 dark:bg-amber-400/18 text-stone-950 dark:text-white';
                               } else {
                                 selectionClasses = `hover:bg-stone-300/30 dark:hover:bg-slate-700/40 hover:text-stone-950 dark:hover:text-white ${savedUnderlineClasses}`;
                               }
@@ -1975,7 +2065,8 @@ export const IELTSPanel: React.FC<IELTSPanelProps> = ({ onOpenNotebook }) => {
                                 </React.Fragment>
                               );
                             })}
-                          </p>
+                            </p>
+                          </div>
                         );
                       })}
                     </motion.div>
@@ -2006,7 +2097,7 @@ export const IELTSPanel: React.FC<IELTSPanelProps> = ({ onOpenNotebook }) => {
                               if (answeredCount >= questions.length) {
                                 handleSubmitTest();
                               } else {
-                                setDrawerHeightPercent(drawerHeightPercent < 55 ? 68 : 26);
+                                setDrawerHeightPercent(drawerHeightPercent < 55 ? 68 : 28);
                               }
                             }}
                             className="flex-1 py-2.5 px-3.5 rounded-xl bg-white dark:bg-white/[0.06] border border-stone-200/85 dark:border-white/[0.08] text-stone-800 dark:text-stone-200 text-xs font-semibold hover:bg-stone-100 dark:hover:bg-white/[0.1] transition-all cursor-pointer active:scale-98"
@@ -2023,7 +2114,7 @@ export const IELTSPanel: React.FC<IELTSPanelProps> = ({ onOpenNotebook }) => {
                                   handleSelectCambridgePassage(nextSequentialPassage.next);
                                 }
                               }}
-                              className="flex-[1.35] py-2.5 px-4 rounded-xl bg-[#516050] hover:bg-[#3F4C3E] dark:bg-[#8FB996] text-white dark:text-stone-950 text-xs font-semibold flex items-center justify-center gap-1.5 transition-all cursor-pointer active:scale-98 shadow-xs"
+                              className="flex-[1.35] py-2.5 px-4 rounded-xl bg-stone-900 hover:bg-stone-800 dark:bg-stone-100 dark:hover:bg-white text-white dark:text-stone-950 text-xs font-semibold flex items-center justify-center gap-1.5 transition-all cursor-pointer active:scale-98 shadow-xs"
                             >
                               <span className="truncate">
                                 {nextSequentialPassage.isSameTest
@@ -2044,7 +2135,7 @@ export const IELTSPanel: React.FC<IELTSPanelProps> = ({ onOpenNotebook }) => {
             {/* Soft Upward Feather Gradient Scrim above Quiz Drawer — prevents harsh half-cut text lines */}
             <div
               style={{
-                bottom: `${effectiveDrawerHeightPercent}%`,
+                bottom: `${drawerHeightPx}px`,
                 transition: isDragging ? 'none' : 'bottom 0.28s cubic-bezier(0.16, 1, 0.3, 1)'
               }}
               className="pointer-events-none absolute left-0 right-0 h-9 bg-gradient-to-t from-[#FAF7F2] via-[#FAF7F2]/85 to-transparent dark:from-[#0C1017] dark:via-[#0C1017]/85 dark:to-transparent z-20"
@@ -2058,62 +2149,60 @@ export const IELTSPanel: React.FC<IELTSPanelProps> = ({ onOpenNotebook }) => {
               exit={{ opacity: 0, y: 28, scale: 0.99 }}
               transition={{ duration: 0.28, delay: 0.04, ease: [0.16, 1, 0.3, 1] }}
               style={{
-                height: `${effectiveDrawerHeightPercent}%`,
+                height: `${drawerHeightPx}px`,
                 transition: isDragging ? 'none' : 'height 0.28s cubic-bezier(0.16, 1, 0.3, 1)'
               }}
               onPointerDown={handleQuizSwipeStart}
               onPointerUp={handleQuizSwipeEnd}
-              className="absolute bottom-0 left-0 right-0 z-30 bg-[#FDFCF9]/98 dark:bg-[#111722]/98 backdrop-blur-2xl border-t border-stone-300/75 dark:border-white/[0.1] rounded-t-[26px] shadow-[0_-10px_32px_rgba(28,25,23,0.07)] dark:shadow-[0_-12px_36px_rgba(0,0,0,0.45)] flex flex-col overflow-hidden"
+              className="absolute bottom-0 left-0 right-0 z-30 bg-[#FDFCF9] dark:bg-[#111722] border-t border-stone-300/75 dark:border-white/[0.1] rounded-t-[26px] shadow-[0_-10px_32px_rgba(28,25,23,0.08)] dark:shadow-[0_-12px_36px_rgba(0,0,0,0.48)] flex flex-col overflow-hidden"
             >
               {/* Drawer Drag Handle Bar */}
               <div
+                id="ielts-quiz-drag-handle"
                 onPointerDown={handleDragStart}
-                onClick={() => {
-                  if (isScrollMinimized) setIsScrollMinimized(false);
-                }}
                 className="w-full pt-2 pb-1 flex flex-col items-center justify-center cursor-ns-resize select-none touch-none shrink-0"
               >
                 <div className="w-9 h-1 bg-stone-300/90 dark:bg-white/20 rounded-full hover:bg-stone-400 transition-colors" />
               </div>
 
               {/* Drawer Content Body with Smooth State Transitions */}
-              <div className="flex-1 min-h-0 overflow-y-auto no-scrollbar px-5 pb-3.5 pt-0.5 flex flex-col justify-between">
+              <div className={`flex-1 min-h-0 px-5 flex flex-col overflow-hidden ${showMinimizedContent ? 'pb-2.5 pt-1' : 'pb-4 pt-0.5'}`}>
                 <AnimatePresence mode="wait" initial={false}>
-                  {isScrollMinimized ? (
-                    /* Auto-Minimized Single-Line Reading Bar (Item 3: frees up reading viewport when scrolling passage) */
+                  {showMinimizedContent ? (
+                    /* Auto-Minimized Single-Line Reading Bar (tap to expand, or drag up smoothly 1:1) */
                     <motion.div
                       key="scroll-minimized-bar"
-                      initial={{ opacity: 0, y: 6 }}
+                      initial={{ opacity: 0, y: 4 }}
                       animate={{ opacity: 1, y: 0 }}
-                      exit={{ opacity: 0, y: -6 }}
-                      transition={{ duration: 0.18, ease: [0.16, 1, 0.3, 1] }}
-                      onClick={() => setIsScrollMinimized(false)}
-                      className="flex items-center justify-between gap-2.5 h-full cursor-pointer select-none"
+                      exit={{ opacity: 0, y: -4 }}
+                      transition={{ duration: 0.14, ease: [0.16, 1, 0.3, 1] }}
+                      onPointerDown={handleDragStart}
+                      className="flex items-center justify-between gap-2.5 w-full py-0.5 cursor-ns-resize select-none touch-none"
                     >
                       <div className="flex items-center gap-2 min-w-0 flex-1">
-                        <span className="px-2 py-0.5 rounded-md bg-[#516050]/12 dark:bg-[#8FB996]/15 text-[#516050] dark:text-[#8FB996] font-mono text-[11px] font-bold tabular-nums shrink-0">
+                        <span className="px-2 py-0.5 rounded-md bg-stone-900/[0.06] dark:bg-white/[0.08] text-stone-800 dark:text-stone-200 font-mono text-[11px] font-bold tabular-nums shrink-0">
                           Q{currentQuizQuestionIndex + 1}/{questions.length || 1}
                         </span>
                         <p className="text-xs text-stone-700 dark:text-stone-200 font-medium truncate">
                           {questions[currentQuizQuestionIndex]?.prompt || '点击展开答题抽屉'}
                         </p>
                       </div>
-                      <span className="text-[10.5px] font-mono text-[#516050] dark:text-[#8FB996] font-semibold whitespace-nowrap shrink-0">
-                        展开答题 ↑
+                      <span className="text-[11.5px] font-sans-ui text-stone-700 dark:text-stone-300 font-medium whitespace-nowrap shrink-0">
+                        展开
                       </span>
                     </motion.div>
                   ) : !isExpanded ? (
-                    /* Collapsed / Peek Mode (< 36% height) */
+                    /* Collapsed / Peek Mode (< expandedThresholdPx) */
                     <motion.div
                       key="peek-mode"
-                      initial={{ opacity: 0, y: 8 }}
+                      initial={{ opacity: 0, y: 6 }}
                       animate={{ opacity: 1, y: 0 }}
-                      exit={{ opacity: 0, y: -8 }}
-                      transition={{ duration: 0.2, ease: [0.16, 1, 0.3, 1] }}
-                      className="flex flex-col justify-between h-full gap-1.5"
+                      exit={{ opacity: 0, y: -6 }}
+                      transition={{ duration: 0.16, ease: [0.16, 1, 0.3, 1] }}
+                      className="flex flex-col h-full min-h-[168px] gap-2"
                     >
                       {/* Top Metadata Header with Interactive Navigation Controls */}
-                      <div className="flex items-center justify-between text-[11px] font-mono tabular-nums pb-1.5 border-b border-stone-200/60 dark:border-white/[0.06] shrink-0">
+                      <div className="flex items-center justify-between text-[11px] font-mono tabular-nums pb-2 border-b border-stone-200/65 dark:border-white/[0.06] shrink-0">
                         <div className="flex items-center gap-1.5">
                           <button
                             type="button"
@@ -2151,8 +2240,8 @@ export const IELTSPanel: React.FC<IELTSPanelProps> = ({ onOpenNotebook }) => {
                             onClick={handleSubmitTest}
                             className={`h-7 px-2.5 rounded-[9px] font-sans-ui text-[11px] font-semibold tracking-wide leading-none inline-flex items-center gap-1.5 transition-all cursor-pointer focus:outline-none whitespace-nowrap ${
                               progressPercent === 100
-                                ? 'bg-gradient-to-b from-[#586857] to-[#465445] hover:from-[#4D5C4C] hover:to-[#3E4B3D] dark:from-[#8FB996] dark:to-[#76A17D] text-[#FAF7F2] dark:text-stone-950 shadow-[0_2px_6px_rgba(81,96,80,0.22),inset_0_1px_0_rgba(255,255,255,0.2)] border border-[#3F4C3E]/60 dark:border-white/20'
-                                : 'bg-[#F3EFE6]/90 hover:bg-[#EAE3D5] dark:bg-white/[0.07] dark:hover:bg-white/[0.12] text-[#465445] dark:text-[#8FB996] border border-[#516050]/22 dark:border-[#8FB996]/25 shadow-[inset_0_1px_0_rgba(255,255,255,0.7)] dark:shadow-none'
+                                ? 'bg-stone-900 hover:bg-stone-800 dark:bg-stone-100 dark:hover:bg-white text-white dark:text-stone-950 shadow-xs'
+                                : 'bg-stone-900/[0.06] hover:bg-stone-900/[0.1] dark:bg-white/[0.08] dark:hover:bg-white/[0.12] text-stone-800 dark:text-stone-200 border border-stone-900/[0.08] dark:border-white/[0.08]'
                             }`}
                             title="提交答卷并生成评估报告"
                           >
@@ -2188,19 +2277,19 @@ export const IELTSPanel: React.FC<IELTSPanelProps> = ({ onOpenNotebook }) => {
                         )}
                       </div>
 
-                      {/* Unboxed Editorial Question Prompt — Full Text Visibility without 2-line Clamping */}
-                      <div className="flex-1 min-h-0 flex items-center overflow-y-auto no-scrollbar py-0.5 px-0.5">
+                      {/* Unboxed Editorial Question Prompt — Top-Aligned Scrollable Container (Never Clips Top Line) */}
+                      <div className="flex-1 min-h-0 overflow-y-auto no-scrollbar py-0.5 px-0.5">
                         <AnimatePresence mode="wait" initial={false}>
                           <motion.div
                             key={`peek-q-prompt-${currentQuizQuestionIndex}-${passageData.title}`}
-                            initial={{ opacity: 0, y: 5, scale: 0.99 }}
-                            animate={{ opacity: 1, y: 0, scale: 1 }}
-                            exit={{ opacity: 0, y: -5, scale: 0.99 }}
-                            transition={{ duration: 0.18, ease: [0.16, 1, 0.3, 1] }}
+                            initial={{ opacity: 0, y: 4 }}
+                            animate={{ opacity: 1, y: 0 }}
+                            exit={{ opacity: 0, y: -4 }}
+                            transition={{ duration: 0.16, ease: [0.16, 1, 0.3, 1] }}
                             className="w-full"
                           >
-                            <p className="font-sans-ui text-xs sm:text-[13px] font-medium text-stone-850 dark:text-stone-100 leading-[1.5]">
-                              <span className="font-mono tabular-nums text-[#516050] dark:text-[#8FB996] font-bold mr-1.5">
+                            <p className="font-sans-ui text-[13px] font-medium text-stone-850 dark:text-stone-100 leading-[1.55]">
+                              <span className="font-mono tabular-nums text-stone-900 dark:text-stone-100 font-bold mr-1.5">
                                 {currentQuizQuestionIndex + 1}.
                               </span>
                               {questions[currentQuizQuestionIndex]?.prompt || questions[0]?.prompt || 'Select whether the statement agrees with the information in the passage.'}
@@ -2240,9 +2329,9 @@ export const IELTSPanel: React.FC<IELTSPanelProps> = ({ onOpenNotebook }) => {
                                       }
                                     }
                                   }}
-                                  className={`py-2 px-2.5 rounded-xl text-[11px] font-mono uppercase tracking-wider font-semibold transition-all active:scale-96 border cursor-pointer text-center truncate focus:outline-none ${
+                                  className={`py-2.5 px-2.5 rounded-xl text-[11px] font-mono uppercase tracking-wider font-semibold transition-all active:scale-96 border cursor-pointer text-center truncate focus:outline-none ${
                                     isSelected
-                                      ? 'bg-[#516050] text-white border-[#516050] shadow-xs'
+                                      ? 'bg-stone-900 dark:bg-stone-100 text-white dark:text-stone-950 border-stone-900 dark:border-stone-100 shadow-xs'
                                       : 'bg-white dark:bg-white/[0.04] text-stone-700 dark:text-stone-300 border-stone-200/85 dark:border-white/[0.08] hover:border-stone-300'
                                   }`}
                                   title={opt}
@@ -2293,47 +2382,15 @@ export const IELTSPanel: React.FC<IELTSPanelProps> = ({ onOpenNotebook }) => {
                             </button>
                           </div>
 
-                          <motion.button
-                            id="quiz-expanded-header-submit-btn"
-                            type="button"
-                            disabled={isSubmittingTest}
-                            whileTap={{ scale: 0.95 }}
-                            onClick={handleSubmitTest}
-                            className={`h-7 px-2.5 rounded-[9px] font-sans-ui text-[11px] font-semibold tracking-wide leading-none inline-flex items-center gap-1.5 transition-all cursor-pointer focus:outline-none whitespace-nowrap ${
-                              progressPercent === 100
-                                ? 'bg-gradient-to-b from-[#586857] to-[#465445] hover:from-[#4D5C4C] hover:to-[#3E4B3D] dark:from-[#8FB996] dark:to-[#76A17D] text-[#FAF7F2] dark:text-stone-950 shadow-[0_2px_6px_rgba(81,96,80,0.22),inset_0_1px_0_rgba(255,255,255,0.2)] border border-[#3F4C3E]/60 dark:border-white/20'
-                                : 'bg-[#F3EFE6]/90 hover:bg-[#EAE3D5] dark:bg-white/[0.07] dark:hover:bg-white/[0.12] text-[#465445] dark:text-[#8FB996] border border-[#516050]/22 dark:border-[#8FB996]/25 shadow-[inset_0_1px_0_rgba(255,255,255,0.7)] dark:shadow-none'
+                          <span
+                            className={`text-[11px] font-sans-ui tabular-nums font-medium ${
+                              answeredCount >= questions.length && questions.length > 0
+                                ? 'text-[#2D5A40] dark:text-[#78B894]'
+                                : 'text-stone-400 dark:text-stone-500'
                             }`}
                           >
-                            {isSubmittingTest ? (
-                              <Loader2 className="w-3 h-3 animate-spin shrink-0" />
-                            ) : (
-                              <svg
-                                className="w-3.5 h-3.5 shrink-0"
-                                viewBox="0 0 16 16"
-                                fill="none"
-                                xmlns="http://www.w3.org/2000/svg"
-                              >
-                                <rect
-                                  x="2.25"
-                                  y="1.75"
-                                  width="11.5"
-                                  height="12.5"
-                                  rx="2.5"
-                                  stroke="currentColor"
-                                  strokeWidth="1.35"
-                                />
-                                <path
-                                  d="M5.25 8.1L7.1 9.95L10.85 6.05"
-                                  stroke="currentColor"
-                                  strokeWidth="1.45"
-                                  strokeLinecap="round"
-                                  strokeLinejoin="round"
-                                />
-                              </svg>
-                            )}
-                            <span>{isSubmittingTest ? '批改中' : '交卷批改'}</span>
-                          </motion.button>
+                            已答 {answeredCount}/{questions.length || 1}
+                          </span>
                         </div>
 
                         {/* Animated Question Prompt & Options in Expanded Mode */}
@@ -2350,7 +2407,7 @@ export const IELTSPanel: React.FC<IELTSPanelProps> = ({ onOpenNotebook }) => {
                             {currentQuestion && (
                               <div className="py-1 px-0.5">
                                 <p className="font-sans-ui text-xs sm:text-sm font-medium text-stone-900 dark:text-stone-100 leading-relaxed">
-                                  <span className="font-mono tabular-nums text-[#516050] dark:text-[#8FB996] font-bold mr-1.5">
+                                  <span className="font-mono tabular-nums text-stone-900 dark:text-stone-100 font-bold mr-1.5">
                                     {currentQuizQuestionIndex + 1}.
                                   </span>
                                   {currentQuestion.prompt}
@@ -2385,14 +2442,14 @@ export const IELTSPanel: React.FC<IELTSPanelProps> = ({ onOpenNotebook }) => {
                                       }}
                                       className={`w-full py-3 px-4 font-sans-ui text-xs tracking-wide font-medium transition-colors cursor-pointer flex items-center justify-between text-left focus:outline-none ${
                                         isSelected
-                                          ? 'bg-[#516050] text-white font-semibold'
+                                          ? 'bg-stone-900 dark:bg-stone-100 text-white dark:text-stone-950 font-semibold'
                                           : 'text-stone-700 dark:text-stone-200 hover:bg-stone-50 dark:hover:bg-white/[0.03]'
                                       }`}
                                     >
                                       <span>{option}</span>
                                       <span className={`w-4 h-4 rounded-full border flex items-center justify-center text-[10px] ${
                                         isSelected
-                                          ? 'border-white bg-white/20 text-white'
+                                          ? 'border-white/70 dark:border-stone-950/60 bg-white/15 dark:bg-stone-950/15 text-white dark:text-stone-950'
                                           : 'border-stone-300 dark:border-stone-600'
                                       }`}>
                                         {isSelected ? '✓' : ''}
@@ -2413,7 +2470,7 @@ export const IELTSPanel: React.FC<IELTSPanelProps> = ({ onOpenNotebook }) => {
                           type="button"
                           disabled={isSubmittingTest}
                           onClick={handleSubmitTest}
-                          className="w-full py-3 px-5 rounded-xl bg-gradient-to-b from-[#586857] to-[#465445] hover:from-[#4D5C4C] hover:to-[#3E4B3D] dark:from-[#8FB996] dark:to-[#76A17D] text-white dark:text-stone-950 font-sans-ui text-xs tracking-wide font-semibold flex items-center justify-center gap-2 shadow-[0_4px_14px_rgba(81,96,80,0.22),inset_0_1px_0_rgba(255,255,255,0.2)] active:scale-98 transition-all cursor-pointer focus:outline-none"
+                          className="w-full py-3 px-5 rounded-xl bg-stone-900 hover:bg-stone-800 dark:bg-stone-100 dark:hover:bg-white text-white dark:text-stone-950 font-sans-ui text-xs tracking-wide font-semibold flex items-center justify-center gap-2 shadow-sm active:scale-[0.99] transition-all cursor-pointer focus:outline-none"
                         >
                           {isSubmittingTest ? (
                             <>
@@ -2498,10 +2555,10 @@ export const IELTSPanel: React.FC<IELTSPanelProps> = ({ onOpenNotebook }) => {
                           initial={{ strokeDashoffset: 125.6 }}
                           animate={{ strokeDashoffset: 18 }}
                           transition={{ duration: 0.42, ease: [0.16, 1, 0.3, 1] }}
-                          className="text-[#516050] dark:text-[#8FB996]"
+                          className="text-stone-900 dark:text-stone-100"
                         />
                       </svg>
-                      <Check className="w-5 h-5 text-[#516050] dark:text-[#8FB996] absolute" />
+                      <Check className="w-5 h-5 text-stone-900 dark:text-stone-100 absolute" />
                     </div>
                     <div className="space-y-1">
                       <p className="font-serif-luxury text-base font-bold text-stone-900 dark:text-stone-100">
@@ -2545,7 +2602,7 @@ export const IELTSPanel: React.FC<IELTSPanelProps> = ({ onOpenNotebook }) => {
               {/* Header */}
               <div className="flex items-center justify-between border-b border-stone-200/60 dark:border-white/[0.06] pb-2.5">
                 <div className="flex items-center gap-1.5">
-                  <Type className="w-3.5 h-3.5 text-[#516050] dark:text-[#8FB996]" />
+                  <Type className="w-3.5 h-3.5 text-stone-700 dark:text-stone-300" />
                   <span className="text-xs font-semibold text-stone-800 dark:text-stone-100 tracking-wide">
                     阅读排版设置
                   </span>
@@ -2599,7 +2656,7 @@ export const IELTSPanel: React.FC<IELTSPanelProps> = ({ onOpenNotebook }) => {
                     step={0.5}
                     value={fontSize}
                     onChange={(e) => handleFontSizeChange(parseFloat(e.target.value))}
-                    className="flex-1 accent-[#516050] dark:accent-[#8FB996] h-1.5 bg-stone-200 dark:bg-stone-700 rounded-lg cursor-pointer appearance-none"
+                    className="flex-1 accent-stone-900 dark:accent-stone-100 h-1.5 bg-stone-200 dark:bg-stone-700 rounded-lg cursor-pointer appearance-none"
                   />
                   <button
                     type="button"
@@ -2634,7 +2691,7 @@ export const IELTSPanel: React.FC<IELTSPanelProps> = ({ onOpenNotebook }) => {
                         onClick={() => handleLineSpacingChange(preset.val)}
                         className={`py-1.5 rounded-xl text-[11px] font-medium border transition-all cursor-pointer focus:outline-none ${
                           isSelected
-                            ? 'bg-[#516050] text-white border-[#516050] shadow-xs'
+                            ? 'bg-stone-900 text-white border-stone-900 dark:bg-stone-100 dark:text-stone-950 dark:border-stone-100 shadow-xs'
                             : 'bg-white dark:bg-[#1A2234] border-stone-200/80 dark:border-white/[0.08] text-stone-600 dark:text-stone-300 hover:border-stone-300'
                         }`}
                       >
@@ -2653,7 +2710,7 @@ export const IELTSPanel: React.FC<IELTSPanelProps> = ({ onOpenNotebook }) => {
                     step={0.05}
                     value={lineSpacing}
                     onChange={(e) => handleLineSpacingChange(parseFloat(e.target.value))}
-                    className="flex-1 accent-[#516050] dark:accent-[#8FB996] h-1.5 bg-stone-200 dark:bg-stone-700 rounded-lg cursor-pointer appearance-none"
+                    className="flex-1 accent-stone-900 dark:accent-stone-100 h-1.5 bg-stone-200 dark:bg-stone-700 rounded-lg cursor-pointer appearance-none"
                   />
                   <MoveVertical className="w-3.5 h-3.5 text-stone-700 dark:text-stone-200 shrink-0" />
                 </div>

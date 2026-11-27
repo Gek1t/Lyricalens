@@ -69,13 +69,13 @@ export function ContextualImmersionSection({
 
   return (
     <div className={wrapperClass}>
-      <div className="text-[10px] font-sans font-semibold uppercase tracking-[0.2em] text-stone-400 dark:text-stone-500">
-        CONTEXTUAL IMMERSION
+      <div className="text-[11px] font-sans font-medium tracking-[0.08em] text-stone-400 dark:text-stone-500">
+        语境例句
       </div>
 
       {songContext.found && (
-        <div className={`relative ${blockPadding} border-l-2 border-[#516050] dark:border-[#8FB996]`}>
-          <div className="flex items-center gap-1.5 text-[11px] font-sans font-medium uppercase tracking-wider text-[#516050] dark:text-[#8FB996]">
+        <div className={`relative ${blockPadding} border-l-2 border-stone-900/75 dark:border-stone-200/75`}>
+          <div className="flex items-center gap-1.5 text-[11px] font-sans font-medium uppercase tracking-wider text-stone-700 dark:text-stone-300">
             <Music2 className="w-3.5 h-3.5" />
             <span>
               {isSheet ? 'Lyrics' : 'LYRICS'} · {songContext.songTitle}
@@ -124,9 +124,9 @@ export function ContextualImmersionSection({
       {displayExamples.map((ex, idx) => (
         <div
           key={`${ex.en.slice(0, 24)}-${idx}`}
-          className={`relative ${blockPadding} border-l-2 border-[#516050] dark:border-[#8FB996]`}
+          className={`relative ${blockPadding} border-l-2 border-stone-900/75 dark:border-stone-200/75`}
         >
-          <div className="flex items-center gap-1.5 text-[11px] font-sans font-medium uppercase tracking-wider text-[#516050] dark:text-[#8FB996]">
+          <div className="flex items-center gap-1.5 text-[11px] font-sans font-medium uppercase tracking-wider text-stone-700 dark:text-stone-300">
             <Sparkles className="w-3.5 h-3.5" />
             <span>{ex.source || 'CONTEXTUAL EXAMPLE'}</span>
           </div>

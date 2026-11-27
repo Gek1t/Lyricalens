@@ -14,9 +14,9 @@
     --color-cream-bg: #F8F6F0;
     --color-cream-surface: rgba(255, 255, 255, 0.94);
     --color-cream-card: rgba(255, 255, 255, 0.96);
-    --color-sage: #516050;
-    --color-sage-dark: #3F4C3E;
-    --color-sage-light: #7E927D;
+    --color-sage: #1C1917;
+    --color-sage-dark: #0C0A09;
+    --color-sage-light: #57534E;
     --color-amber-accent: #B45309;
 
     --safe-top: env(safe-area-inset-top, 24px);
@@ -36,9 +36,9 @@
     --color-cream-bg: #0B0F17;
     --color-cream-surface: rgba(18, 24, 38, 0.92);
     --color-cream-card: rgba(26, 34, 52, 0.94);
-    --color-sage: #6B8F71;
-    --color-sage-dark: #4A6B50;
-    --color-sage-light: #8FB996;
+    --color-sage: #E7E5E4;
+    --color-sage-dark: #D6D3D1;
+    --color-sage-light: #F5F5F4;
     --color-amber-accent: #F59E0B;
   }
 
@@ -227,7 +227,7 @@
   text-decoration: underline;
   text-decoration-thickness: 1.5px;
   text-underline-offset: 4px;
-  text-decoration-color: #516050;
+  text-decoration-color: #B45309;
   cursor: pointer;
   transition: all 0.2s ease;
   border-radius: 2px;
@@ -235,12 +235,12 @@
 }
 
 .vocab-target:hover, .vocab-target:active {
-  background-color: rgba(81, 96, 80, 0.15);
-  color: #2F392E;
+  background-color: rgba(180, 83, 9, 0.12);
+  color: #1C1917;
 }
 
 .dark .vocab-target {
-  text-decoration-color: #38BDF8;
+  text-decoration-color: #F59E0B;
 }
 
 .dark .vocab-target:hover {

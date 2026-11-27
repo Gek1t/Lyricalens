@@ -23,7 +23,7 @@ export const MasteryRing: React.FC<MasteryRingProps> = ({
       case 0:
         return 'text-white/40 dark:text-stone-500';
       case 1:
-        return 'text-[#8FB996] dark:text-[#8FB996]';
+        return 'text-stone-200 dark:text-stone-200';
       case 2:
         return 'text-amber-400 dark:text-amber-300';
       case 3:

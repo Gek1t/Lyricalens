@@ -230,6 +230,12 @@ let cachedHubCustomPassages: CambridgePassage[] = [];
 let cachedHubCustomListening: IELTSListeningSection[] = [];
 let cachedHubTestRecords: IeltsTestRecord[] = [];
 
+// Compact band range formatting: "Band 6.5 - 7.5" -> "Band 6.5–7.5" so metadata rows stay crisp on one line
+function formatCompactBand(raw?: string): string {
+  if (!raw) return '';
+  return raw.replace(/\s*-\s*/g, '–');
+}
+
 export const IELTSHubView: React.FC<IELTSHubViewProps> = ({
   onStartReading,
   onStartListening,
@@ -244,6 +250,7 @@ export const IELTSHubView: React.FC<IELTSHubViewProps> = ({
   const [skillMode, setSkillMode] = useState<'reading' | 'listening'>('reading');
   const [selectedBook, setSelectedBook] = useState<string>('ALL');
   const [isBookMenuOpen, setIsBookMenuOpen] = useState<boolean>(false);
+  const [bookMenuOpenUp, setBookMenuOpenUp] = useState<boolean>(true);
   const [isSearchExpanded, setIsSearchExpanded] = useState<boolean>(false);
   const [searchQuery, setSearchQuery] = useState<string>('');
   const searchInputRef = useRef<HTMLInputElement>(null);
@@ -513,9 +520,9 @@ export const IELTSHubView: React.FC<IELTSHubViewProps> = ({
         }`}
       />
 
-      {/* Bottom Soft Feather Gradient Wash */}
+      {/* Bottom Soft Feather Gradient Wash — cushions bottom pagination dots cleanly */}
       <div
-        className="pointer-events-none absolute bottom-0 left-0 right-0 h-8 bg-gradient-to-t from-[#FAF7F2] via-[#FAF7F2]/75 to-transparent dark:from-[#0C1017] dark:via-[#0C1017]/75 to-transparent z-20"
+        className="pointer-events-none absolute bottom-0 left-0 right-0 h-20 bg-gradient-to-t from-[#FAF7F2] from-35% via-[#FAF7F2]/92 via-65% to-transparent dark:from-[#0C1017] dark:from-35% dark:via-[#0C1017]/92 dark:via-65% dark:to-transparent z-20"
       />
 
       <div
@@ -579,10 +586,10 @@ export const IELTSHubView: React.FC<IELTSHubViewProps> = ({
                 <button
                   type="button"
                   onClick={() => openOnlineSearch(skillMode, searchQuery.trim())}
-                  className="h-7 px-2.5 rounded-xl text-xs font-medium text-[#516050] dark:text-[#8FB996] bg-[#516050]/[0.09] hover:bg-[#516050]/[0.15] dark:bg-[#8FB996]/[0.12] dark:hover:bg-[#8FB996]/[0.2] flex items-center gap-1 transition-colors cursor-pointer whitespace-nowrap"
+                  className="h-7 px-2.5 rounded-xl text-xs font-medium text-stone-700 dark:text-stone-200 bg-stone-900/[0.045] hover:bg-stone-900/[0.08] dark:bg-white/[0.07] dark:hover:bg-white/[0.12] border border-stone-900/[0.06] dark:border-white/[0.08] flex items-center gap-1 transition-colors cursor-pointer whitespace-nowrap"
                   title="全网题库"
                 >
-                  <Globe className="w-3 h-3 shrink-0" />
+                  <Globe className="w-3 h-3 shrink-0 opacity-75" />
                   <span>淘题入库</span>
                   {customPassages.length + customListening.length > 0 && (
                     <span className="font-mono text-[10px] opacity-75">
@@ -652,9 +659,9 @@ export const IELTSHubView: React.FC<IELTSHubViewProps> = ({
                         type="button"
                         id="btn-open-volume-library"
                         onClick={() => openOnlineSearch(skillMode, searchQuery.trim())}
-                        className="flex items-center gap-1 px-2.5 py-1.5 rounded-xl text-[11px] font-medium text-[#516050] dark:text-[#8FB996] bg-[#516050]/[0.09] hover:bg-[#516050]/[0.15] dark:bg-[#8FB996]/[0.12] dark:hover:bg-[#8FB996]/[0.2] transition-colors cursor-pointer whitespace-nowrap"
+                        className="flex items-center gap-1 px-2.5 py-1.5 rounded-xl text-[11px] font-medium text-stone-700 dark:text-stone-200 bg-stone-900/[0.05] hover:bg-stone-900/[0.09] dark:bg-white/[0.08] dark:hover:bg-white/[0.14] transition-colors cursor-pointer whitespace-nowrap"
                       >
-                        <Globe className="w-3 h-3 shrink-0" />
+                        <Globe className="w-3 h-3 shrink-0 opacity-75" />
                         <span>全网题库</span>
                       </button>
                     </div>
@@ -681,45 +688,34 @@ export const IELTSHubView: React.FC<IELTSHubViewProps> = ({
                     readingBookmark.targetItem.progress.hitWords
                   )
                 }
-                className={`group relative overflow-hidden rounded-[26px] bg-gradient-to-br ${featuredReadingDiscipline.heroBgClass} p-5 sm:p-6 border ${featuredReadingDiscipline.heroBorderClass} shadow-[0_10px_30px_-10px_rgba(28,25,23,0.07)] cursor-pointer transition-transform duration-200 active:scale-[0.995] transform-gpu`}
+                className={`group relative overflow-hidden rounded-[26px] bg-gradient-to-br ${featuredReadingDiscipline.heroBgClass} p-4 sm:p-5 border ${featuredReadingDiscipline.heroBorderClass} shadow-[0_10px_30px_-10px_rgba(28,25,23,0.07)] cursor-pointer transition-transform duration-200 active:scale-[0.995] transform-gpu`}
               >
                 <div className={`absolute -right-10 -top-10 w-60 h-60 pointer-events-none select-none transition-transform duration-500 group-hover:scale-105 group-hover:rotate-3 ${featuredReadingDiscipline.accentTextClass}`}>
                   <DisciplineArtworkSvg discipline={featuredReadingDiscipline.key} />
                 </div>
 
-                <div className="relative z-10 space-y-3.5">
-                  {/* Top Workbook Bookmark Row */}
+                <div className="relative z-10 space-y-3">
+                  {/* Top Workbook Bookmark Row: Quiet Source + Location */}
                   <div className="flex items-center justify-between gap-2 text-[11px]">
-                    <div className="flex items-center gap-1 font-mono tabular-nums text-stone-600 dark:text-stone-300 min-w-0 flex-1 overflow-hidden">
+                    <div className="flex items-center gap-1.5 text-stone-600 dark:text-stone-300 min-w-0 flex-1 overflow-hidden">
                       <Bookmark className={`w-3.5 h-3.5 shrink-0 ${featuredReadingDiscipline.accentTextClass}`} />
-                      <span className={`font-sans-ui font-semibold whitespace-nowrap shrink-0 ${featuredReadingDiscipline.accentTextClass}`}>
-                        {readingBookmark.isResume ? '书签续刷' : '整卷起点'}
-                      </span>
-                      <span aria-hidden="true" className="opacity-40 shrink-0">·</span>
-                      <span className="font-serif-luxury italic text-[13px] font-bold tracking-normal truncate">
+                      <span className="font-sans-ui text-[11.5px] font-semibold text-stone-700 dark:text-stone-200 tracking-normal truncate">
                         {getVolumeShortBadge(readingBookmark.volumeGroup.volumeKey)}
-                      </span>
-                      <span aria-hidden="true" className="opacity-40 shrink-0">·</span>
-                      <span className="whitespace-nowrap shrink-0 font-semibold">
-                        T{readingBookmark.targetItem.testNum}·P{readingBookmark.targetItem.passageNum}
                       </span>
                     </div>
 
                     <span className="font-mono tabular-nums text-[11px] text-stone-500 dark:text-stone-400 font-medium whitespace-nowrap shrink-0">
-                      本套 {readingBookmark.testGroup.completedCount}/{readingBookmark.testGroup.totalItems} 篇
+                      Test {readingBookmark.targetItem.testNum} · P{readingBookmark.targetItem.passageNum}
                     </span>
                   </div>
 
                   {/* Center Focal Anchor: Deep Ink Typography on Warm Archival Paper */}
-                  <div className="space-y-2">
-                    <h2
-                      className="text-[22px] sm:text-2xl font-bold tracking-tight text-stone-900 dark:text-stone-100 leading-[1.3]"
-                      style={{ textWrap: 'balance' }}
-                    >
+                  <div className="space-y-1.5">
+                    <h2 className="text-[19px] sm:text-[21px] font-bold tracking-tight text-stone-900 dark:text-stone-100 leading-[1.32]">
                       {featuredReadingMeta.titleZh}
                     </h2>
 
-                    <p className="font-serif-luxury italic text-[15px] text-stone-600 dark:text-stone-300 leading-snug">
+                    <p className="font-serif-luxury italic text-[14.5px] text-stone-600 dark:text-stone-300 leading-snug">
                       {featuredReadingMeta.titleEn}
                     </p>
 
@@ -728,24 +724,24 @@ export const IELTSHubView: React.FC<IELTSHubViewProps> = ({
                     </p>
                   </div>
 
-                  {/* Clean Single-Row Footer: Sibling Progress + Primary Sequential Action */}
-                  <div className="pt-3.5 border-t border-stone-900/[0.08] dark:border-white/10 flex items-center justify-between gap-3">
+                  {/* Clean Single-Row Footer: Single Contextual Signal + Natural Action */}
+                  <div className="pt-3 border-t border-stone-900/[0.08] dark:border-white/10 flex items-center justify-between gap-3">
                     <div className="flex items-center gap-2 text-xs text-stone-600 dark:text-stone-300 min-w-0 flex-1 overflow-hidden">
                       {readingBookmark.targetItem.progress.status === 'in_progress' ? (
                         <span className="text-amber-700 dark:text-amber-400 font-mono font-medium truncate">
-                          进行中 · 已答 {readingBookmark.targetItem.progress.answeredCount}/{readingBookmark.targetItem.progress.totalQuestions} 题
+                          已答 {readingBookmark.targetItem.progress.answeredCount}/{readingBookmark.targetItem.progress.totalQuestions} 题
                         </span>
                       ) : readingBookmark.testGroup.earnedTotalQuestions > 0 ? (
                         <span className={`font-mono font-medium truncate ${featuredReadingDiscipline.accentTextClass}`}>
-                          本套已得 {readingBookmark.testGroup.earnedCorrect}/{readingBookmark.testGroup.earnedTotalQuestions} 分 · P{readingBookmark.targetItem.passageNum}
+                          本套已得 {readingBookmark.testGroup.earnedCorrect}/{readingBookmark.testGroup.earnedTotalQuestions}
                         </span>
                       ) : readingBookmark.targetItem.progress.hitCount > 0 ? (
-                        <span className={`font-medium truncate ${featuredReadingDiscipline.accentTextClass}`}>
-                          生词共鸣 +{readingBookmark.targetItem.progress.hitCount} · {readingBookmark.targetItem.progress.totalQuestions} 题
+                        <span className={`font-medium tabular-nums truncate ${featuredReadingDiscipline.accentTextClass}`}>
+                          生词共鸣 +{readingBookmark.targetItem.progress.hitCount}
                         </span>
                       ) : (
                         <span className="text-stone-500 dark:text-stone-400 font-mono tabular-nums truncate">
-                          {readingBookmark.targetItem.passage.bandDifficulty} · {readingBookmark.targetItem.progress.totalQuestions} 题
+                          {formatCompactBand(readingBookmark.targetItem.passage.bandDifficulty)}
                         </span>
                       )}
                     </div>
@@ -762,11 +758,7 @@ export const IELTSHubView: React.FC<IELTSHubViewProps> = ({
                       }}
                       className={`px-4 py-2 rounded-xl text-xs font-semibold flex items-center gap-1.5 shadow-xs transition-all group-hover:translate-x-0.5 cursor-pointer whitespace-nowrap shrink-0 ${featuredReadingDiscipline.ctaBtnClass}`}
                     >
-                      <span>
-                        {readingBookmark.isResume
-                          ? `继续 P${readingBookmark.targetItem.passageNum}`
-                          : `开启 T${readingBookmark.targetItem.testNum}·P${readingBookmark.targetItem.passageNum}`}
-                      </span>
+                      <span>{readingBookmark.isResume ? '继续阅读' : '开始精读'}</span>
                       <ArrowRight className="w-3.5 h-3.5" />
                     </button>
                   </div>
@@ -783,45 +775,34 @@ export const IELTSHubView: React.FC<IELTSHubViewProps> = ({
                 exit={{ opacity: 0, y: -6 }}
                 transition={{ duration: 0.22, ease: [0.16, 1, 0.3, 1] }}
                 onClick={() => onStartListening(listeningBookmark.targetItem.section)}
-                className={`group relative overflow-hidden rounded-[26px] bg-gradient-to-br ${featuredListeningDiscipline.heroBgClass} p-5 sm:p-6 border ${featuredListeningDiscipline.heroBorderClass} shadow-[0_10px_30px_-10px_rgba(28,25,23,0.07)] cursor-pointer transition-transform duration-200 active:scale-[0.995] transform-gpu`}
+                className={`group relative overflow-hidden rounded-[26px] bg-gradient-to-br ${featuredListeningDiscipline.heroBgClass} p-4 sm:p-5 border ${featuredListeningDiscipline.heroBorderClass} shadow-[0_10px_30px_-10px_rgba(28,25,23,0.07)] cursor-pointer transition-transform duration-200 active:scale-[0.995] transform-gpu`}
               >
                 <div className={`absolute -right-10 -top-10 w-60 h-60 pointer-events-none select-none transition-transform duration-500 group-hover:scale-105 group-hover:rotate-3 ${featuredListeningDiscipline.accentTextClass}`}>
                   <DisciplineArtworkSvg discipline={featuredListeningDiscipline.key} />
                 </div>
 
-                <div className="relative z-10 space-y-3.5">
-                  {/* Top Workbook Bookmark Masthead */}
+                <div className="relative z-10 space-y-3">
+                  {/* Top Workbook Bookmark Masthead: Quiet Source + Location */}
                   <div className="flex items-center justify-between gap-2 text-[11px]">
-                    <div className="flex items-center gap-1 font-mono tabular-nums text-stone-600 dark:text-stone-300 min-w-0 flex-1 overflow-hidden">
+                    <div className="flex items-center gap-1.5 text-stone-600 dark:text-stone-300 min-w-0 flex-1 overflow-hidden">
                       <Bookmark className={`w-3.5 h-3.5 shrink-0 ${featuredListeningDiscipline.accentTextClass}`} />
-                      <span className={`font-sans-ui font-semibold whitespace-nowrap shrink-0 ${featuredListeningDiscipline.accentTextClass}`}>
-                        {listeningBookmark.isResume ? '书签续刷' : '整卷起点'}
-                      </span>
-                      <span aria-hidden="true" className="opacity-40 shrink-0">·</span>
-                      <span className="font-serif-luxury italic text-[13px] font-bold tracking-normal truncate">
+                      <span className="font-sans-ui text-[11.5px] font-semibold text-stone-700 dark:text-stone-200 tracking-normal truncate">
                         {getVolumeShortBadge(listeningBookmark.volumeGroup.volumeKey)}
-                      </span>
-                      <span aria-hidden="true" className="opacity-40 shrink-0">·</span>
-                      <span className="whitespace-nowrap shrink-0 font-semibold">
-                        T{listeningBookmark.targetItem.testNum}·S{listeningBookmark.targetItem.sectionNum}
                       </span>
                     </div>
 
                     <span className="font-mono tabular-nums text-[11px] text-stone-500 dark:text-stone-400 font-medium whitespace-nowrap shrink-0">
-                      本套 {listeningBookmark.testGroup.completedCount}/{listeningBookmark.testGroup.totalItems} 节
+                      Test {listeningBookmark.targetItem.testNum} · S{listeningBookmark.targetItem.sectionNum}
                     </span>
                   </div>
 
                   {/* Center Headline */}
-                  <div className="space-y-2">
-                    <h2
-                      className="text-[22px] sm:text-2xl font-bold tracking-tight text-stone-900 dark:text-stone-100 leading-[1.3]"
-                      style={{ textWrap: 'balance' }}
-                    >
+                  <div className="space-y-1.5">
+                    <h2 className="text-[19px] sm:text-[21px] font-bold tracking-tight text-stone-900 dark:text-stone-100 leading-[1.32]">
                       {featuredListeningMeta.titleZh}
                     </h2>
 
-                    <p className="font-serif-luxury italic text-[15px] text-stone-600 dark:text-stone-300 leading-snug">
+                    <p className="font-serif-luxury italic text-[14.5px] text-stone-600 dark:text-stone-300 leading-snug">
                       {featuredListeningMeta.titleEn}
                     </p>
 
@@ -831,19 +812,19 @@ export const IELTSHubView: React.FC<IELTSHubViewProps> = ({
                   </div>
 
                   {/* Clean Single-Row Footer */}
-                  <div className="pt-3.5 border-t border-stone-900/[0.08] dark:border-white/10 flex items-center justify-between gap-3">
+                  <div className="pt-3 border-t border-stone-900/[0.08] dark:border-white/10 flex items-center justify-between gap-3">
                     <div className="flex items-center gap-1.5 text-xs text-stone-600 dark:text-stone-300 min-w-0 flex-1 overflow-hidden">
                       {listeningBookmark.targetItem.progress.status === 'in_progress' ? (
                         <span className="text-amber-700 dark:text-amber-400 font-mono font-medium truncate">
-                          进行中 · 已答 {listeningBookmark.targetItem.progress.answeredCount}/{listeningBookmark.targetItem.progress.totalQuestions} 题
+                          已答 {listeningBookmark.targetItem.progress.answeredCount}/{listeningBookmark.targetItem.progress.totalQuestions} 题
                         </span>
                       ) : listeningBookmark.testGroup.earnedTotalQuestions > 0 ? (
                         <span className={`font-mono font-medium truncate ${featuredListeningDiscipline.accentTextClass}`}>
-                          本套已得 {listeningBookmark.testGroup.earnedCorrect}/{listeningBookmark.testGroup.earnedTotalQuestions} 分 · S{listeningBookmark.targetItem.sectionNum}
+                          本套已得 {listeningBookmark.testGroup.earnedCorrect}/{listeningBookmark.testGroup.earnedTotalQuestions}
                         </span>
                       ) : (
                         <span className="text-stone-500 dark:text-stone-400 font-mono tabular-nums truncate">
-                          {listeningBookmark.targetItem.section.bandDifficulty} · {listeningBookmark.targetItem.progress.totalQuestions} 题
+                          {formatCompactBand(listeningBookmark.targetItem.section.bandDifficulty)}
                         </span>
                       )}
                     </div>
@@ -856,11 +837,7 @@ export const IELTSHubView: React.FC<IELTSHubViewProps> = ({
                       }}
                       className={`px-4 py-2 rounded-xl text-xs font-semibold flex items-center gap-1.5 shadow-xs transition-all group-hover:translate-x-0.5 cursor-pointer whitespace-nowrap shrink-0 ${featuredListeningDiscipline.ctaBtnClass}`}
                     >
-                      <span>
-                        {listeningBookmark.isResume
-                          ? `继续 S${listeningBookmark.targetItem.sectionNum}`
-                          : `开启 T${listeningBookmark.targetItem.testNum}·S${listeningBookmark.targetItem.sectionNum}`}
-                      </span>
+                      <span>{listeningBookmark.isResume ? '继续听力' : '开始精听'}</span>
                       <ArrowRight className="w-3.5 h-3.5" />
                     </button>
                   </div>
@@ -872,8 +849,8 @@ export const IELTSHubView: React.FC<IELTSHubViewProps> = ({
           {/* 3. Paper-Workbook Catalog: 分册 -> Test 1~4 -> P1/P2/P3 */}
           <div id="workbook-directory-section" className="space-y-4 pt-1">
             {/* Quick Volume Switcher Strip + Volume Dropdown */}
-            <div className="flex items-center justify-between gap-3 border-b border-stone-900/[0.07] dark:border-white/[0.07] pb-2">
-              <div className="flex items-center gap-4 overflow-x-auto no-scrollbar min-w-0 flex-1">
+            <div className="flex items-center justify-between gap-2 border-b border-stone-900/[0.07] dark:border-white/[0.07] pb-2">
+              <div className="flex items-center gap-4 overflow-x-auto no-scrollbar min-w-0 flex-1 pr-6 [mask-image:linear-gradient(to_right,black_calc(100%-28px),transparent_100%)] [-webkit-mask-image:linear-gradient(to_right,black_calc(100%-28px),transparent_100%)]">
                 {availableBooks.map(book => {
                   const active = selectedBook === book;
                   const shortLabel =
@@ -903,7 +880,19 @@ export const IELTSHubView: React.FC<IELTSHubViewProps> = ({
               <div className="relative shrink-0">
                 <button
                   type="button"
-                  onClick={() => setIsBookMenuOpen(prev => !prev)}
+                  onClick={(e) => {
+                    if (!isBookMenuOpen) {
+                      const rect = e.currentTarget.getBoundingClientRect();
+                      const scrollEl = e.currentTarget.closest('.overflow-y-auto');
+                      const containerRect = scrollEl ? scrollEl.getBoundingClientRect() : null;
+                      const bottomEdge = containerRect ? containerRect.bottom : window.innerHeight;
+                      const topEdge = containerRect ? containerRect.top : 0;
+                      const spaceBelow = bottomEdge - rect.bottom - 56;
+                      const spaceAbove = rect.top - topEdge;
+                      setBookMenuOpenUp(spaceBelow < 264 && spaceAbove > spaceBelow);
+                    }
+                    setIsBookMenuOpen(prev => !prev);
+                  }}
                   className={`h-7 px-2.5 rounded-lg text-xs flex items-center gap-1 transition-colors cursor-pointer whitespace-nowrap ${
                     selectedBook !== 'ALL'
                       ? 'bg-stone-900 text-white dark:bg-stone-100 dark:text-stone-900 font-semibold'
@@ -928,11 +917,13 @@ export const IELTSHubView: React.FC<IELTSHubViewProps> = ({
                         onClick={() => setIsBookMenuOpen(false)}
                       />
                       <motion.div
-                        initial={{ opacity: 0, y: 6, scale: 0.96 }}
+                        initial={{ opacity: 0, y: bookMenuOpenUp ? 6 : -6, scale: 0.96 }}
                         animate={{ opacity: 1, y: 0, scale: 1 }}
-                        exit={{ opacity: 0, y: 4, scale: 0.96 }}
+                        exit={{ opacity: 0, y: bookMenuOpenUp ? 4 : -4, scale: 0.96 }}
                         transition={{ duration: 0.18, ease: [0.16, 1, 0.3, 1] }}
-                        className="absolute right-0 mt-1.5 w-48 max-h-64 overflow-y-auto no-scrollbar rounded-2xl p-1.5 bg-[#FDFBF7]/95 dark:bg-[#141B29]/95 backdrop-blur-2xl border border-stone-900/[0.08] dark:border-white/[0.1] shadow-xl z-40 space-y-0.5"
+                        className={`absolute right-0 ${
+                          bookMenuOpenUp ? 'bottom-full mb-1.5 origin-bottom-right' : 'top-full mt-1.5 origin-top-right'
+                        } w-48 max-h-64 overflow-y-auto no-scrollbar rounded-2xl p-1.5 bg-[#FDFCF9] dark:bg-[#141822] border border-stone-200/95 dark:border-white/[0.12] shadow-[0_18px_38px_-10px_rgba(28,25,23,0.22),0_4px_12px_rgba(28,25,23,0.06)] dark:shadow-[0_20px_45px_-10px_rgba(0,0,0,0.8)] z-40 space-y-0.5`}
                       >
                         {availableBooks.map(book => {
                           const active = selectedBook === book;
@@ -952,7 +943,7 @@ export const IELTSHubView: React.FC<IELTSHubViewProps> = ({
                               }}
                               className={`w-full px-3 py-2 rounded-xl text-xs flex items-center justify-between text-left transition-colors cursor-pointer ${
                                 active
-                                  ? 'bg-[#516050]/10 dark:bg-[#8FB996]/15 text-[#516050] dark:text-[#8FB996] font-semibold'
+                                  ? 'bg-stone-900/[0.06] dark:bg-white/[0.09] text-stone-950 dark:text-white font-semibold'
                                   : 'text-stone-700 dark:text-stone-300 hover:bg-stone-900/[0.04] dark:hover:bg-white/[0.05]'
                               }`}
                             >
@@ -986,9 +977,11 @@ export const IELTSHubView: React.FC<IELTSHubViewProps> = ({
                           <h3 className="font-serif-luxury text-lg font-bold tracking-tight text-stone-900 dark:text-stone-100 truncate">
                             {volume.volumeLabel}
                           </h3>
-                          <span className="text-[11px] font-mono tabular-nums text-stone-500 dark:text-stone-400 shrink-0">
-                            {volume.completedItemsCount}/{volume.totalItemsCount} 篇
-                          </span>
+                          {volume.completedItemsCount > 0 && (
+                            <span className="text-[11px] font-mono tabular-nums text-stone-500 dark:text-stone-400 shrink-0">
+                              {volume.completedItemsCount}/{volume.totalItemsCount}
+                            </span>
+                          )}
                         </div>
 
                         {/* Complete Test 1 ~ Test 4 Sheets with Smooth Accordion */}
@@ -1011,15 +1004,9 @@ export const IELTSHubView: React.FC<IELTSHubViewProps> = ({
                                   className="w-full px-4 py-2.5 bg-stone-900/[0.025] dark:bg-white/[0.03] hover:bg-stone-900/[0.045] dark:hover:bg-white/[0.05] transition-colors flex flex-col gap-1.5 cursor-pointer text-left focus:outline-none"
                                 >
                                   <div className="w-full flex items-center justify-between gap-2">
-                                    <div className="flex items-center gap-2 min-w-0">
-                                      <span className="font-serif-luxury text-base font-bold text-stone-900 dark:text-stone-100 whitespace-nowrap">
-                                        Test {test.testNum}
-                                      </span>
-                                      <span aria-hidden="true" className="text-stone-300 dark:text-stone-600">·</span>
-                                      <span className="text-xs font-mono tabular-nums text-stone-500 dark:text-stone-400 truncate">
-                                        P1–P{test.items.length}
-                                      </span>
-                                    </div>
+                                    <span className="font-serif-luxury text-base font-bold text-stone-900 dark:text-stone-100 whitespace-nowrap">
+                                      Test {test.testNum}
+                                    </span>
 
                                     <div className="flex items-center gap-2 shrink-0 text-xs font-mono tabular-nums">
                                       {test.isTestCompleted ? (
@@ -1028,15 +1015,10 @@ export const IELTSHubView: React.FC<IELTSHubViewProps> = ({
                                           <span>{test.earnedCorrect}/{test.earnedTotalQuestions}</span>
                                         </span>
                                       ) : test.completedCount > 0 || test.inProgressCount > 0 ? (
-                                        <span className="text-stone-700 dark:text-stone-300 font-medium">
-                                          {test.completedCount}/{test.totalItems} 篇
-                                          {test.earnedTotalQuestions > 0 ? ` · ${test.earnedCorrect}/${test.earnedTotalQuestions}` : ''}
+                                        <span className="text-stone-600 dark:text-stone-300 font-medium">
+                                          {test.completedCount}/{test.totalItems}
                                         </span>
-                                      ) : (
-                                        <span className="text-stone-400 dark:text-stone-500">
-                                          0/{test.totalItems} 篇 · {test.totalQuestionsInTest} 题
-                                        </span>
-                                      )}
+                                      ) : null}
                                       <ChevronDown
                                         className={`w-3.5 h-3.5 text-stone-400 transition-transform duration-200 ${
                                           isCollapsed ? '-rotate-90' : 'rotate-0'
@@ -1080,34 +1062,29 @@ export const IELTSHubView: React.FC<IELTSHubViewProps> = ({
                                             <article
                                               key={`passage-workbook-row-${volume.volumeKey}-t${test.testNum}-p${passage.passageNum}-${passage.id}`}
                                               onClick={() => onStartReading(passage, false, progress.hitWords)}
-                                              className={`group py-3.5 px-4 transition-colors cursor-pointer flex items-start gap-3.5 ${
+                                              className={`group py-3.5 px-3.5 transition-colors cursor-pointer flex items-start gap-3 ${
                                                 isBookmarked
-                                                  ? 'bg-[#516050]/[0.05] dark:bg-[#8FB996]/[0.06]'
+                                                  ? 'bg-stone-900/[0.035] dark:bg-white/[0.05]'
                                                   : 'hover:bg-stone-900/[0.025] dark:hover:bg-white/[0.025]'
                                               }`}
                                             >
-                                              {/* Left: Passage Index */}
-                                              <div className="w-12 shrink-0 pt-0.5 flex flex-col items-start">
-                                                <div className="flex items-center gap-1.5">
-                                                  {progress.status === 'completed' ? (
-                                                    <span className="w-2 h-2 rounded-full bg-[#2D5A40] dark:bg-[#78B894]" title="已完成" />
-                                                  ) : progress.status === 'in_progress' ? (
-                                                    <span className="w-2 h-2 rounded-full bg-amber-500" title="进行中" />
-                                                  ) : (
-                                                    <span className={`w-1.5 h-1.5 rounded-full ${disc.badgeDotClass}`} />
-                                                  )}
-                                                  <span className="font-serif-luxury text-xl font-bold leading-none text-stone-800 dark:text-stone-200 group-hover:text-[#516050] dark:group-hover:text-[#8FB996] transition-colors tabular-nums">
-                                                    P{passage.passageNum}
-                                                  </span>
-                                                </div>
-                                                <span className="mt-1 text-[10px] font-mono tabular-nums text-stone-400 dark:text-stone-500">
-                                                  {isBookmarked ? '当前书签' : `第 ${passage.passageNum} 篇`}
+                                              {/* Left: Clean Passage Index */}
+                                              <div className="w-10 shrink-0 pt-0.5 flex items-center gap-1.5">
+                                                {progress.status === 'completed' ? (
+                                                  <span className="w-2 h-2 rounded-full bg-[#2D5A40] dark:bg-[#78B894] shrink-0" title="已完成" />
+                                                ) : progress.status === 'in_progress' ? (
+                                                  <span className="w-2 h-2 rounded-full bg-amber-500 shrink-0" title="进行中" />
+                                                ) : (
+                                                  <span className={`w-1.5 h-1.5 rounded-full shrink-0 ${disc.badgeDotClass}`} />
+                                                )}
+                                                <span className="font-serif-luxury text-lg font-bold leading-none text-stone-800 dark:text-stone-200 group-hover:text-stone-950 dark:group-hover:text-white transition-colors tabular-nums">
+                                                  P{passage.passageNum}
                                                 </span>
                                               </div>
 
-                                              {/* Center: Title + Subtitle + Discipline Metadata */}
+                                              {/* Center: Title + Subtitle + Minimal Discipline Tag */}
                                               <div className="min-w-0 flex-1 space-y-1">
-                                                <h4 className="text-[15px] font-bold text-stone-900 dark:text-stone-100 group-hover:text-[#516050] dark:group-hover:text-[#8FB996] transition-colors leading-snug">
+                                                <h4 className="text-[15px] font-bold text-stone-900 dark:text-stone-100 group-hover:text-stone-950 dark:group-hover:text-white transition-colors leading-snug">
                                                   {meta.titleZh}
                                                 </h4>
 
@@ -1115,54 +1092,34 @@ export const IELTSHubView: React.FC<IELTSHubViewProps> = ({
                                                   {meta.titleEn}
                                                 </p>
 
-                                                <div className="flex items-center gap-1.5 text-[11px] text-stone-400 dark:text-stone-500 flex-wrap pt-0.5">
-                                                  <span className={`font-medium ${disc.accentTextClass}`}>
+                                                <div className="flex items-center gap-x-1.5 text-[10.5px] leading-none text-stone-400 dark:text-stone-500 whitespace-nowrap pt-0.5 min-w-0">
+                                                  <span className={`font-medium truncate min-w-0 ${disc.accentTextClass}`}>
                                                     {disc.shortZh}
                                                   </span>
-                                                  <span aria-hidden="true">·</span>
-                                                  <span className="font-mono tabular-nums">{passage.bandDifficulty}</span>
                                                   {progress.hitCount > 0 && (
-                                                    <>
-                                                      <span aria-hidden="true">·</span>
-                                                      <span className="text-amber-700 dark:text-amber-400 font-medium font-mono tabular-nums">
-                                                        生词共鸣 +{progress.hitCount}
+                                                    <span className="inline-flex items-center gap-1 shrink-0">
+                                                      <span aria-hidden="true" className="opacity-50">·</span>
+                                                      <span className="text-amber-700 dark:text-amber-400 font-medium tabular-nums">
+                                                        生词 +{progress.hitCount}
                                                       </span>
-                                                    </>
+                                                    </span>
                                                   )}
                                                 </div>
                                               </div>
 
-                                              {/* Right: Paper Score / Progress Mark + Arrow */}
-                                              <div className="shrink-0 self-center pl-1 flex items-center gap-2">
-                                                <div className="text-right font-mono tabular-nums">
-                                                  {progress.status === 'completed' ? (
-                                                    <div className="flex flex-col items-end">
-                                                      <span className="text-xs font-bold text-[#2D5A40] dark:text-[#78B894] flex items-center gap-1">
-                                                        <Check className="w-3 h-3 shrink-0" />
-                                                        <span>{progress.correctCount}/{progress.totalQuestions}</span>
-                                                      </span>
-                                                      {progress.bandScore && (
-                                                        <span className="text-[10px] text-stone-400 dark:text-stone-500">
-                                                          Band {progress.bandScore}
-                                                        </span>
-                                                      )}
-                                                    </div>
-                                                  ) : progress.status === 'in_progress' ? (
-                                                    <div className="flex flex-col items-end">
-                                                      <span className="text-xs font-semibold text-amber-700 dark:text-amber-400">
-                                                        {progress.answeredCount}/{progress.totalQuestions}
-                                                      </span>
-                                                      <span className="text-[10px] text-amber-600/80 dark:text-amber-400/80">
-                                                        进行中
-                                                      </span>
-                                                    </div>
-                                                  ) : (
-                                                    <span className="text-xs text-stone-400 dark:text-stone-500">
-                                                      {progress.totalQuestions} 题
-                                                    </span>
-                                                  )}
-                                                </div>
-                                                <ArrowRight className="w-4 h-4 text-stone-300 dark:text-stone-600 group-hover:text-[#516050] dark:group-hover:text-[#8FB996] group-hover:translate-x-0.5 transition-all" />
+                                              {/* Right: Active Score Only (Untouched Rows Stay Quiet with Arrow) */}
+                                              <div className="shrink-0 self-center pl-1 flex items-center gap-1.5">
+                                                {progress.status === 'completed' ? (
+                                                  <span className="text-xs font-mono font-bold tabular-nums text-[#2D5A40] dark:text-[#78B894] flex items-center gap-0.5">
+                                                    <Check className="w-3 h-3 shrink-0" />
+                                                    <span>{progress.correctCount}/{progress.totalQuestions}</span>
+                                                  </span>
+                                                ) : progress.status === 'in_progress' ? (
+                                                  <span className="text-xs font-mono font-semibold tabular-nums text-amber-700 dark:text-amber-400">
+                                                    {progress.answeredCount}/{progress.totalQuestions}
+                                                  </span>
+                                                ) : null}
+                                                <ArrowRight className="w-4 h-4 text-stone-300 dark:text-stone-600 group-hover:text-stone-900 dark:group-hover:text-stone-100 group-hover:translate-x-0.5 transition-all" />
                                               </div>
                                             </article>
                                           );
@@ -1196,7 +1153,7 @@ export const IELTSHubView: React.FC<IELTSHubViewProps> = ({
                           <button
                             type="button"
                             onClick={() => openOnlineSearch('reading', searchQuery.trim())}
-                            className="inline-flex items-center gap-1.5 px-4 py-2 rounded-xl bg-[#516050] text-white text-xs font-semibold shadow-xs cursor-pointer hover:bg-[#3F4C3E] transition-colors"
+                            className="inline-flex items-center gap-1.5 px-4 py-2 rounded-xl bg-stone-900 dark:bg-stone-100 text-white dark:text-stone-950 text-xs font-semibold shadow-xs cursor-pointer hover:bg-stone-800 dark:hover:bg-white transition-colors"
                           >
                             <Globe className="w-3.5 h-3.5" />
                             <span>全网检索「{searchQuery}」</span>
@@ -1213,9 +1170,11 @@ export const IELTSHubView: React.FC<IELTSHubViewProps> = ({
                         <h3 className="font-serif-luxury text-lg font-bold tracking-tight text-stone-900 dark:text-stone-100 truncate">
                           {volume.volumeLabel}
                         </h3>
-                        <span className="text-[11px] font-mono tabular-nums text-stone-500 dark:text-stone-400 shrink-0">
-                          {volume.completedItemsCount}/{volume.totalItemsCount} 节
-                        </span>
+                        {volume.completedItemsCount > 0 && (
+                          <span className="text-[11px] font-mono tabular-nums text-stone-500 dark:text-stone-400 shrink-0">
+                            {volume.completedItemsCount}/{volume.totalItemsCount}
+                          </span>
+                        )}
                       </div>
 
                       {/* Complete Test 1 ~ Test 4 Listening Sheets with Smooth Accordion */}
@@ -1238,15 +1197,9 @@ export const IELTSHubView: React.FC<IELTSHubViewProps> = ({
                                 className="w-full px-4 py-2.5 bg-stone-900/[0.025] dark:bg-white/[0.03] hover:bg-stone-900/[0.045] dark:hover:bg-white/[0.05] transition-colors flex flex-col gap-1.5 cursor-pointer text-left focus:outline-none"
                               >
                                 <div className="w-full flex items-center justify-between gap-2">
-                                  <div className="flex items-center gap-2 min-w-0">
-                                    <span className="font-serif-luxury text-base font-bold text-stone-900 dark:text-stone-100 whitespace-nowrap">
-                                      Test {test.testNum}
-                                    </span>
-                                    <span aria-hidden="true" className="text-stone-300 dark:text-stone-600">·</span>
-                                    <span className="text-xs font-mono tabular-nums text-stone-500 dark:text-stone-400 truncate">
-                                      S1–S{test.items.length}
-                                    </span>
-                                  </div>
+                                  <span className="font-serif-luxury text-base font-bold text-stone-900 dark:text-stone-100 whitespace-nowrap">
+                                    Test {test.testNum}
+                                  </span>
 
                                   <div className="flex items-center gap-2 shrink-0 text-xs font-mono tabular-nums">
                                     {test.isTestCompleted ? (
@@ -1255,15 +1208,10 @@ export const IELTSHubView: React.FC<IELTSHubViewProps> = ({
                                         <span>{test.earnedCorrect}/{test.earnedTotalQuestions}</span>
                                       </span>
                                     ) : test.completedCount > 0 || test.inProgressCount > 0 ? (
-                                      <span className="text-stone-700 dark:text-stone-300 font-medium">
-                                        {test.completedCount}/{test.totalItems} 节
-                                        {test.earnedTotalQuestions > 0 ? ` · ${test.earnedCorrect}/${test.earnedTotalQuestions}` : ''}
+                                      <span className="text-stone-600 dark:text-stone-300 font-medium">
+                                        {test.completedCount}/{test.totalItems}
                                       </span>
-                                    ) : (
-                                      <span className="text-stone-400 dark:text-stone-500">
-                                        0/{test.totalItems} 节 · {test.totalQuestionsInTest} 题
-                                      </span>
-                                    )}
+                                    ) : null}
                                     <ChevronDown
                                       className={`w-3.5 h-3.5 text-stone-400 transition-transform duration-200 ${
                                         isCollapsed ? '-rotate-90' : 'rotate-0'
@@ -1307,27 +1255,22 @@ export const IELTSHubView: React.FC<IELTSHubViewProps> = ({
                                           <article
                                             key={`section-workbook-row-${volume.volumeKey}-t${test.testNum}-s${section.sectionNum}-${section.id}`}
                                             onClick={() => onStartListening(section)}
-                                            className={`group py-3.5 px-4 transition-colors cursor-pointer flex items-start gap-3.5 ${
+                                            className={`group py-3.5 px-3.5 transition-colors cursor-pointer flex items-start gap-3 ${
                                               isBookmarked
-                                                ? 'bg-amber-700/[0.05] dark:bg-amber-400/[0.06]'
+                                                ? 'bg-amber-700/[0.045] dark:bg-amber-400/[0.06]'
                                                 : 'hover:bg-stone-900/[0.025] dark:hover:bg-white/[0.025]'
                                             }`}
                                           >
-                                            <div className="w-12 shrink-0 pt-0.5 flex flex-col items-start">
-                                              <div className="flex items-center gap-1.5">
-                                                {progress.status === 'completed' ? (
-                                                  <span className="w-2 h-2 rounded-full bg-[#2D5A40] dark:bg-[#78B894]" title="已完成" />
-                                                ) : progress.status === 'in_progress' ? (
-                                                  <span className="w-2 h-2 rounded-full bg-amber-500" title="进行中" />
-                                                ) : (
-                                                  <span className={`w-1.5 h-1.5 rounded-full ${disc.badgeDotClass}`} />
-                                                )}
-                                                <span className="font-serif-luxury text-xl font-bold leading-none text-stone-800 dark:text-stone-200 group-hover:text-amber-700 dark:group-hover:text-amber-400 transition-colors tabular-nums">
-                                                  S{section.sectionNum}
-                                                </span>
-                                              </div>
-                                              <span className="mt-1 text-[10px] font-mono tabular-nums text-stone-400 dark:text-stone-500">
-                                                {isBookmarked ? '当前书签' : `第 ${section.sectionNum} 节`}
+                                            <div className="w-10 shrink-0 pt-0.5 flex items-center gap-1.5">
+                                              {progress.status === 'completed' ? (
+                                                <span className="w-2 h-2 rounded-full bg-[#2D5A40] dark:bg-[#78B894] shrink-0" title="已完成" />
+                                              ) : progress.status === 'in_progress' ? (
+                                                <span className="w-2 h-2 rounded-full bg-amber-500 shrink-0" title="进行中" />
+                                              ) : (
+                                                <span className={`w-1.5 h-1.5 rounded-full shrink-0 ${disc.badgeDotClass}`} />
+                                              )}
+                                              <span className="font-serif-luxury text-lg font-bold leading-none text-stone-800 dark:text-stone-200 group-hover:text-amber-700 dark:group-hover:text-amber-400 transition-colors tabular-nums">
+                                                S{section.sectionNum}
                                               </span>
                                             </div>
 
@@ -1340,52 +1283,32 @@ export const IELTSHubView: React.FC<IELTSHubViewProps> = ({
                                                 {meta.titleEn}
                                               </p>
 
-                                              <div className="flex items-center gap-1.5 text-[11px] text-stone-400 dark:text-stone-500 flex-wrap pt-0.5">
-                                                <span className={`font-medium ${disc.accentTextClass}`}>
+                                              <div className="flex items-center gap-x-1.5 text-[10.5px] leading-none text-stone-400 dark:text-stone-500 whitespace-nowrap pt-0.5 min-w-0">
+                                                <span className={`font-medium truncate min-w-0 ${disc.accentTextClass}`}>
                                                   {meta.categoryZh}
                                                 </span>
-                                                <span aria-hidden="true">·</span>
-                                                <span className="font-mono tabular-nums">{section.bandDifficulty}</span>
                                                 {progress.hitCount > 0 && (
-                                                  <>
-                                                    <span aria-hidden="true">·</span>
-                                                    <span className="text-amber-700 dark:text-amber-400 font-medium font-mono tabular-nums">
-                                                      生词共鸣 +{progress.hitCount}
+                                                  <span className="inline-flex items-center gap-1 shrink-0">
+                                                    <span aria-hidden="true" className="opacity-50">·</span>
+                                                    <span className="text-amber-700 dark:text-amber-400 font-medium tabular-nums">
+                                                      生词 +{progress.hitCount}
                                                     </span>
-                                                  </>
+                                                  </span>
                                                 )}
                                               </div>
                                             </div>
 
-                                            <div className="shrink-0 self-center pl-1 flex items-center gap-2">
-                                              <div className="text-right font-mono tabular-nums">
-                                                {progress.status === 'completed' ? (
-                                                  <div className="flex flex-col items-end">
-                                                    <span className="text-xs font-bold text-[#2D5A40] dark:text-[#78B894] flex items-center gap-1">
-                                                      <Check className="w-3 h-3 shrink-0" />
-                                                      <span>{progress.correctCount}/{progress.totalQuestions}</span>
-                                                    </span>
-                                                    {progress.bandScore && (
-                                                      <span className="text-[10px] text-stone-400 dark:text-stone-500">
-                                                        Band {progress.bandScore}
-                                                      </span>
-                                                    )}
-                                                  </div>
-                                                ) : progress.status === 'in_progress' ? (
-                                                  <div className="flex flex-col items-end">
-                                                    <span className="text-xs font-semibold text-amber-700 dark:text-amber-400">
-                                                      {progress.answeredCount}/{progress.totalQuestions}
-                                                    </span>
-                                                    <span className="text-[10px] text-amber-600/80 dark:text-amber-400/80">
-                                                      进行中
-                                                    </span>
-                                                  </div>
-                                                ) : (
-                                                  <span className="text-xs text-stone-400 dark:text-stone-500">
-                                                    {progress.totalQuestions} 题
-                                                  </span>
-                                                )}
-                                              </div>
+                                            <div className="shrink-0 self-center pl-1 flex items-center gap-1.5">
+                                              {progress.status === 'completed' ? (
+                                                <span className="text-xs font-mono font-bold tabular-nums text-[#2D5A40] dark:text-[#78B894] flex items-center gap-0.5">
+                                                  <Check className="w-3 h-3 shrink-0" />
+                                                  <span>{progress.correctCount}/{progress.totalQuestions}</span>
+                                                </span>
+                                              ) : progress.status === 'in_progress' ? (
+                                                <span className="text-xs font-mono font-semibold tabular-nums text-amber-700 dark:text-amber-400">
+                                                  {progress.answeredCount}/{progress.totalQuestions}
+                                                </span>
+                                              ) : null}
                                               <ArrowRight className="w-4 h-4 text-stone-300 dark:text-stone-600 group-hover:text-amber-700 dark:group-hover:text-amber-400 group-hover:translate-x-0.5 transition-all" />
                                             </div>
                                           </article>

@@ -8,6 +8,8 @@ import {
   resolveReadingBookmarkTarget,
   getCompleteWorkbookPassages,
   getCompleteWorkbookListening,
+  computeWordHitMapForPassages,
+  computeWordHitMapForListening,
 } from './ieltsWorkbookEngine';
 import { CambridgePassage } from '../data/ieltsPassages';
 import { IeltsTestRecord } from '../db';
@@ -186,3 +188,57 @@ test('getCompleteWorkbookPassages and getCompleteWorkbookListening produce compl
   const allListening = getCompleteWorkbookListening();
   assert.ok(allListening.length >= 16);
 });
+
+test('computeWordHitMapForPassages enforces leading word boundaries, deduplicates words, and ignores 1-char tokens', () => {
+  const hitMap = computeWordHitMapForPassages(mockPassages, [
+    'glass',
+    'GLASS',
+    'lass', // mid-word substring must NOT match "Glass"
+    'albedo',
+    'a', // < 2 chars ignored
+  ]);
+
+  assert.equal(hitMap['recall26-t1-p1'].count, 1);
+  assert.deepEqual(hitMap['recall26-t1-p1'].matchedWords, ['glass']);
+  assert.equal(hitMap['recall25-t1-p2'].count, 1);
+  assert.deepEqual(hitMap['recall25-t1-p2'].matchedWords, ['albedo']);
+  assert.equal(hitMap['recall25-t1-p3'].count, 0);
+});
+
+test('computeWordHitMapForListening matches transcript and vocabulary with word boundaries', () => {
+  const listening = getCompleteWorkbookListening().slice(0, 1);
+  assert.ok(listening.length === 1);
+  const sampleWord = listening[0].keyVocab?.[0] || 'listening';
+  const hitMap = computeWordHitMapForListening(listening, [sampleWord, sampleWord.toUpperCase()]);
+  assert.equal(hitMap[listening[0].id].count, 1);
+});
+
+test('buildReadingWorkbookCatalog selects the latest test record when multiple attempts exist', () => {
+  const olderRecord: IeltsTestRecord = {
+    timestamp: 1000,
+    passageTitle: 'The History of Glass',
+    passageSubtitle: '',
+    passageText: '',
+    questions: [],
+    conqueredWords: [],
+    timeSpentSec: 600,
+    correctCount: 0,
+    totalQuestions: 1,
+    bandScore: 5.5,
+    answers: { 1: 'FALSE' },
+    wrongQuestionDetails: [],
+  };
+  const newerRecord: IeltsTestRecord = {
+    ...olderRecord,
+    timestamp: 5000,
+    correctCount: 1,
+    bandScore: 8.5,
+    answers: { 1: 'TRUE' },
+  };
+
+  const catalog = buildReadingWorkbookCatalog(mockPassages, {}, [olderRecord, newerRecord], {});
+  const firstItem = catalog[0].tests[0].items[0];
+  assert.equal(firstItem.progress.bandScore, 8.5);
+  assert.equal(firstItem.progress.correctCount, 1);
+});
+

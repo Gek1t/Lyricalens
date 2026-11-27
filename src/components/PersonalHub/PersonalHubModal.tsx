@@ -86,13 +86,13 @@ export const PersonalHubModal: React.FC = () => {
       {/* Top Tactile Segmented Bar - Balanced top safe-area breathing room */}
       <div className="relative z-10 px-5 pt-[var(--android-safe-top,max(3.25rem,calc(env(safe-area-inset-top,44px)+0.85rem)))] pb-2 flex-shrink-0 bg-transparent">
         {/* Apple-grade Milled Segmented Control */}
-        <div className="grid grid-cols-3 p-1 rounded-2xl bg-stone-900/[0.06] dark:bg-white/8 text-xs font-medium border border-stone-900/[0.04] dark:border-white/5 shadow-2xs">
+        <div className="grid grid-cols-3 p-1 rounded-2xl bg-stone-900/[0.06] dark:bg-white/[0.06] text-xs font-medium border border-stone-900/[0.04] dark:border-white/[0.06] shadow-2xs">
           <button
             type="button"
             onClick={() => setActiveTab('compass')}
             className={`py-1.5 rounded-xl transition-colors cursor-pointer text-center ${
               activeTab === 'compass'
-                ? 'bg-white dark:bg-[#18212D] text-stone-900 dark:text-white shadow-[0_1px_4px_rgba(0,0,0,0.06)] font-semibold'
+                ? 'bg-white dark:bg-white/[0.15] text-stone-900 dark:text-white shadow-[0_1px_4px_rgba(0,0,0,0.06)] dark:shadow-[0_2px_8px_rgba(0,0,0,0.35)] dark:ring-1 dark:ring-white/[0.10] font-semibold'
                 : 'text-stone-500 dark:text-stone-400 hover:text-stone-800 dark:hover:text-stone-200'
             }`}
           >
@@ -104,7 +104,7 @@ export const PersonalHubModal: React.FC = () => {
             onClick={() => setActiveTab('archives')}
             className={`py-1.5 rounded-xl transition-colors cursor-pointer text-center ${
               activeTab === 'archives'
-                ? 'bg-white dark:bg-[#18212D] text-stone-900 dark:text-white shadow-[0_1px_4px_rgba(0,0,0,0.06)] font-semibold'
+                ? 'bg-white dark:bg-white/[0.15] text-stone-900 dark:text-white shadow-[0_1px_4px_rgba(0,0,0,0.06)] dark:shadow-[0_2px_8px_rgba(0,0,0,0.35)] dark:ring-1 dark:ring-white/[0.10] font-semibold'
                 : 'text-stone-500 dark:text-stone-400 hover:text-stone-800 dark:hover:text-stone-200'
             }`}
           >
@@ -116,7 +116,7 @@ export const PersonalHubModal: React.FC = () => {
             onClick={() => setActiveTab('settings')}
             className={`py-1.5 rounded-xl transition-colors cursor-pointer text-center ${
               activeTab === 'settings'
-                ? 'bg-white dark:bg-[#18212D] text-stone-900 dark:text-white shadow-[0_1px_4px_rgba(0,0,0,0.06)] font-semibold'
+                ? 'bg-white dark:bg-white/[0.15] text-stone-900 dark:text-white shadow-[0_1px_4px_rgba(0,0,0,0.06)] dark:shadow-[0_2px_8px_rgba(0,0,0,0.35)] dark:ring-1 dark:ring-white/[0.10] font-semibold'
                 : 'text-stone-500 dark:text-stone-400 hover:text-stone-800 dark:hover:text-stone-200'
             }`}
           >
@@ -125,9 +125,17 @@ export const PersonalHubModal: React.FC = () => {
         </div>
       </div>
 
-      {/* Scrollable Content View - Direct Unmasked Flow (Zero Backdrop Root / Zero Top Band Seam) */}
-      <div className="relative z-10 flex-1 min-h-0 flex flex-col overflow-hidden">
-        <div className="flex-1 overflow-y-auto px-4.5 pt-2.5 pb-8 overscroll-contain touch-pan-y no-scrollbar">
+      {/* Scrollable Content View with Seamless Alpha-Mask Edge Fade */}
+      <div
+        className="relative z-10 flex-1 min-h-0 flex flex-col overflow-hidden"
+        style={{
+          maskImage:
+            'linear-gradient(to bottom, transparent 0px, rgba(0, 0, 0, 0.55) 4px, black 12px, black calc(100% - 76px), rgba(0, 0, 0, 0.84) calc(100% - 56px), rgba(0, 0, 0, 0.4) calc(100% - 36px), rgba(0, 0, 0, 0.08) calc(100% - 18px), transparent calc(100% - 4px))',
+          WebkitMaskImage:
+            'linear-gradient(to bottom, transparent 0px, rgba(0, 0, 0, 0.55) 4px, black 12px, black calc(100% - 76px), rgba(0, 0, 0, 0.84) calc(100% - 56px), rgba(0, 0, 0, 0.4) calc(100% - 36px), rgba(0, 0, 0, 0.08) calc(100% - 18px), transparent calc(100% - 4px))',
+        }}
+      >
+        <div className="flex-1 overflow-y-auto px-4.5 pt-3 pb-16 overscroll-contain touch-pan-y no-scrollbar">
           {activeTab === 'compass' && <GrowthCompassTab />}
           {activeTab === 'archives' && (
             <IELTSArchivesTab onOpenReview={(record) => setReviewRecord(record)} />
@@ -136,13 +144,13 @@ export const PersonalHubModal: React.FC = () => {
         </div>
       </div>
 
-      {/* Seamless Bottom Return Handle (Wide & Flat Soft Chevron) */}
-      <div className="relative z-10 flex-shrink-0 pt-1.5 pb-[max(0.625rem,calc(env(safe-area-inset-bottom,0px)+0.35rem))] flex items-center justify-center bg-transparent">
+      {/* Seamless Floating Bottom Return Handle (Wide & Flat Soft Chevron) */}
+      <div className="pointer-events-none absolute inset-x-0 bottom-0 z-20 pt-2 pb-[max(0.625rem,calc(env(safe-area-inset-bottom,0px)+0.35rem))] flex items-center justify-center bg-transparent">
         <button
           id="personal-hub-bottom-return-btn"
           type="button"
           onClick={closePersonalHub}
-          className="group py-1.5 px-8 flex items-center justify-center transition-all active:scale-95 cursor-pointer"
+          className="pointer-events-auto group py-1.5 px-8 flex items-center justify-center transition-all active:scale-95 cursor-pointer"
           title="收起返回主界面"
           aria-label="收起返回"
         >

@@ -90,6 +90,46 @@ export default defineConfig(() => {
         '@': path.resolve(__dirname, '.'),
       },
     },
+    build: {
+      rollupOptions: {
+        output: {
+          manualChunks(id) {
+            const normalized = id.replace(/\\/g, '/');
+            if (normalized.includes('/node_modules/')) {
+              if (
+                normalized.includes('/node_modules/react/') ||
+                normalized.includes('/node_modules/react-dom/') ||
+                normalized.includes('/node_modules/scheduler/')
+              ) {
+                return 'vendor-react';
+              }
+              if (normalized.includes('/node_modules/motion/') || normalized.includes('/node_modules/framer-motion/')) {
+                return 'vendor-motion';
+              }
+              if (normalized.includes('/node_modules/lucide-react/')) {
+                return 'vendor-icons';
+              }
+              if (
+                normalized.includes('/node_modules/dexie/') ||
+                normalized.includes('/node_modules/dexie-react-hooks/') ||
+                normalized.includes('/node_modules/zustand/')
+              ) {
+                return 'vendor-data';
+              }
+            }
+            if (
+              normalized.includes('/src/utils/ieltsCorpusDictionary.ts') ||
+              normalized.includes('/src/utils/collocationDictionary.ts')
+            ) {
+              return 'corpus-dictionaries';
+            }
+            if (normalized.includes('/src/data/')) {
+              return 'ielts-data';
+            }
+          },
+        },
+      },
+    },
     server: {
       // HMR is disabled in AI Studio via DISABLE_HMR env var.
       // Do not modifyâfile watching is disabled to prevent flickering during agent edits.

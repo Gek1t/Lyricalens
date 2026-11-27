@@ -167,9 +167,12 @@ export function triggerDebouncedCloudSync(delayMs = 1000) {
   }, delayMs);
 }
 
-// Initialize online/offline event listeners
+let isListenerInitialized = false;
+
+// Initialize online/offline event listeners (idempotent across StrictMode remounts)
 export function initCloudSyncListener() {
-  if (typeof window === 'undefined') return;
+  if (typeof window === 'undefined' || isListenerInitialized) return;
+  isListenerInitialized = true;
 
   window.addEventListener('online', () => {
     currentState.isOnline = true;
@@ -190,9 +193,9 @@ export function initCloudSyncListener() {
     }
   });
 
-  // Periodic heartbeat sync every 60 seconds
+  // Periodic heartbeat sync every 60 seconds (skip when tab is hidden to save battery/network)
   setInterval(() => {
-    if (navigator.onLine) {
+    if (navigator.onLine && (typeof document === 'undefined' || document.visibilityState !== 'hidden')) {
       syncWordsWithServer();
     }
   }, 60000);

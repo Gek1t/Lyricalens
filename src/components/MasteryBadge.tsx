@@ -21,19 +21,19 @@ export const MASTERY_CONFIG: Record<MasteryLevel, { label: string; glyph: string
     label: '已加入单词集',
     glyph: '⊚',
     subtitle: '针尖微点 · 已加入单词本',
-    color: '#516050', // sage green
+    color: '#44403C', // stone-700
   },
   2: {
     label: '熟悉/学习中',
     glyph: '⊙',
     subtitle: '中核点 · 复习精读中',
-    color: '#8C7A5B', // warm ochre/amber
+    color: '#C87D32', // warm amber
   },
   3: {
     label: '已掌握',
     glyph: '◉',
     subtitle: '饱满实心 · 完全掌握',
-    color: '#2F4F2F', // deep forest green
+    color: '#1C1917', // stone-900
   }
 };
 
@@ -90,10 +90,10 @@ export const MasteryBadge: React.FC<MasteryBadgeProps> = ({
             safeLevel === 0
               ? 'stroke-stone-400/80 dark:stroke-stone-500/80'
               : safeLevel === 1
-              ? 'stroke-[#516050] dark:stroke-[#8FB996]'
+              ? 'stroke-stone-700 dark:stroke-stone-300'
               : safeLevel === 2
-              ? 'stroke-[#8C7A5B] dark:stroke-amber-400'
-              : 'stroke-[#516050] dark:stroke-[#8FB996]'
+              ? 'stroke-[#C87D32] dark:stroke-amber-400'
+              : 'stroke-stone-900 dark:stroke-stone-100'
           }`}
           strokeWidth="1.6"
         />
@@ -107,7 +107,7 @@ export const MasteryBadge: React.FC<MasteryBadgeProps> = ({
             cx="12"
             cy="12"
             r="1.5"
-            className="fill-[#516050] dark:fill-[#8FB996] transition-all duration-300"
+            className="fill-stone-700 dark:fill-stone-300 transition-all duration-300"
           />
         )}
 
@@ -117,7 +117,7 @@ export const MasteryBadge: React.FC<MasteryBadgeProps> = ({
             cx="12"
             cy="12"
             r="3.6"
-            className="fill-[#8C7A5B] dark:fill-amber-400 transition-all duration-300"
+            className="fill-[#C87D32] dark:fill-amber-400 transition-all duration-300"
           />
         )}
 
@@ -127,7 +127,7 @@ export const MasteryBadge: React.FC<MasteryBadgeProps> = ({
             cx="12"
             cy="12"
             r="6.0"
-            className="fill-[#516050] dark:fill-[#8FB996] transition-all duration-300"
+            className="fill-stone-900 dark:fill-stone-100 transition-all duration-300"
           />
         )}
       </svg>

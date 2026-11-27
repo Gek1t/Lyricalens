@@ -180,7 +180,10 @@ export function getVolumeShortBadge(volumeKey: string): string {
  * Collects the complete set of Reading passages across primary volumes (2026 Recall, C20, C19, C18, C17, C16, Special)
  * plus any custom/live-synced passages so every Test has all 3 Passages (P1, P2, P3).
  */
-export function getCompleteWorkbookPassages(customPassages: CambridgePassage[] = []): CambridgePassage[] {
+let cachedBasePassages: CambridgePassage[] | null = null;
+
+function getBaseWorkbookPassages(): CambridgePassage[] {
+  if (cachedBasePassages) return cachedBasePassages;
   const result: CambridgePassage[] = [];
 
   // 1. 2026 Recall Volume (Tests 1-4, each P1-P3)
@@ -288,19 +291,26 @@ export function getCompleteWorkbookPassages(customPassages: CambridgePassage[] =
     );
   }
 
-  // 7. Custom / Online synced passages
-  for (const cp of customPassages) {
-    result.push(cp);
-  }
-
+  cachedBasePassages = result;
   return result;
+}
+
+export function getCompleteWorkbookPassages(customPassages: CambridgePassage[] = []): CambridgePassage[] {
+  const base = getBaseWorkbookPassages();
+  if (!customPassages || customPassages.length === 0) {
+    return base;
+  }
+  return [...base, ...customPassages];
 }
 
 /**
  * Collects the complete set of Listening sections across primary volumes (2026 Recall, C20, C19, C18, C17, C16, Special)
  * plus any custom/live-synced listening sections so every Test has complete sections.
  */
-export function getCompleteWorkbookListening(customSections: IELTSListeningSection[] = []): IELTSListeningSection[] {
+let cachedBaseListening: IELTSListeningSection[] | null = null;
+
+function getBaseWorkbookListening(): IELTSListeningSection[] {
+  if (cachedBaseListening) return cachedBaseListening;
   const result: IELTSListeningSection[] = [];
 
   // 1. 2026 Recall Volume (Tests 1-4, each S1-S4)
@@ -367,30 +377,48 @@ export function getCompleteWorkbookListening(customSections: IELTSListeningSecti
     );
   }
 
-  // 5. Custom / Online synced listening sections
-  for (const cs of customSections) {
-    result.push(cs);
-  }
-
+  cachedBaseListening = result;
   return result;
+}
+
+export function getCompleteWorkbookListening(customSections: IELTSListeningSection[] = []): IELTSListeningSection[] {
+  const base = getBaseWorkbookListening();
+  if (!customSections || customSections.length === 0) {
+    return base;
+  }
+  return [...base, ...customSections];
+}
+
+function compileUserWordMatchers(userWords: string[]): Array<{ word: string; regex: RegExp }> {
+  const seen = new Set<string>();
+  const matchers: Array<{ word: string; regex: RegExp }> = [];
+  for (const raw of userWords || []) {
+    const w = raw.trim().toLowerCase();
+    if (w.length < 2 || seen.has(w)) continue;
+    seen.add(w);
+    matchers.push({
+      word: w,
+      regex: new RegExp(`\\b${w.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}`),
+    });
+  }
+  return matchers;
 }
 
 export function computeWordHitMapForPassages(
   passages: CambridgePassage[],
   userWords: string[]
 ): Record<string, HitStatsEntry> {
-  const normalizedUserWords = (userWords || []).map(w => w.trim().toLowerCase()).filter(w => w.length >= 2);
+  const matchers = compileUserWordMatchers(userWords);
   const map: Record<string, HitStatsEntry> = {};
 
-  if (normalizedUserWords.length === 0) return map;
+  if (matchers.length === 0) return map;
 
   for (const passage of passages) {
     const passageTextLower = `${passage.text || ''} ${passage.title || ''} ${(passage.keyVocab || []).join(' ')}`.toLowerCase();
     const matched: string[] = [];
-    for (const w of normalizedUserWords) {
-      const regex = new RegExp(`\\b${w.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}`, 'i');
-      if (regex.test(passageTextLower)) {
-        matched.push(w);
+    for (const { word, regex } of matchers) {
+      if (passageTextLower.includes(word) && regex.test(passageTextLower)) {
+        matched.push(word);
       }
     }
     map[passage.id] = { count: matched.length, matchedWords: matched };
@@ -402,18 +430,17 @@ export function computeWordHitMapForListening(
   sections: IELTSListeningSection[],
   userWords: string[]
 ): Record<string, HitStatsEntry> {
-  const normalizedUserWords = (userWords || []).map(w => w.trim().toLowerCase()).filter(w => w.length >= 2);
+  const matchers = compileUserWordMatchers(userWords);
   const map: Record<string, HitStatsEntry> = {};
 
-  if (normalizedUserWords.length === 0) return map;
+  if (matchers.length === 0) return map;
 
   for (const section of sections) {
     const fullText = `${section.title || ''} ${section.scenario || ''} ${(section.keyVocab || []).join(' ')} ${(section.scriptParagraphs || []).map(p => p.text).join(' ')}`.toLowerCase();
     const matched: string[] = [];
-    for (const w of normalizedUserWords) {
-      const regex = new RegExp(`\\b${w.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}`, 'i');
-      if (regex.test(fullText)) {
-        matched.push(w);
+    for (const { word, regex } of matchers) {
+      if (fullText.includes(word) && regex.test(fullText)) {
+        matched.push(word);
       }
     }
     map[section.id] = { count: matched.length, matchedWords: matched };
@@ -562,10 +589,38 @@ export function buildReadingWorkbookCatalog(
     }
   }
 
+  // Index latest test record by passageId and passageTitle once in O(R) instead of O(P * R log R)
+  const latestRecordById = new Map<string, IeltsTestRecord>();
+  const latestRecordByTitle = new Map<string, IeltsTestRecord>();
+  for (const rec of testRecords || []) {
+    const pid = (rec as { passageId?: string }).passageId;
+    if (pid) {
+      const prev = latestRecordById.get(pid);
+      if (!prev || rec.timestamp > prev.timestamp) latestRecordById.set(pid, rec);
+    }
+    if (rec.passageTitle) {
+      const prev = latestRecordByTitle.get(rec.passageTitle);
+      if (!prev || rec.timestamp > prev.timestamp) latestRecordByTitle.set(rec.passageTitle, rec);
+    }
+  }
+
   for (const p of slotMap.values()) {
     const volumeKey = normalizeVolumeKey(p.cambridgeBook);
     const meta = getVolumeDisplayMeta(volumeKey);
-    const progress = computeReadingPassageProgress(p, testRecords, draftsMap, hitStatsMap[p.id]);
+    const matchedById = latestRecordById.get(p.id);
+    const matchedByTitle = latestRecordByTitle.get(p.title);
+    const latestRecord =
+      matchedById && matchedByTitle
+        ? matchedById.timestamp >= matchedByTitle.timestamp
+          ? matchedById
+          : matchedByTitle
+        : matchedById || matchedByTitle;
+    const progress = computeReadingPassageProgress(
+      p,
+      latestRecord ? [latestRecord] : [],
+      draftsMap,
+      hitStatsMap[p.id]
+    );
 
     const item: WorkbookPassageItem = {
       passage: { ...p, cambridgeBook: volumeKey },

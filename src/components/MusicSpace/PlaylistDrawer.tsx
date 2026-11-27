@@ -4,15 +4,14 @@ import { useLiveQuery } from 'dexie-react-hooks';
 import { useAppStore } from '../../store/useAppStore';
 import { db } from '../../db';
 import {
-  evaluateSongVocabDifficulty,
-  analyzeSongVocab,
+  buildLowerWordSet,
+  evaluateAndAnalyzeSong,
   getDueReviewWords,
-  isChineseSong,
   prioritizeSongsByNotebookAndSpacedRepetition
 } from '../../utils/vocabEngine';
-import { VocabDifficultyTag, SongItem } from '../../types';
+import { VocabDifficultyTag, SongItem, WordItem } from '../../types';
 import { triggerHighRefreshBoost } from '../../utils/displayRefreshRate';
-import { Sparkles, ArrowUpDown, Filter, RotateCcw, Volume2, Check, Search, SlidersHorizontal, X, ChevronDown } from 'lucide-react';
+import { ArrowUpDown, RotateCcw, Search, SlidersHorizontal, X, ChevronDown } from 'lucide-react';
 import {
   PlaylistPrimaryFilter,
   PlaylistVocabSubFilter,
@@ -22,49 +21,22 @@ import {
   hasActiveSecondaryFilter
 } from '../../utils/playlistFilterEngine';
 
-// Mastery status circle indicator matching the app design system (0: hollow, 1: needle-dot, 2: mid-dot, 3: solid)
-const MasteryCircleIndicator: React.FC<{ level?: number; isDue?: boolean; size?: number }> = ({
+const EMPTY_PLAYLIST_WORDS: WordItem[] = [];
+
+// Subtle editorial status dot (due: soft warm amber, mastered: calm emerald, learning: soft teal, collected: muted stone)
+const MasteryDot: React.FC<{ level?: number; isDue?: boolean }> = ({
   level = 0,
   isDue = false,
-  size = 11,
 }) => {
-  if (isDue) {
-    return (
-      <svg width={size} height={size} viewBox="0 0 24 24" fill="none" className="inline-block shrink-0">
-        <circle cx="12" cy="12" r="8.5" stroke="#D97706" strokeWidth="2.2" className="text-amber-500" />
-        <circle cx="12" cy="12" r="3.8" fill="#D97706" className="fill-amber-500" />
-      </svg>
-    );
-  }
-  if (level === 3) {
-    return (
-      <svg width={size} height={size} viewBox="0 0 24 24" fill="none" className="inline-block shrink-0">
-        <circle cx="12" cy="12" r="8.5" stroke="currentColor" strokeWidth="2.2" className="text-[#516050] dark:text-[#8FB996]" />
-        <circle cx="12" cy="12" r="5.8" fill="currentColor" className="text-[#516050] dark:text-[#8FB996]" />
-      </svg>
-    );
-  }
-  if (level === 2) {
-    return (
-      <svg width={size} height={size} viewBox="0 0 24 24" fill="none" className="inline-block shrink-0">
-        <circle cx="12" cy="12" r="8.5" stroke="currentColor" strokeWidth="2.2" className="text-[#8C7A5B] dark:text-amber-400" />
-        <circle cx="12" cy="12" r="3.6" fill="currentColor" className="text-[#8C7A5B] dark:text-amber-400" />
-      </svg>
-    );
-  }
-  if (level === 1) {
-    return (
-      <svg width={size} height={size} viewBox="0 0 24 24" fill="none" className="inline-block shrink-0">
-        <circle cx="12" cy="12" r="8.5" stroke="currentColor" strokeWidth="2.2" className="text-[#516050] dark:text-[#8FB996]" />
-        <circle cx="12" cy="12" r="1.8" fill="currentColor" className="text-[#516050] dark:text-[#8FB996]" />
-      </svg>
-    );
-  }
-  return (
-    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" className="inline-block shrink-0">
-      <circle cx="12" cy="12" r="8.5" stroke="currentColor" strokeWidth="2.2" className="text-stone-400 dark:text-stone-500" />
-    </svg>
-  );
+  const colorClass = isDue
+    ? 'bg-amber-500/90 dark:bg-amber-400'
+    : level === 3
+    ? 'bg-emerald-500/85 dark:bg-emerald-400'
+    : level === 2
+    ? 'bg-teal-500/80 dark:bg-teal-400'
+    : 'bg-stone-300 dark:bg-stone-600';
+
+  return <span className={`w-1.5 h-1.5 rounded-full shrink-0 ${colorClass}`} />;
 };
 
 export const PlaylistDrawer: React.FC = () => {
@@ -92,32 +64,35 @@ export const PlaylistDrawer: React.FC = () => {
   const activeSongItemRef = useRef<HTMLDivElement | null>(null);
   const dragControls = useDragControls();
 
-  // Live Dexie query for user's vocabulary vault & due words
-  const words = useLiveQuery(() => db.words.toArray(), []) || [];
-  const dueWords = useMemo(() => getDueReviewWords(words), [words]);
-  const dueWordStrs = useMemo(() => dueWords.map(w => w.word.toLowerCase()), [dueWords]);
+  // Live Dexie query for user's vocabulary vault & due words (suspended while drawer is closed)
+  const words = useLiveQuery(
+    () => (isPlaylistOpen ? db.words.toArray() : EMPTY_PLAYLIST_WORDS),
+    [isPlaylistOpen]
+  ) ?? EMPTY_PLAYLIST_WORDS;
+  const dueWords = useMemo(() => (isPlaylistOpen ? getDueReviewWords(words) : EMPTY_PLAYLIST_WORDS), [isPlaylistOpen, words]);
+  const notebookWordSet = useMemo(() => buildLowerWordSet(words), [words]);
+  const dueWordSet = useMemo(() => buildLowerWordSet(dueWords), [dueWords]);
 
   // Map of user's notebook words for instant lookup of mastery levels
   const notebookWordMap = useMemo(() => {
-    const map = new Map<string, any>();
-    words.forEach(w => {
+    const map = new Map<string, WordItem>();
+    for (const w of words) {
       if (w.word) map.set(w.word.trim().toLowerCase(), w);
-    });
+    }
     return map;
   }, [words]);
 
-  // Evaluated songs with difficulties and due-word matches (suspended when drawer is closed so background vault updates never stall main thread)
+  // Evaluated songs with difficulties and due-word matches (single-pass per song; suspended when drawer is closed)
   const analyzedSongs = useMemo(() => {
     if (!isPlaylistOpen) return [];
     return songs.map((song, originalIdx) => {
-      const evalResult = evaluateSongVocabDifficulty(song, words, dueWordStrs);
-      const analysis = analyzeSongVocab(song, words, dueWordStrs);
-      const isChinese = isChineseSong(song) || Boolean(evalResult.isChinese);
+      const { evaluation: evalResult, analysis } = evaluateAndAnalyzeSong(song, notebookWordSet, dueWordSet);
+      const isChinese = Boolean(evalResult.isChinese);
 
       const matchedList = analysis.matchedNotebookWords.map(wordStr => {
         const lower = wordStr.toLowerCase();
         const item = notebookWordMap.get(lower);
-        const isDue = dueWordStrs.includes(lower);
+        const isDue = dueWordSet.has(lower);
         const masteryLevel = (item?.masteryLevel ?? (item?.isStarred ? 1 : 0)) as number;
         return {
           word: wordStr,
@@ -147,7 +122,7 @@ export const PlaylistDrawer: React.FC = () => {
         hasNotebookWords: (evalResult.stats.matchedNotebookCount || 0) > 0
       };
     });
-  }, [isPlaylistOpen, songs, words, dueWordStrs, notebookWordMap]);
+  }, [isPlaylistOpen, songs, notebookWordSet, dueWordSet, notebookWordMap]);
 
   // Precompute filter counts in a single O(N) pass
   const filterCounts = useMemo(() => {
@@ -339,7 +314,8 @@ export const PlaylistDrawer: React.FC = () => {
           id="playlist-modal-wrapper"
           data-no-swipe="true"
           data-no-gesture="true"
-          className="absolute inset-0 z-50 flex flex-col justify-end pointer-events-auto overflow-hidden"
+          style={{ transform: 'translate3d(0, 0, 0)' }}
+          className="absolute inset-0 z-50 flex flex-col justify-end pointer-events-auto overflow-hidden isolate"
           onTouchStart={(e) => e.stopPropagation()}
           onTouchMove={(e) => e.stopPropagation()}
           onTouchEnd={(e) => e.stopPropagation()}
@@ -427,28 +403,28 @@ export const PlaylistDrawer: React.FC = () => {
               }}
               className="flex items-center justify-between pb-3 border-b border-stone-200/70 dark:border-slate-800/80 shrink-0 touch-none"
             >
-              <div>
-                <h4 className="font-serif-luxury text-lg font-medium text-stone-900 dark:text-stone-50">
-                  Playlist
+              <div className="flex items-baseline gap-2 min-w-0">
+                <h4 className="text-[16px] font-semibold text-stone-900 dark:text-stone-50 tracking-tight">
+                  播放列表
                 </h4>
-                <p className="text-[10px] font-mono text-stone-400 dark:text-stone-500 uppercase tracking-widest mt-0.5">
-                  {filteredList.length} / {songs.length} SOUNDTRACKS
-                </p>
+                <span className="text-xs font-mono tabular-nums text-stone-400 dark:text-stone-500">
+                  {filteredList.length} / {songs.length} 首
+                </span>
               </div>
 
               {/* Spaced Review Smart Sort Trigger */}
               <button
                 type="button"
                 onClick={handleSmartSpacedSort}
-                className="px-3 py-1.5 rounded-xl bg-[#516050]/10 hover:bg-[#516050]/20 dark:bg-[#8FB996]/15 dark:hover:bg-[#8FB996]/25 border border-[#516050]/20 dark:border-[#8FB996]/30 text-[#516050] dark:text-[#8FB996] text-[11px] font-semibold flex items-center gap-1.5 transition-all cursor-pointer shadow-2xs active:scale-95"
-                title="Sort by review priority"
+                className="h-8 px-3 rounded-xl bg-white dark:bg-[#1A2234] hover:bg-stone-100 dark:hover:bg-slate-800 border border-stone-200/85 dark:border-slate-700/80 text-stone-700 dark:text-stone-200 text-xs font-medium inline-flex items-center gap-1.5 transition-all cursor-pointer shadow-2xs active:scale-95 shrink-0"
+                title="按待复习生词优先排序"
               >
-                <ArrowUpDown className="w-3.5 h-3.5" />
-                <span>按复习优先排序</span>
+                <ArrowUpDown className="w-3.5 h-3.5 text-stone-500 dark:text-stone-400" />
+                <span>复习优先</span>
               </button>
             </div>
 
-            {/* Vocabulary Difficulty Filter Toolbar + Animated Horizontal Search & Secondary Filter Trigger */}
+            {/* Vocabulary Filter Toolbar + Animated Horizontal Search & Secondary Filter Trigger */}
             <div className="relative h-11 flex items-center justify-between gap-2 border-b border-stone-200/50 dark:border-slate-800/60 shrink-0 overflow-hidden">
               <AnimatePresence initial={false} mode="wait">
                 {!isSearchOpen ? (
@@ -460,19 +436,21 @@ export const PlaylistDrawer: React.FC = () => {
                     transition={{ duration: 0.18, ease: [0.16, 1, 0.3, 1] }}
                     className="w-full flex items-center justify-between gap-2"
                   >
-                    {/* Left Primary Filter Pills */}
-                    <div className="flex items-center gap-1.5 overflow-x-auto no-scrollbar py-1 min-w-0">
+                    {/* Left Primary Filter Tabs */}
+                    <div className="flex items-center gap-1 overflow-x-auto no-scrollbar py-1 min-w-0">
                       {[
-                        { id: 'ALL', label: '全部' },
+                        { id: 'ALL', label: '全部', count: null as number | null },
                         {
                           id: 'DUE_REVIEW',
-                          label: `待复习 (${filterCounts.dueCount})`,
-                          highlight: filterCounts.dueCount > 0,
+                          label: '待复习',
+                          count: filterCounts.dueCount,
+                          dot: filterCounts.dueCount > 0,
                           hide: filterCounts.dueCount === 0
                         },
                         {
                           id: 'NOTEBOOK',
-                          label: `生词 (${filterCounts.notebookCount})`,
+                          label: '含生词',
+                          count: filterCounts.notebookCount,
                           hide: filterCounts.notebookCount === 0
                         }
                       ].filter(t => !t.hide).map(tab => {
@@ -482,17 +460,21 @@ export const PlaylistDrawer: React.FC = () => {
                             key={tab.id}
                             type="button"
                             onClick={() => setActiveFilter(tab.id as PlaylistPrimaryFilter)}
-                            className={`px-3 py-1 rounded-full text-[11px] font-medium transition-all shrink-0 flex items-center gap-1 cursor-pointer ${
+                            className={`px-2.5 py-1 rounded-lg text-xs font-medium transition-all shrink-0 inline-flex items-center gap-1.5 cursor-pointer tabular-nums ${
                               isActive
-                                ? tab.id === 'DUE_REVIEW'
-                                  ? 'bg-amber-500 text-white shadow-2xs font-semibold'
-                                  : 'bg-[#516050] text-white shadow-2xs font-semibold'
-                                : tab.highlight
-                                ? 'bg-amber-500/10 text-amber-700 dark:text-amber-300 border border-amber-500/30 hover:bg-amber-500/20'
-                                : 'bg-white dark:bg-[#1A2234] text-stone-600 dark:text-stone-400 hover:bg-stone-100 dark:hover:bg-slate-800 border border-stone-200/60 dark:border-slate-800'
+                                ? 'bg-stone-900 text-white dark:bg-stone-100 dark:text-stone-900 shadow-2xs'
+                                : 'text-stone-600 dark:text-stone-400 hover:bg-stone-200/60 dark:hover:bg-slate-800/80 hover:text-stone-900 dark:hover:text-stone-100'
                             }`}
                           >
+                            {tab.dot && !isActive && (
+                              <span className="w-1.5 h-1.5 rounded-full bg-amber-500/90 dark:bg-amber-400 shrink-0" />
+                            )}
                             <span>{tab.label}</span>
+                            {tab.count !== null && (
+                              <span className={`font-mono text-[10px] ${isActive ? 'opacity-75' : 'text-stone-400 dark:text-stone-500'}`}>
+                                {tab.count}
+                              </span>
+                            )}
                           </button>
                         );
                       })}
@@ -504,10 +486,10 @@ export const PlaylistDrawer: React.FC = () => {
                         type="button"
                         aria-label="Search playlist"
                         onClick={() => setIsSearchOpen(true)}
-                        className={`w-7 h-7 rounded-full flex items-center justify-center transition-all cursor-pointer active:scale-95 ${
+                        className={`w-7 h-7 rounded-lg flex items-center justify-center transition-all cursor-pointer active:scale-95 ${
                           searchQuery.trim()
-                            ? 'bg-[#516050] text-white border border-[#516050] shadow-2xs'
-                            : 'bg-white dark:bg-[#1A2234] text-stone-600 dark:text-stone-400 hover:bg-stone-100 dark:hover:bg-slate-800 border border-stone-200/60 dark:border-slate-800'
+                            ? 'bg-stone-900 text-white dark:bg-stone-100 dark:text-stone-900 shadow-2xs'
+                            : 'text-stone-500 dark:text-stone-400 hover:bg-stone-200/60 dark:hover:bg-slate-800 hover:text-stone-900 dark:hover:text-stone-100'
                         }`}
                       >
                         <Search className="w-3.5 h-3.5" />
@@ -518,10 +500,10 @@ export const PlaylistDrawer: React.FC = () => {
                         aria-label="Filter playlist"
                         aria-expanded={isFilterMenuOpen}
                         onClick={() => setIsFilterMenuOpen(prev => !prev)}
-                        className={`relative w-7 h-7 rounded-full flex items-center justify-center transition-all cursor-pointer active:scale-95 ${
+                        className={`relative w-7 h-7 rounded-lg flex items-center justify-center transition-all cursor-pointer active:scale-95 ${
                           isFilterMenuOpen || isSecondaryFilterActive
-                            ? 'bg-[#516050] text-white border border-[#516050] shadow-2xs'
-                            : 'bg-white dark:bg-[#1A2234] text-stone-600 dark:text-stone-400 hover:bg-stone-100 dark:hover:bg-slate-800 border border-stone-200/60 dark:border-slate-800'
+                            ? 'bg-stone-900 text-white dark:bg-stone-100 dark:text-stone-900 shadow-2xs'
+                            : 'text-stone-500 dark:text-stone-400 hover:bg-stone-200/60 dark:hover:bg-slate-800 hover:text-stone-900 dark:hover:text-stone-100'
                         }`}
                       >
                         <SlidersHorizontal className="w-3.5 h-3.5" />
@@ -536,9 +518,9 @@ export const PlaylistDrawer: React.FC = () => {
                     exit={{ opacity: 0, scaleX: 0.85 }}
                     transition={{ duration: 0.22, ease: [0.16, 1, 0.3, 1] }}
                     style={{ transformOrigin: 'right center' }}
-                    className="w-full h-7.5 px-3 rounded-full bg-white dark:bg-[#1A2234] border border-[#516050]/45 dark:border-[#8FB996]/45 flex items-center gap-2 shadow-2xs"
+                    className="w-full h-8 px-3 rounded-xl bg-white dark:bg-[#1A2234] border border-stone-300/80 dark:border-slate-700 flex items-center gap-2 shadow-2xs"
                   >
-                    <Search className="w-3.5 h-3.5 text-[#516050] dark:text-[#8FB996] shrink-0" />
+                    <Search className="w-3.5 h-3.5 text-stone-400 shrink-0" />
                     <input
                       ref={searchInputRef}
                       type="text"
@@ -550,8 +532,9 @@ export const PlaylistDrawer: React.FC = () => {
                           setIsSearchOpen(false);
                         }
                       }}
+                      placeholder="搜索歌名或歌手..."
                       aria-label="Search tracks"
-                      className="flex-1 min-w-0 bg-transparent text-xs text-stone-800 dark:text-stone-100 focus:outline-hidden"
+                      className="flex-1 min-w-0 bg-transparent text-xs text-stone-800 dark:text-stone-100 placeholder:text-stone-400 focus:outline-hidden"
                     />
                     <button
                       type="button"
@@ -603,9 +586,9 @@ export const PlaylistDrawer: React.FC = () => {
                               key={opt.id}
                               type="button"
                               onClick={() => setVocabSubFilter(prev => (prev === opt.id ? 'ALL' : opt.id))}
-                              className={`px-2.5 py-1 rounded-full text-[11px] font-medium border transition-all shrink-0 cursor-pointer ${
+                              className={`px-2.5 py-1 rounded-lg text-[11px] font-medium border transition-all shrink-0 cursor-pointer ${
                                 active
-                                  ? 'bg-[#516050] text-white border-transparent font-semibold shadow-2xs'
+                                  ? 'bg-stone-900 text-white dark:bg-stone-100 dark:text-stone-900 border-transparent shadow-2xs'
                                   : 'bg-white/80 dark:bg-[#1A2234]/80 text-stone-600 dark:text-stone-400 hover:bg-stone-100 dark:hover:bg-slate-800 border-stone-200/60 dark:border-slate-800'
                               }`}
                             >
@@ -628,9 +611,9 @@ export const PlaylistDrawer: React.FC = () => {
                               key={opt.id}
                               type="button"
                               onClick={() => setLangSubFilter(prev => (prev === opt.id ? 'ALL' : opt.id))}
-                              className={`px-2.5 py-1 rounded-full text-[11px] font-medium border transition-all shrink-0 cursor-pointer ${
+                              className={`px-2.5 py-1 rounded-lg text-[11px] font-medium border transition-all shrink-0 cursor-pointer ${
                                 active
-                                  ? 'bg-[#516050] text-white border-transparent font-semibold shadow-2xs'
+                                  ? 'bg-stone-900 text-white dark:bg-stone-100 dark:text-stone-900 border-transparent shadow-2xs'
                                   : 'bg-white/80 dark:bg-[#1A2234]/80 text-stone-600 dark:text-stone-400 hover:bg-stone-100 dark:hover:bg-slate-800 border-stone-200/60 dark:border-slate-800'
                               }`}
                             >
@@ -648,7 +631,7 @@ export const PlaylistDrawer: React.FC = () => {
                           setLangSubFilter('ALL');
                           setArtistSubFilter('ALL');
                         }}
-                        className={`w-6.5 h-6.5 rounded-full flex items-center justify-center text-stone-400 hover:text-stone-700 dark:hover:text-stone-200 bg-white/80 dark:bg-[#1A2234]/80 border border-stone-200/60 dark:border-slate-800 transition-all duration-200 shrink-0 cursor-pointer ${
+                        className={`w-6.5 h-6.5 rounded-lg flex items-center justify-center text-stone-400 hover:text-stone-700 dark:hover:text-stone-200 bg-white/80 dark:bg-[#1A2234]/80 border border-stone-200/60 dark:border-slate-800 transition-all duration-200 shrink-0 cursor-pointer ${
                           isSecondaryFilterActive
                             ? 'opacity-100 scale-100 pointer-events-auto'
                             : 'opacity-0 scale-75 pointer-events-none'
@@ -658,7 +641,7 @@ export const PlaylistDrawer: React.FC = () => {
                       </button>
                     </div>
 
-                    {/* Row 2: Artist Filter Strip (Animated Expandable Multi-Row Grid for Artists >= 5 Songs) */}
+                    {/* Row 2: Artist Filter Strip */}
                     {displayedArtists.length > 0 && (
                       <div
                         className="flex items-start justify-between gap-1.5"
@@ -687,9 +670,9 @@ export const PlaylistDrawer: React.FC = () => {
                                   key={artist}
                                   type="button"
                                   onClick={() => setArtistSubFilter(prev => (prev === artist ? 'ALL' : artist))}
-                                  className={`px-2.5 py-1 rounded-full text-[11px] font-medium border transition-all shrink-0 cursor-pointer max-w-[150px] truncate ${
+                                  className={`px-2.5 py-1 rounded-lg text-[11px] font-medium border transition-all shrink-0 cursor-pointer max-w-[150px] truncate ${
                                     active
-                                      ? 'bg-[#516050] text-white border-transparent font-semibold shadow-2xs'
+                                      ? 'bg-stone-900 text-white dark:bg-stone-100 dark:text-stone-900 border-transparent shadow-2xs'
                                       : 'bg-white/80 dark:bg-[#1A2234]/80 text-stone-600 dark:text-stone-400 hover:bg-stone-100 dark:hover:bg-slate-800 border-stone-200/60 dark:border-slate-800'
                                   }`}
                                 >
@@ -706,7 +689,7 @@ export const PlaylistDrawer: React.FC = () => {
                             aria-label={isArtistGridExpanded ? 'Collapse artists' : 'Expand artists'}
                             aria-expanded={isArtistGridExpanded}
                             onClick={() => setIsArtistGridExpanded(prev => !prev)}
-                            className="w-6.5 h-6.5 mt-0.5 rounded-full flex items-center justify-center text-stone-400 hover:text-stone-700 dark:hover:text-stone-200 bg-white/80 dark:bg-[#1A2234]/80 border border-stone-200/60 dark:border-slate-800 transition-all shrink-0 cursor-pointer"
+                            className="w-6.5 h-6.5 mt-0.5 rounded-lg flex items-center justify-center text-stone-400 hover:text-stone-700 dark:hover:text-stone-200 bg-white/80 dark:bg-[#1A2234]/80 border border-stone-200/60 dark:border-slate-800 transition-all shrink-0 cursor-pointer"
                           >
                             <ChevronDown
                               className={`w-3.5 h-3.5 transition-transform duration-200 ${
@@ -725,7 +708,7 @@ export const PlaylistDrawer: React.FC = () => {
             {/* Track list with smooth scrolling & auto-scroll support */}
             <div
               ref={playlistContainerRef}
-              className="flex-1 overflow-y-auto overscroll-contain touch-pan-y space-y-2.5 mt-3 min-h-0 select-none no-scrollbar"
+              className="flex-1 overflow-y-auto overscroll-contain touch-pan-y space-y-2 pt-3 min-h-0 select-none no-scrollbar bg-[#FAF7F2] dark:bg-[#121826]"
               onPointerDown={(e) => e.stopPropagation()}
               onTouchStart={(e) => e.stopPropagation()}
               onTouchMove={(e) => e.stopPropagation()}
@@ -733,21 +716,23 @@ export const PlaylistDrawer: React.FC = () => {
               {filteredList.length > 0 ? (
                 filteredList.map(({ song, originalIdx, matchedList }) => {
                   const isCur = originalIdx === currentSongIndex;
+                  const visibleMatches = matchedList ? matchedList.slice(0, 2) : [];
+                  const extraMatchCount = matchedList && matchedList.length > 2 ? matchedList.length - 2 : 0;
 
                   return (
                     <div
                       key={song.id}
                       ref={isCur ? activeSongItemRef : undefined}
-                      style={{ contentVisibility: 'auto', containIntrinsicSize: '0 74px' }}
+                      style={{ contentVisibility: 'auto', containIntrinsicSize: '0 76px' }}
                       onClick={() => handleSelectSong(originalIdx)}
-                      className={`p-3 rounded-2xl flex items-center gap-3 cursor-pointer transition-transform duration-150 active:scale-[0.98] ${
+                      className={`relative px-3.5 py-3 rounded-2xl flex items-center gap-3 cursor-pointer transition-all duration-150 active:scale-[0.985] ${
                         isCur
-                          ? 'bg-[#262E25]/10 dark:bg-[#7EA783]/15 border-2 border-[#262E25]/35 dark:border-[#7EA783]/45 shadow-sm ring-1 ring-[#262E25]/10 dark:ring-[#7EA783]/20'
-                          : 'bg-white dark:bg-[#1A2234] border border-stone-200/60 dark:border-slate-800/80 hover:border-stone-400 dark:hover:border-slate-700 hover:bg-stone-50/80 dark:hover:bg-slate-800/50'
+                          ? 'bg-white dark:bg-[#1B2436] border border-stone-900/12 dark:border-white/15 shadow-[0_6px_20px_-6px_rgba(28,25,23,0.12)] dark:shadow-[0_8px_24px_-6px_rgba(0,0,0,0.5)]'
+                          : 'bg-white/65 dark:bg-[#161E2E]/80 border border-stone-200/60 dark:border-slate-800/75 hover:bg-white dark:hover:bg-[#1B2436] hover:border-stone-300/80 dark:hover:border-slate-700'
                       }`}
                     >
-                      {/* Album Art with Equalizer Overlay for Active Song */}
-                      <div className="relative w-12 h-12 rounded-xl overflow-hidden shadow-2xs flex-shrink-0">
+                      {/* Clean Album Art (No duplicate equalizer overlay) */}
+                      <div className="relative w-12 h-12 rounded-xl overflow-hidden shadow-2xs shrink-0 ring-1 ring-black/[0.05] dark:ring-white/[0.06]">
                         <img
                           src={song.albumArtUrl}
                           alt={song.title}
@@ -756,88 +741,60 @@ export const PlaylistDrawer: React.FC = () => {
                           className="w-full h-full object-cover"
                           referrerPolicy="no-referrer"
                         />
-                        {isCur && (
-                          <div className="absolute inset-0 bg-black/25 flex items-center justify-center">
-                            <div className="flex items-center gap-0.5">
-                              <span className="w-1 h-3 bg-white rounded-full animate-pulse" />
-                              <span className="w-1 h-4.5 bg-white rounded-full animate-pulse delay-75" />
-                              <span className="w-1 h-2 bg-white rounded-full animate-pulse delay-150" />
-                            </div>
+                      </div>
+
+                      {/* Uniform 3-Line Editorial Layout: Title / Artist·Time / Optional Single-Line Inline Vocab */}
+                      <div className="flex-1 min-w-0">
+                        <p
+                          className={`font-serif-luxury text-[15px] leading-snug truncate ${
+                            isCur
+                              ? 'text-stone-950 dark:text-white font-semibold'
+                              : 'text-stone-800 dark:text-stone-100 font-medium'
+                          }`}
+                        >
+                          {song.title}
+                        </p>
+
+                        <p className="text-xs text-stone-400 dark:text-stone-500 truncate mt-0.5 tabular-nums">
+                          {song.artist} · {formatTime(song.duration)}
+                        </p>
+
+                        {visibleMatches.length > 0 && (
+                          <div
+                            className="mt-1.5 flex items-center gap-2.5 text-[11.5px] leading-tight overflow-hidden whitespace-nowrap"
+                            title={`命中生词: ${matchedList.map(w => w.word).join(', ')}`}
+                          >
+                            {visibleMatches.map((item, wIdx) => (
+                              <span
+                                key={`pl-w-${wIdx}`}
+                                className={`inline-flex items-center gap-1.5 min-w-0 truncate ${
+                                  item.isDue
+                                    ? 'text-stone-700 dark:text-stone-200 font-medium'
+                                    : 'text-stone-500 dark:text-stone-400'
+                                }`}
+                              >
+                                <MasteryDot level={item.masteryLevel} isDue={item.isDue} />
+                                <span className="truncate">{item.word}</span>
+                              </span>
+                            ))}
+                            {extraMatchCount > 0 && (
+                              <span className="text-[11px] font-mono text-stone-400 dark:text-stone-500 shrink-0 tabular-nums">
+                                +{extraMatchCount}
+                              </span>
+                            )}
                           </div>
                         )}
                       </div>
 
-                      {/* Title, Artist & Vocab Match Badges */}
-                      <div className="flex-1 min-w-0">
-                        <div className="flex items-center gap-1.5 flex-wrap">
-                          <p
-                            className={`font-serif-luxury text-sm font-medium truncate ${
-                              isCur
-                                ? 'text-[#262E25] dark:text-[#7EA783] font-bold'
-                                : 'text-stone-900 dark:text-stone-100'
-                            }`}
-                          >
-                            {song.title}
-                          </p>
-
-                          {/* When few words (1 or 2): directly show the word with its circle indicator */}
-                          {matchedList && matchedList.length > 0 && matchedList.length <= 2 && (
-                            matchedList.map((item, wIdx) => (
-                              <span
-                                key={`pl-w-${wIdx}`}
-                                title={item.isDue ? `待复习生词: ${item.word}` : `生词: ${item.word}`}
-                                className={`text-[9px] px-1.5 py-0.5 rounded-md font-mono flex items-center gap-1 border transition-colors ${
-                                  item.isDue
-                                    ? 'bg-amber-500/15 text-amber-900 dark:text-amber-300 border-amber-500/30'
-                                    : 'bg-[#516050]/10 dark:bg-[#8FB996]/15 text-[#516050] dark:text-[#8FB996] border-[#516050]/20 dark:border-[#8FB996]/20'
-                                }`}
-                              >
-                                <MasteryCircleIndicator level={item.masteryLevel} isDue={item.isDue} size={10} />
-                                <span>{item.word}</span>
-                              </span>
-                            ))
-                          )}
-
-                          {/* When many words (>= 3): show first word + circle state count badge */}
-                          {matchedList && matchedList.length >= 3 && (
-                            <>
-                              <span
-                                title={matchedList[0].isDue ? `待复习: ${matchedList[0].word}` : `生词: ${matchedList[0].word}`}
-                                className={`text-[9px] px-1.5 py-0.5 rounded-md font-mono flex items-center gap-1 border transition-colors ${
-                                  matchedList[0].isDue
-                                    ? 'bg-amber-500/15 text-amber-900 dark:text-amber-300 border-amber-500/30'
-                                    : 'bg-[#516050]/10 dark:bg-[#8FB996]/15 text-[#516050] dark:text-[#8FB996] border-[#516050]/20 dark:border-[#8FB996]/20'
-                                }`}
-                              >
-                                <MasteryCircleIndicator level={matchedList[0].masteryLevel} isDue={matchedList[0].isDue} size={10} />
-                                <span>{matchedList[0].word}</span>
-                              </span>
-
-                              <span
-                                title={`命中 ${matchedList.length} 个生词: ${matchedList.map(w => w.word).join(', ')}`}
-                                className="text-[9px] px-1.5 py-0.5 rounded-md font-mono flex items-center gap-0.5 bg-stone-500/10 dark:bg-stone-800/80 text-stone-600 dark:text-stone-300 border border-stone-200/60 dark:border-stone-700/60 cursor-help"
-                              >
-                                <MasteryCircleIndicator level={matchedList[1]?.masteryLevel ?? 1} isDue={matchedList.some(w => w.isDue)} size={10} />
-                                <span>+{matchedList.length - 1}</span>
-                              </span>
-                            </>
-                          )}
-                        </div>
-
-                        <p className="text-xs text-stone-400 dark:text-stone-500 truncate mt-0.5">
-                          {song.artist} · {formatTime(song.duration)}
-                        </p>
-                      </div>
-
-                      {/* Current Playing Audio Wave or Index */}
+                      {/* Single Right-Side Active Equalizer or Track Index */}
                       {isCur ? (
-                        <div className="flex items-center gap-1 text-[#262E25] dark:text-[#7EA783] pr-1">
-                          <span className="w-1 h-3.5 bg-[#262E25] dark:bg-[#7EA783] rounded-full animate-pulse" />
-                          <span className="w-1 h-5 bg-[#262E25] dark:bg-[#7EA783] rounded-full animate-pulse delay-75" />
-                          <span className="w-1 h-2.5 bg-[#262E25] dark:bg-[#7EA783] rounded-full animate-pulse delay-150" />
+                        <div className="flex items-end gap-[3px] h-3.5 pr-1 shrink-0" aria-label="Now playing">
+                          <span className="w-[2px] h-2 bg-stone-800 dark:bg-stone-100 rounded-full animate-pulse" />
+                          <span className="w-[2px] h-3.5 bg-stone-800 dark:bg-stone-100 rounded-full animate-pulse delay-75" />
+                          <span className="w-[2px] h-1.5 bg-stone-800 dark:bg-stone-100 rounded-full animate-pulse delay-150" />
                         </div>
                       ) : (
-                        <span className="text-[10px] font-mono text-stone-400 px-1">
+                        <span className="text-[11px] font-mono tabular-nums text-stone-400/85 dark:text-stone-500 px-1 shrink-0">
                           {String(originalIdx + 1).padStart(2, '0')}
                         </span>
                       )}
@@ -856,7 +813,7 @@ export const PlaylistDrawer: React.FC = () => {
                       setArtistSubFilter('ALL');
                       setSearchQuery('');
                     }}
-                    className="mt-2 text-[#516050] dark:text-[#8FB996] underline cursor-pointer"
+                    className="mt-2 text-stone-700 dark:text-stone-200 underline underline-offset-4 cursor-pointer"
                   >
                     查看全部曲目
                   </button>
